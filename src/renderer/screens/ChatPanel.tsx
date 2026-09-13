@@ -3,13 +3,13 @@ import { piCommandCompatibility, piTodexCommands } from '../session/providerComm
 import { ConversationControls } from '../components/ConversationControls';
 import { NoticeToast } from '../components/NoticeToast';
 import { RiArrowDownDoubleLine, RiAttachment2, RiBarChartBoxLine, RiClipboardLine, RiCpuLine, RiGitBranchLine, RiListCheck2, RiShieldLine, RiStopCircleLine } from '@remixicon/react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 import { Button, Label, ListBox, Popover, ScrollShadow, Select, Tooltip, toast } from '@heroui/react';
 import { ChainOfThought, ChatAttachment, ChatAttachmentGroup, ChatAttachmentInput, ChatMessage, HoverCard, PromptInput } from '@heroui-pro/react';
 import { ChatMessageActions } from '@heroui-pro/react/chat-message-actions';
 import { ChatTool } from '@heroui-pro/react/chat-tool';
-import { Markdown } from '@heroui-pro/react/markdown';
+import { Markdown, type MarkdownProps } from '@heroui-pro/react/markdown';
 import { providerDisplayName, type ProviderKind, type PermissionMode } from '@todex/protocol/v2';
 import { ConversationPermissionActions, ConversationPromptInput, ConversationRunStatus, TurnUsageSummary } from '../components/ConversationRunStatus';
 import { ReferenceComposer, type ReferenceComposerHandle } from '../components/ReferenceComposer';
@@ -271,6 +271,29 @@ export function ChatPanel({ session }: Props) {
       document.removeEventListener('scroll', hide, true);
     };
   }, []);
+  const workspacePath = workspace?.path;
+  const markdownComponents = useMemo<NonNullable<MarkdownProps['components']>>(() => ({
+    a: ({ href, children, node: _node, ref: _ref, ...props }) => {
+      const target = workspaceLinkTarget(href, workspacePath);
+      return (
+        <a
+          {...props}
+          href={href}
+          onClick={(event) => {
+            if (!target) return;
+            event.preventDefault();
+            if (target.kind === 'browser-url') {
+              session.openPanel('Browser', { url: target.url });
+            } else {
+              session.openPanel('Files', { filePath: target.filePath });
+            }
+          }}
+        >
+          {children}
+        </a>
+      );
+    },
+  }), [workspacePath, session.openPanel]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const atBottomRef = useRef(true);
   const [isAtBottom, setIsAtBottom] = useState(true);
@@ -383,6 +406,21 @@ export function ChatPanel({ session }: Props) {
   const pendingPermissionIds = new Set((runtime?.pendingPermissions ?? []).map(item => item.id));
   const permissionRequests = session.pendingRequests.filter(item => item.requestId && pendingPermissionIds.has(item.requestId));
   const compaction = session.compactionByConversation[conversation.id];
+  // A trailing reply whose turn is still running is unfinished: hide its
+  // copy/fork/usage actions until the turn settles. A newer outgoing entry
+  // means the last reply already belongs to a completed turn.
+  const runActive = thinking || executionUnknown || submissionStatus === 'sending' || compaction?.status === 'running';
+  let pendingReplyId: string | undefined;
+  if (runActive) {
+    for (let index = chatEntries.length - 1; index >= 0; index -= 1) {
+      const candidate = chatEntries[index];
+      if (candidate.kind === 'incoming') {
+        pendingReplyId = candidate.id;
+        break;
+      }
+      if (candidate.kind === 'outgoing') break;
+    }
+  }
   const conversationTimeline = session.timeline.filter((entry) => entry.conversationId === conversation.id);
   const canSwitchAgent = canSwitchConversationAgent(conversation, {
     timeline: conversationTimeline,
@@ -559,34 +597,13 @@ export function ChatPanel({ session }: Props) {
                     </div> : (
                       <Markdown
                         id={entry.id}
-                        components={{
-                          a: ({ href, children, node: _node, ref: _ref, ...props }) => {
-                            const target = workspaceLinkTarget(href, workspace.path);
-                            return (
-                              <a
-                                {...props}
-                                href={href}
-                                onClick={(event) => {
-                                  if (!target) return;
-                                  event.preventDefault();
-                                  if (target.kind === 'browser-url') {
-                                    session.openPanel('Browser', { url: target.url });
-                                  } else {
-                                    session.openPanel('Files', { filePath: target.filePath });
-                                  }
-                                }}
-                              >
-                                {children}
-                              </a>
-                            );
-                          },
-                        }}
+                        components={markdownComponents}
                       >
                         {entry.subtitle}
                       </Markdown>
                     )}
                   </div>
-                  {entry.kind === 'incoming' && actionableIncoming.has(entry.id)
+                  {entry.kind === 'incoming' && actionableIncoming.has(entry.id) && entry.id !== pendingReplyId
                     ? <AgentMessageActions conversationId={conversation.id} entry={entry} session={session} />
                     : null}
                   {request ? (

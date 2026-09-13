@@ -20,8 +20,10 @@ WORKDIR /build/TodeX_web
 FROM base AS deps
 COPY package.json pnpm-lock.yaml ./
 # esbuild needs its install script; the @heroui-pro/react stub postinstall is
-# skipped because hpsetup below supplies the licensed package contents.
-RUN printf "allowBuilds:\n  esbuild: true\n" > pnpm-workspace.yaml
+# skipped because hpsetup below supplies the licensed package contents, and
+# the @zowe keyring helper it pulls in has no credential store here. pnpm 11
+# errors on unlisted build scripts, so both must be denied explicitly.
+RUN printf "allowBuilds:\n  esbuild: true\n  '@heroui-pro/react': false\n  '@zowe/secrets-for-zowe-sdk': false\n" > pnpm-workspace.yaml
 RUN pnpm install --frozen-lockfile
 ARG HPSETUP_VERSION=latest
 RUN --mount=type=secret,id=HEROUI_KEY,env=HEROUI_KEY \
