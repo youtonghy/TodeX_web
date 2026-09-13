@@ -73,9 +73,9 @@ version `0.0.0`.
 The `docker` GitHub Actions workflow is triggered manually (**Actions → docker →
 Run workflow**) with a release version such as `1.2.3`. It builds
 `ghcr.io/<owner>/todex_web:<version>` (plus `:latest` by default) and requires a
-`HEROUI_AUTH_TOKEN` repository secret for the licensed `@heroui-pro/react`
-install. The `protocol_ref` input pins which `youtonghy/TodeX` branch or tag the
-protocol sources are compiled from.
+`HEROUI_KEY` repository secret (the `hp_…` key) so `hpsetup` can fetch the
+licensed `@heroui-pro/react` contents. The `protocol_ref` input pins which
+`youtonghy/TodeX` branch or tag the protocol sources are compiled from.
 
 To build the image locally, point the `todexapp` build context at a sibling
 `TodeX_app` checkout:
@@ -83,7 +83,7 @@ To build the image locally, point the `todexapp` build context at a sibling
 ```bash
 docker buildx build \
   --build-context todexapp=/path/to/TodeX_app \
-  --secret id=HEROUI_AUTH_TOKEN,env=HEROUI_AUTH_TOKEN \
+  --secret id=HEROUI_KEY,env=HEROUI_KEY \
   -t todex-web .
 ```
 

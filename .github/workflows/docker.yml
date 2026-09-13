@@ -39,10 +39,10 @@ jobs:
 
       - name: Check required secrets
         env:
-          HEROUI_AUTH_TOKEN: ${{ secrets.HEROUI_AUTH_TOKEN }}
+          HEROUI_KEY: ${{ secrets.HEROUI_KEY }}
         run: |
-          if [ -z "$HEROUI_AUTH_TOKEN" ]; then
-            echo "::error::Repository secret HEROUI_AUTH_TOKEN is not set; @heroui-pro/react cannot install without it." >&2
+          if [ -z "$HEROUI_KEY" ]; then
+            echo "::error::Repository secret HEROUI_KEY is not set; hpsetup cannot fetch the licensed @heroui-pro/react contents without it." >&2
             exit 1
           fi
 
@@ -94,7 +94,7 @@ jobs:
           build-args: |
             TODEX_BUILD_VERSION=${{ steps.version.outputs.version }}
           secrets: |
-            HEROUI_AUTH_TOKEN=${{ secrets.HEROUI_AUTH_TOKEN }}
+            HEROUI_KEY=${{ secrets.HEROUI_KEY }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: |
             org.opencontainers.image.version=${{ steps.version.outputs.version }}

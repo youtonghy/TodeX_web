@@ -6,10 +6,10 @@
 #
 #   docker buildx build --build-context todexapp=/path/to/TodeX_app -t todex-web .
 #
-# The @heroui-pro/react postinstall reads HEROUI_AUTH_TOKEN; pass it as a build
-# secret when the licensed token is required:
+# The licensed @heroui-pro/react contents are fetched by hpsetup with the hp_
+# key; pass it as a build secret (never in a build-arg or copied file):
 #
-#   --secret id=HEROUI_AUTH_TOKEN,env=HEROUI_AUTH_TOKEN
+#   --secret id=HEROUI_KEY,env=HEROUI_KEY
 
 FROM node:22-alpine AS base
 ENV PNPM_HOME=/pnpm
@@ -18,13 +18,14 @@ RUN corepack enable && corepack prepare pnpm@11.24.0 --activate
 WORKDIR /build/TodeX_web
 
 FROM base AS deps
-RUN apk add --no-cache python3 make g++
 COPY package.json pnpm-lock.yaml ./
-# Only the licensed HeroUI Pro download and the esbuild binary need install
-# scripts in CI; the keyring helper (@zowe) has no credential store here.
-RUN printf "allowBuilds:\n  '@heroui-pro/react': true\n  esbuild: true\n" > pnpm-workspace.yaml
-RUN --mount=type=secret,id=HEROUI_AUTH_TOKEN,env=HEROUI_AUTH_TOKEN \
-    pnpm install --frozen-lockfile
+# esbuild needs its install script; the @heroui-pro/react stub postinstall is
+# skipped because hpsetup below supplies the licensed package contents.
+RUN printf "allowBuilds:\n  esbuild: true\n" > pnpm-workspace.yaml
+RUN pnpm install --frozen-lockfile
+ARG HPSETUP_VERSION=latest
+RUN --mount=type=secret,id=HEROUI_KEY,env=HEROUI_KEY \
+    pnpm dlx "hpsetup@$HPSETUP_VERSION" "$HEROUI_KEY"
 # Protocol sources resolve their @noble/* imports through this node_modules.
 RUN mkdir -p /build/TodeX_app \
     && ln -s /build/TodeX_web/node_modules /build/TodeX_app/node_modules
