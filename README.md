@@ -68,30 +68,81 @@ CI should set `TODEX_BUILD_VERSION` to the release version while building. Local
 development builds display `DEV0.0.0`; `package.json` keeps the valid placeholder
 version `0.0.0`.
 
-### Docker image
+### Docker
+
+Published images live at `ghcr.io/youtonghy/todex_web`, tagged with each release
+version plus `latest`. The container listens on `4173`, runs as the unprivileged
+`node` user, and ships a health check against `GET /healthz`. `HOST` and `PORT`
+are the only runtime settings; there is no Backend proxy, user database, session
+store, or secret to configure.
+
+Run it directly:
+
+```bash
+docker run -d --name todex-web --restart unless-stopped \
+  -p 4173:4173 \
+  ghcr.io/youtonghy/todex_web:latest
+```
+
+Or use the bundled [`compose.yaml`](compose.yaml):
+
+```bash
+cp .env.example .env   # optional: change PORT to pick the host port
+docker compose pull
+docker compose up -d
+docker compose logs -f web
+```
+
+Pin a version with `TODEX_WEB_TAG=1.2.3 docker compose up -d`. Upgrade with
+`docker compose pull && docker compose up -d`.
+
+```yaml
+services:
+  web:
+    image: ghcr.io/youtonghy/todex_web:${TODEX_WEB_TAG:-latest}
+    restart: unless-stopped
+    ports:
+      - "${PORT:-4173}:4173"
+    environment:
+      HOST: 0.0.0.0
+      PORT: "4173"
+```
+
+Put a trusted reverse proxy (Caddy, nginx, Traefik) in front of the container to
+terminate TLS. An HTTPS page must use HTTPS/WSS for non-loopback Backends, and
+each Backend must allow the deployed site origin through CORS and, when
+relevant, browser Private Network Access.
+
+#### Building the image
 
 The `docker` GitHub Actions workflow is triggered manually (**Actions → docker →
-Run workflow**) with a release version such as `1.2.3`. It builds
-`ghcr.io/<owner>/todex_web:<version>` (plus `:latest` by default) and requires a
-`HEROUI_KEY` repository secret (the `hp_…` key) so `hpsetup` can fetch the
+Run workflow**) with a release version such as `1.2.3`. It pushes
+`ghcr.io/youtonghy/todex_web:<version>` (plus `:latest` by default) and requires
+a `HEROUI_KEY` repository secret (the `hp_…` key) so `hpsetup` can fetch the
 licensed `@heroui-pro/react` contents. The `protocol_ref` input pins which
 `youtonghy/TodeX` branch or tag the protocol sources are compiled from.
 
-To build the image locally, point the `todexapp` build context at a sibling
-`TodeX_app` checkout:
+To build locally, the image needs a sibling `TodeX_app` checkout as the
+`todexapp` build context and `HEROUI_KEY` exported in the shell. The key is
+passed as a BuildKit secret and never stored in a layer.
+[`compose.build.yaml`](compose.build.yaml) layers a `build` section onto the
+service:
+
+```bash
+export HEROUI_KEY="hp_..."
+docker compose -f compose.yaml -f compose.build.yaml up -d --build
+# TODEX_APP_DIR=/path/to/TodeX_app and TODEX_BUILD_VERSION=1.2.3 override the defaults
+```
+
+The equivalent plain `docker buildx` invocation:
 
 ```bash
 docker buildx build \
   --build-context todexapp=/path/to/TodeX_app \
   --secret id=HEROUI_KEY,env=HEROUI_KEY \
+  --build-arg TODEX_BUILD_VERSION=1.2.3 \
   -t todex-web .
 ```
-
-Run it with `docker run -p 4173:4173 todex-web`; `HOST` and `PORT` are supported.
-
-The Node server exposes the site and `GET /healthz`. It has no Backend proxy, user database, session store, or secret configuration.
-
-Terminate TLS at a trusted reverse proxy. An HTTPS page must use HTTPS/WSS for non-loopback Backends. Each Backend must allow the deployed site origin through CORS and, when relevant, browser Private Network Access.
 
 ## Device verification
 

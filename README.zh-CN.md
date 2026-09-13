@@ -37,6 +37,65 @@ CI 打包时应通过 `TODEX_BUILD_VERSION` 传入正式版本。开发构建显
 
 生产服务提供网页和 `GET /healthz`，不包含 Backend 代理、用户数据库、服务端会话或密钥配置。
 
+### Docker 部署
+
+镜像发布在 `ghcr.io/youtonghy/todex_web`，按版本号打标签并附带 `latest`。容器监听 `4173`，以非特权 `node` 用户运行，并内置针对 `GET /healthz` 的健康检查。运行期只有 `HOST` 和 `PORT` 两个配置项。
+
+直接运行：
+
+```bash
+docker run -d --name todex-web --restart unless-stopped \
+  -p 4173:4173 \
+  ghcr.io/youtonghy/todex_web:latest
+```
+
+或使用仓库自带的 [`compose.yaml`](compose.yaml)：
+
+```bash
+cp .env.example .env   # 可选：修改 PORT 以更换宿主机端口
+docker compose pull
+docker compose up -d
+docker compose logs -f web
+```
+
+用 `TODEX_WEB_TAG=1.2.3 docker compose up -d` 固定版本；升级时执行 `docker compose pull && docker compose up -d`。
+
+```yaml
+services:
+  web:
+    image: ghcr.io/youtonghy/todex_web:${TODEX_WEB_TAG:-latest}
+    restart: unless-stopped
+    ports:
+      - "${PORT:-4173}:4173"
+    environment:
+      HOST: 0.0.0.0
+      PORT: "4173"
+```
+
+请在容器前放置可信的反向代理（Caddy、nginx、Traefik）终止 TLS。HTTPS 页面连接非回环 Backend 时必须使用 HTTPS/WSS，且每个 Backend 都需要在 CORS（必要时还有浏览器 Private Network Access）中放行站点 origin。
+
+#### 构建镜像
+
+`docker` GitHub Actions 工作流需手动触发（**Actions → docker → Run workflow**）并填写版本号（如 `1.2.3`），会推送 `ghcr.io/youtonghy/todex_web:<version>`（默认同时打 `latest`）。仓库需配置 `HEROUI_KEY` secret（`hp_…` 密钥）供 `hpsetup` 拉取授权的 `@heroui-pro/react` 内容；`protocol_ref` 输入用于指定编译协议源码所用的 `youtonghy/TodeX` 分支或标签。
+
+本地构建需要相邻目录的 `TodeX_app` 作为 `todexapp` 构建上下文，并在 shell 中导出 `HEROUI_KEY`。密钥通过 BuildKit secret 传入，不会写入镜像层。[`compose.build.yaml`](compose.build.yaml) 会为服务叠加 `build` 配置：
+
+```bash
+export HEROUI_KEY="hp_..."
+docker compose -f compose.yaml -f compose.build.yaml up -d --build
+# 可用 TODEX_APP_DIR=/path/to/TodeX_app 和 TODEX_BUILD_VERSION=1.2.3 覆盖默认值
+```
+
+等价的 `docker buildx` 命令：
+
+```bash
+docker buildx build \
+  --build-context todexapp=/path/to/TodeX_app \
+  --secret id=HEROUI_KEY,env=HEROUI_KEY \
+  --build-arg TODEX_BUILD_VERSION=1.2.3 \
+  -t todex-web .
+```
+
 ## 官网与下载清单
 
 官网内容来自各项目 README。版本和平台选择使用 `src/renderer/site/releases.json` 中已发布的稳定版本及真实文件地址；准备发布官网时执行 `pnpm releases:refresh` 刷新。该命令只需访问公开 GitHub API，无需 token，官网访客不会请求 GitHub API。
