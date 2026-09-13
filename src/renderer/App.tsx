@@ -1,0 +1,495 @@
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import { Button, Label, ListBox, Modal, Select, Toast, toast } from '@heroui/react';
+import { AppLayout, Navbar } from '@heroui-pro/react';
+import { RiAddLine, RiGithubLine, RiLayoutLeftLine, RiLayoutRightLine, RiShieldLine } from '@remixicon/react';
+import { useWorkbenchLayout } from './session/useWorkbenchLayout';
+import { workbenchScopeKey } from './session/workbenchLayout';
+import { useTodeXSession, type TodeXSession } from './session/useTodeXSession';
+import { ConversationHeaderDetails } from './components/ConversationHeaderDetails';
+import { GitActionsModal } from './components/GitActionsModal';
+import { DesktopAlertHost } from './components/DesktopAlertHost';
+import { SessionNoticeToasts } from './components/SessionNoticeToasts';
+import { AppSidebar } from './components/AppSidebar';
+import { AppIcon } from './components/AppIcon';
+import { ChatPanel } from './screens/ChatPanel';
+import { Field } from './components/Field';
+import { connectionStateLabel, fetchWorkspaceDirectorySnapshot } from './session/helpers';
+import { isWorkbenchTab, panelFromRoute, type DesktopPanel, type OpenPanelOptions, type WorkbenchTab } from './lib/panels';
+import { getWorkspaceTrust, setWorkspaceTrust } from './lib/webBackend';
+
+// Secondary surfaces load on demand so the main bundle stays small.
+const SettingsPanel = lazy(() => import('./screens/SettingsPanel').then((module) => ({ default: module.SettingsPanel })));
+const AsidePanel = lazy(() => import('./screens/AsidePanel').then((module) => ({ default: module.AsidePanel })));
+const CapabilitiesPanel = lazy(() => import('./screens/CapabilitiesPanel').then((module) => ({ default: module.CapabilitiesPanel })));
+const WorkbenchPanel = lazy(() => import('./screens/WorkbenchPanel').then((module) => ({ default: module.WorkbenchPanel })));
+const UsagePanel = lazy(() => import('./screens/UsagePanel').then((module) => ({ default: module.UsagePanel })));
+const AboutPanel = lazy(() => import('./screens/AboutPanel').then((module) => ({ default: module.AboutPanel })));
+const CliManagerPanel = lazy(() => import('./screens/CliManagerPanel').then((module) => ({ default: module.CliManagerPanel })));
+const KanbanPanel = lazy(() => import('./screens/KanbanPanel').then((module) => ({ default: module.KanbanPanel })));
+
+const panelFallback = (
+  <div className="text-muted flex h-full min-h-24 items-center justify-center text-sm">加载中…</div>
+);
+
+const LAYOUT_AUTO_SAVE_ID = 'todex.web.appLayout.v1';
+const LAYOUT_OPEN_STORAGE_KEY = 'todex.web.layoutOpen.v3';
+
+type LayoutOpenState = {
+  sidebarOpen: boolean;
+  asideOpen: boolean;
+};
+
+function applyTheme(dark: boolean) {
+  document.documentElement.classList.toggle('dark', dark);
+  document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+}
+
+function readLayoutOpen(): LayoutOpenState {
+  const desktopDefault = typeof window !== 'undefined' && window.matchMedia('(min-width: 1025px)').matches;
+  try {
+    const raw = window.localStorage.getItem(LAYOUT_OPEN_STORAGE_KEY);
+    if (!raw) return { sidebarOpen: true, asideOpen: desktopDefault };
+    const parsed = JSON.parse(raw) as Partial<LayoutOpenState>;
+    return {
+      sidebarOpen: parsed.sidebarOpen !== false,
+      asideOpen: parsed.asideOpen === true,
+    };
+  } catch {
+    return { sidebarOpen: true, asideOpen: desktopDefault };
+  }
+}
+
+function writeLayoutOpen(next: LayoutOpenState) {
+  try {
+    window.localStorage.setItem(LAYOUT_OPEN_STORAGE_KEY, JSON.stringify(next));
+  } catch {
+    window.dispatchEvent(new CustomEvent('todex-storage-error', { detail: { key: LAYOUT_OPEN_STORAGE_KEY } }));
+  }
+}
+
+export function App() {
+  const [panel, setPanel] = useState<DesktopPanel | null>(null);
+  const panelScopeRef = useRef('');
+  const [slashCommand, setSlashCommand] = useState<string>();
+  const [sidebarOpen, setSidebarOpen] = useState(() => readLayoutOpen().sidebarOpen);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [editingWorkspaceId, setEditingWorkspaceId] = useState<string | null>(null);
+  const [capabilitiesOpen, setCapabilitiesOpen] = useState(false);
+  const [gitOpen, setGitOpen] = useState(false);
+  const [trustOpen, setTrustOpen] = useState(false);
+  const [workspaceTrusted, setWorkspaceTrustedState] = useState<boolean | null>(null);
+  const [trustUpdating, setTrustUpdating] = useState(false);
+
+  const persistSidebarOpen = useCallback((open: boolean) => {
+    setSidebarOpen(open);
+    writeLayoutOpen({ ...readLayoutOpen(), sidebarOpen: open });
+  }, []);
+
+  const openPanelHandlerRef = useRef<(name: string, params?: OpenPanelOptions) => void>(() => {});
+  const forwardOpenPanel = useCallback((name: string, params?: OpenPanelOptions) => openPanelHandlerRef.current(name, params), []);
+  const session = useTodeXSession(forwardOpenPanel);
+  const scopeKey = session.hydrated && session.workbenchSharingHydrated ? workbenchScopeKey(
+    session.workbenchSharing,
+    session.activeWorkspace?.backendConnectionId || session.activeBackendConnectionId || session.settings.serverUrl,
+    session.activeWorkspace?.id || '', session.activeConversation?.id || '',
+  ) : '';
+  const layout = useWorkbenchLayout(scopeKey);
+  const { isOpen: asideOpen, setOpen: persistAsideOpen, tab: workbenchTab, setTab: setWorkbenchTab,
+    target: panelTarget, setTarget: setPanelTarget } = layout;
+
+  const openPanel = useCallback((name: string, params?: OpenPanelOptions) => {
+    const next = panelFromRoute(name);
+    if (!next) {
+      return;
+    }
+    panelScopeRef.current = scopeKey;
+    setSlashCommand(params?.command);
+    setPanelTarget({ url: params?.url, filePath: params?.filePath });
+    setPanel(next);
+    if (isWorkbenchTab(next)) {
+      setWorkbenchTab(next);
+    }
+    if (next !== 'settings' && next !== 'usage' && next !== 'about' && next !== 'cli-manager') {
+      persistAsideOpen(true);
+    }
+  }, [persistAsideOpen, scopeKey, setPanelTarget, setWorkbenchTab]);
+  openPanelHandlerRef.current = openPanel;
+
+  const consumePanelTarget = useCallback(() => setPanelTarget({}), [setPanelTarget]);
+  const changeWorkbenchTab = useCallback((next: WorkbenchTab) => { setWorkbenchTab(next); setPanelTarget({}); }, [setWorkbenchTab, setPanelTarget]);
+
+  useEffect(() => {
+    setPanel(current => current && ['settings', 'usage', 'about', 'cli-manager', 'kanban'].includes(current) ? current : null);
+    setSlashCommand(undefined);
+  }, [scopeKey]);
+
+  useEffect(() => {
+    const reportStorageFailure = () => toast.danger('浏览器存储空间不足，部分偏好可能无法保存。');
+    window.addEventListener('todex-storage-error', reportStorageFailure);
+    return () => window.removeEventListener('todex-storage-error', reportStorageFailure);
+  }, []);
+
+  useEffect(() => {
+    void window.todexWeb.theme.shouldUseDark().then((dark) => {
+      applyTheme(dark);
+    });
+    const unsubscribe = window.todexWeb.theme.onUpdated(applyTheme);
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    const conversation = session.activeConversation;
+    const status = connectionStateLabel(session.connectionState);
+    document.title = conversation ? `TodeX · ${conversation.title} · ${status}` : `TodeX · ${status}`;
+  }, [session.activeConversation, session.connectionState]);
+
+  useEffect(() => {
+    const workspaceId = session.activeWorkspace?.id;
+    if (!workspaceId || session.connectionState !== 'open') {
+      setWorkspaceTrustedState(null);
+      return;
+    }
+    let cancelled = false;
+    setWorkspaceTrustedState(null);
+    const loadTrust = async () => {
+      for (let attempt = 0; attempt < 3 && !cancelled; attempt += 1) {
+        try {
+          const trust = await getWorkspaceTrust(session.settings, workspaceId);
+          if (!cancelled) setWorkspaceTrustedState(trust.trusted);
+          return;
+        } catch {
+          if (attempt < 2) {
+            await new Promise((resolve) => window.setTimeout(resolve, 350));
+          }
+        }
+      }
+      if (!cancelled) setWorkspaceTrustedState(null);
+    };
+    void loadTrust();
+    return () => { cancelled = true; };
+  }, [session.activeWorkspace?.id, session.connectionState, session.settings]);
+
+  const updateWorkspaceTrust = async () => {
+    const workspaceId = session.activeWorkspace?.id;
+    if (!workspaceId) return;
+    setTrustUpdating(true);
+    try {
+      const next = await setWorkspaceTrust(session.settings, workspaceId, !workspaceTrusted);
+      setWorkspaceTrustedState(next.trusted);
+      setTrustOpen(false);
+      toast.success(next.trusted ? '工作区已信任' : '已撤销工作区信任');
+    } catch (error) {
+      toast.danger(error instanceof Error ? error.message : '无法更新工作区信任状态');
+    } finally {
+      setTrustUpdating(false);
+    }
+  };
+
+  const settingsOpen = panel === 'settings';
+  const usageOpen = panel === 'usage';
+  const aboutOpen = panel === 'about';
+  const cliManagerOpen = panel === 'cli-manager';
+  const modalPanel = settingsOpen || usageOpen || aboutOpen || cliManagerOpen;
+  const overlayPanel = panelScopeRef.current === scopeKey && panel && panel !== 'kanban' && !modalPanel && !isWorkbenchTab(panel) ? panel : null;
+
+  return (
+    <div className="bg-background text-foreground h-full">
+      <Toast.Provider />
+      <DesktopAlertHost />
+      {session.hydrated ? (
+        <AppLayout
+          className="h-full min-h-0"
+          scrollMode="content"
+          sidebarCollapsible="offcanvas"
+          asideMobile="sheet"
+          sidebarOpen={sidebarOpen}
+          onSidebarOpenChange={persistSidebarOpen}
+          sidebarResizable
+          sidebarDefaultSize="248px"
+          sidebarMinSize="200px"
+          sidebarMaxSize="320px"
+          sidebarResizeBehavior="preserve-pixel-size"
+          asideResizable
+          asideDefaultSize="420px"
+          asideMinSize="320px"
+          asideMaxSize="640px"
+          asideResizeBehavior="preserve-pixel-size"
+          resizableAutoSaveId={LAYOUT_AUTO_SAVE_ID}
+          asideOpen={Boolean(scopeKey) && layout.hydrated && asideOpen}
+          onAsideOpenChange={persistAsideOpen}
+          aside={
+            !scopeKey || !layout.hydrated ? null : (
+              <Suspense fallback={panelFallback}>
+                {overlayPanel ? (
+                  <AsidePanel
+                    session={session}
+                    panel={overlayPanel}
+                    slashCommand={slashCommand}
+                    onBack={() => setPanel(workbenchTab)}
+                  />
+                ) : (
+                  <WorkbenchPanel key={scopeKey} scopeKey={scopeKey} session={session} tab={workbenchTab} target={panelTarget} onTabChange={changeWorkbenchTab} onTargetConsumed={consumePanelTarget} />
+                )}
+              </Suspense>
+            )
+          }
+          sidebar={
+            <AppSidebar
+              session={session}
+              onCreateWorkspace={() => { setEditingWorkspaceId(null); setCreateOpen(true); }}
+              onEditWorkspace={(workspaceId) => { setEditingWorkspaceId(workspaceId); setCreateOpen(true); }}
+              onCreateConversation={() => {
+                if (!session.activeWorkspaceId) {
+                  return;
+                }
+                session.createConversation(session.activeWorkspaceId);
+                setPanel(null);
+              }}
+              onOpenSettings={() => setPanel('settings')}
+              onOpenCapabilities={() => setCapabilitiesOpen(true)}
+              onOpenCliManager={() => { persistAsideOpen(false); setPanel('cli-manager'); }}
+              onOpenUsage={() => setPanel('usage')}
+              onOpenAbout={() => setPanel('about')}
+              onOpenKanban={() => { setPanel('kanban'); persistAsideOpen(false); }}
+            />
+          }
+          navbar={
+            <Navbar maxWidth="full">
+              <Navbar.Header className="flex-nowrap gap-2 px-3 sm:px-6 [&>button]:shrink-0">
+                <AppLayout.MenuToggle className="inline-flex min-[769px]:hidden" aria-label="打开导航侧栏">
+                  <RiLayoutLeftLine className="size-4" />
+                </AppLayout.MenuToggle>
+                <Button className="hidden min-[769px]:inline-flex" isIconOnly size="sm" variant="ghost" aria-label={sidebarOpen ? '折叠侧栏' : '展开侧栏'} onPress={() => persistSidebarOpen(!sidebarOpen)}>
+                  <RiLayoutLeftLine className="size-4" />
+                </Button>
+                <ConversationHeaderDetails session={session} title={panel === 'kanban' ? '今日看板' : session.activeConversation?.title ?? '对话'} gitOpen={gitOpen} onOpenGit={() => setGitOpen(true)} />
+                <Navbar.Content className="shrink-0 gap-2">
+                  {session.activeWorkspace && workspaceTrusted !== null ? (
+                    <Button
+                      size="sm"
+                      variant={workspaceTrusted ? 'tertiary' : 'danger-soft'}
+                      aria-label={workspaceTrusted ? '撤销工作区信任' : '信任工作区'}
+                      onPress={() => setTrustOpen(true)}
+                    >
+                      <RiShieldLine className="size-4" />
+                      <span className="hidden sm:inline">{workspaceTrusted ? '已信任' : '需要信任'}</span>
+                    </Button>
+                  ) : null}
+                  <Button isIconOnly size="sm" variant="ghost" aria-label="GitHub 操作" onPress={() => setGitOpen(true)}>
+                    <RiGithubLine className="size-4" />
+                  </Button>
+                  <Button isIconOnly size="sm" variant="ghost" aria-label={asideOpen ? '关闭右侧面板' : '打开右侧面板'} aria-expanded={asideOpen} onPress={() => persistAsideOpen(!asideOpen)}>
+                    <RiLayoutRightLine className="size-4" />
+                  </Button>
+                </Navbar.Content>
+              </Navbar.Header>
+            </Navbar>
+          }
+        >
+          {panel === 'kanban' ? (
+            <Suspense fallback={panelFallback}>
+              <KanbanPanel session={session} onOpenConversation={() => setPanel(null)} />
+            </Suspense>
+          ) : <ChatPanel session={session} />}
+        </AppLayout>
+      ) : (
+        <div className="flex h-full flex-col items-center justify-center gap-3">
+          <AppIcon className="size-16" />
+          <p className="text-lg font-semibold">TodeX</p>
+          <p className="text-muted text-sm">正在加载设置和工作区...</p>
+        </div>
+      )}
+      <Modal isOpen={settingsOpen} onOpenChange={(open) => { if (!open) setPanel((current) => current === 'settings' ? null : current); }}>
+        <Modal.Backdrop>
+          <Modal.Container>
+            <Modal.Dialog className="max-h-[90vh] sm:max-w-xl">
+              <Modal.CloseTrigger />
+              <Modal.Header>
+                <Modal.Heading>设置</Modal.Heading>
+              </Modal.Header>
+              <Modal.Body className="max-h-[70vh] overflow-y-auto">
+                <Suspense fallback={panelFallback}><SettingsPanel session={session} /></Suspense>
+              </Modal.Body>
+            </Modal.Dialog>
+          </Modal.Container>
+        </Modal.Backdrop>
+      </Modal>
+      <Modal isOpen={usageOpen} onOpenChange={(open) => { if (!open) setPanel((current) => current === 'usage' ? null : current); }}>
+        <Modal.Backdrop>
+          <Modal.Container>
+            <Modal.Dialog className="max-h-[92vh] sm:max-w-5xl">
+              <Modal.CloseTrigger />
+              <Modal.Header><Modal.Heading>使用统计</Modal.Heading></Modal.Header>
+              <Modal.Body className="max-h-[82vh] overflow-y-auto p-0"><Suspense fallback={panelFallback}><UsagePanel session={session} /></Suspense></Modal.Body>
+            </Modal.Dialog>
+          </Modal.Container>
+        </Modal.Backdrop>
+      </Modal>
+      <Modal isOpen={aboutOpen} onOpenChange={(open) => { if (!open) setPanel((current) => current === 'about' ? null : current); }}>
+        <Modal.Backdrop>
+          <Modal.Container>
+            <Modal.Dialog className="max-h-[90vh] sm:max-w-2xl">
+              <Modal.CloseTrigger />
+              <Modal.Header><Modal.Heading>关于</Modal.Heading></Modal.Header>
+              <Modal.Body className="max-h-[76vh] overflow-y-auto p-0"><Suspense fallback={panelFallback}><AboutPanel session={session} /></Suspense></Modal.Body>
+            </Modal.Dialog>
+          </Modal.Container>
+        </Modal.Backdrop>
+      </Modal>
+      <Modal isOpen={cliManagerOpen} onOpenChange={(open) => { if (!open) setPanel((current) => current === 'cli-manager' ? null : current); }}>
+        <Modal.Backdrop><Modal.Container><Modal.Dialog className="max-h-[92vh] sm:max-w-3xl"><Modal.CloseTrigger /><Modal.Header><Modal.Heading>CLI 管理</Modal.Heading></Modal.Header><Modal.Body className="max-h-[80vh] overflow-y-auto p-0"><Suspense fallback={panelFallback}><CliManagerPanel session={session} /></Suspense></Modal.Body></Modal.Dialog></Modal.Container></Modal.Backdrop>
+      </Modal>
+      <Modal isOpen={capabilitiesOpen} onOpenChange={setCapabilitiesOpen}>
+        <Modal.Backdrop><Modal.Container><Modal.Dialog className="max-h-[90vh] sm:max-w-2xl"><Modal.CloseTrigger /><Modal.Header><Modal.Heading>MCP / Skill 管理</Modal.Heading></Modal.Header><Modal.Body className="max-h-[75vh] overflow-y-auto"><Suspense fallback={panelFallback}><CapabilitiesPanel workspacePath={session.activeWorkspace?.path ?? session.settings.defaultWorkspacePath} providers={session.v2Providers} catalogs={session.capabilityCatalogs} onRefresh={(provider) => void session.refreshCapabilityCatalog(provider)} conversationId={session.activeConversation?.id} selectedSkills={session.activeConversation ? session.selectedSkills[session.activeConversation.id] ?? [] : []} canInvoke={Boolean(session.activeConversation?.v2ConversationId || session.activeConversation?.provider)} onToggleSkill={(skill, provider) => session.activeConversation && session.toggleCatalogSkill(session.activeConversation.id, skill, provider)} onPreviewSkill={(skill, provider) => session.previewSkillResource(provider, skill.resourceId)} onRefreshMcp={(resourceId) => session.activeConversation && session.refreshMcpServer(session.activeConversation.id, resourceId)} onCallMcp={(resourceId, toolName) => session.activeConversation && session.callMcpTool(session.activeConversation.id, resourceId, toolName)} /></Suspense></Modal.Body></Modal.Dialog></Modal.Container></Modal.Backdrop>
+      </Modal>
+      <GitActionsModal key={session.activeConversation?.id} session={session} isOpen={gitOpen} onOpenChange={setGitOpen} />
+      {createOpen ? <CreateWorkspaceModal
+        key={editingWorkspaceId ?? 'create'}
+        session={session}
+        workspace={session.workspaces.find((workspace) => workspace.id === editingWorkspaceId)}
+        isOpen={createOpen}
+        onOpenChange={setCreateOpen}
+      /> : null}
+      <Modal isOpen={trustOpen} onOpenChange={setTrustOpen}>
+        <Modal.Backdrop><Modal.Container><Modal.Dialog className="sm:max-w-md">
+          <Modal.CloseTrigger />
+          <Modal.Header>
+            <Modal.Icon className={workspaceTrusted ? 'bg-warning-soft text-warning' : 'bg-danger-soft text-danger'}><RiShieldLine className="size-5" /></Modal.Icon>
+            <Modal.Heading>{workspaceTrusted ? '撤销工作区信任' : '信任这个工作区'}</Modal.Heading>
+          </Modal.Header>
+          <Modal.Body>
+            <p className="text-sm">{workspaceTrusted
+              ? '撤销后会停止正在执行的任务，并阻止终端、Git 写入和 Agent 操作。'
+              : '信任后，Backend 可以在这个目录中运行 Agent、终端和 Git 写操作。请只信任你了解的目录。'}</p>
+            <p className="text-muted break-all text-xs">{session.activeWorkspace?.path}</p>
+          </Modal.Body>
+          <Modal.Footer>
+            <Button slot="close" variant="tertiary">取消</Button>
+            <Button variant={workspaceTrusted ? 'danger' : 'primary'} isPending={trustUpdating} onPress={() => void updateWorkspaceTrust()}>
+              {workspaceTrusted ? '撤销信任' : '确认信任'}
+            </Button>
+          </Modal.Footer>
+        </Modal.Dialog></Modal.Container></Modal.Backdrop>
+      </Modal>
+    </div>
+  );
+}
+
+function CreateWorkspaceModal({
+  session,
+  workspace,
+  isOpen,
+  onOpenChange,
+}: {
+  session: TodeXSession;
+  workspace?: TodeXSession['workspaces'][number];
+  isOpen: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const [name, setName] = useState(workspace?.name ?? '');
+  const [path, setPath] = useState(workspace?.path ?? session.settings.defaultWorkspacePath);
+  const [backendId, setBackendId] = useState(workspace?.backendConnectionId ?? session.activeBackendConnectionId);
+  const [entries, setEntries] = useState<string[]>([]);
+  const selectedBackend = session.backendConnections.find((profile) => profile.id === backendId);
+  const directorySettings = selectedBackend ? { ...session.settings, serverUrl: selectedBackend.serverUrl, authToken: selectedBackend.authToken, tenantId: selectedBackend.tenantId, encryptionProtocol: selectedBackend.encryptionProtocol, encryptionPublicKey: selectedBackend.encryptionPublicKey } : session.settings;
+
+  useEffect(() => {
+    if (!isOpen || workspace) return;
+    const defaultPath = session.settings.defaultWorkspacePath;
+    setBackendId(session.activeBackendConnectionId);
+    const backendRoot = session.serverVersion?.workspace_root || '';
+    setPath(defaultPath);
+    void fetchWorkspaceDirectorySnapshot(directorySettings, defaultPath)
+      .then((snapshot) => {
+        setPath(snapshot.current);
+        setEntries(snapshot.entries.map((entry) => entry.path));
+      })
+      .catch(async () => {
+        if (!backendRoot || backendRoot === defaultPath) {
+          setEntries([]);
+          return;
+        }
+        try {
+          const snapshot = await fetchWorkspaceDirectorySnapshot(directorySettings, backendRoot);
+          setPath(snapshot.current);
+          setEntries(snapshot.entries.map((entry) => entry.path));
+        } catch {
+          setEntries([]);
+        }
+      });
+  }, [isOpen, workspace, session.activeBackendConnectionId, session.serverVersion?.workspace_root, session.settings]);
+
+  return (
+    <Modal isOpen={isOpen} onOpenChange={onOpenChange}>
+      <Modal.Backdrop>
+        <Modal.Container>
+          <Modal.Dialog className="sm:max-w-lg">
+            <Modal.CloseTrigger />
+            <Modal.Header>
+              <Modal.Heading>{workspace ? '编辑工作区' : '新建工作区'}</Modal.Heading>
+            </Modal.Header>
+            <Modal.Body className="flex flex-col gap-4">
+              <Field label="名称" value={name} onChange={setName} />
+              <Select isDisabled={Boolean(workspace)} selectedKey={backendId} onSelectionChange={(key) => { if (typeof key === 'string') setBackendId(key); }}>
+                <Label>连接后端</Label><Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
+                <Select.Popover><ListBox>{session.backendConnections.map((profile) => <ListBox.Item key={profile.id} id={profile.id} textValue={profile.name}>{profile.name} · {profile.serverUrl}</ListBox.Item>)}</ListBox></Select.Popover>
+              </Select>
+              <Field label="目录" value={path} onChange={setPath} />
+              <div className="flex gap-2">
+                <Button
+                  variant="secondary"
+                  onPress={async () => {
+                    try {
+                      const snapshot = await fetchWorkspaceDirectorySnapshot(directorySettings, path);
+                      setPath(snapshot.current);
+                      setEntries(snapshot.entries.map((entry) => entry.path));
+                    } catch (error) {
+                      toast.danger(error instanceof Error ? error.message : '无法读取目录');
+                    }
+                  }}
+                >
+                  浏览后端目录
+                </Button>
+              </div>
+              {entries.length ? (
+                <div className="flex max-h-40 flex-col gap-1 overflow-y-auto">
+                  {entries.map((entry) => (
+                    <Button key={entry} variant="ghost" className="justify-start" onPress={() => setPath(entry)}>
+                      {entry}
+                    </Button>
+                  ))}
+                </div>
+              ) : null}
+            </Modal.Body>
+            <Modal.Footer>
+              <Button slot="close" variant="tertiary">取消</Button>
+              <Button
+                onPress={async () => {
+                  let validatedPath = path;
+                  if (session.connectionState === 'open') {
+                    try {
+                      validatedPath = (await fetchWorkspaceDirectorySnapshot(directorySettings, path)).current;
+                    } catch (error) {
+                      toast.danger(error instanceof Error ? error.message : '无法读取目录');
+                      return;
+                    }
+                  }
+                  if (workspace) {
+                    session.updateWorkspace(workspace.id, { name: name.trim() || validatedPath, path: validatedPath });
+                  } else {
+                    session.setActiveBackendConnectionId(backendId);
+                    session.createWorkspace(name.trim() || validatedPath, validatedPath);
+                  }
+                  onOpenChange(false);
+                }}
+              >
+                {workspace ? null : <RiAddLine className="size-4" />}
+                {workspace ? '保存' : '创建'}
+              </Button>
+            </Modal.Footer>
+          </Modal.Dialog>
+        </Modal.Container>
+      </Modal.Backdrop>
+    </Modal>
+  );
+}

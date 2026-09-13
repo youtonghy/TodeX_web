@@ -1,0 +1,1007 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
+import { RiCloseLine, RiTerminalBoxLine, RiGitBranchLine, RiAddLine, RiArrowLeftDoubleLine, RiArrowRightDoubleLine, RiFileTextLine, RiFolder3Line, RiGlobalLine, RiFocus3Line, RiRefreshLine, RiStopCircleLine } from '@remixicon/react';
+import { Button, Chip, Dropdown, Input, ScrollShadow, Spinner, TextField, Tooltip, toast } from '@heroui/react';
+import type { Selection } from '@heroui/react';
+import { FileTree } from '@heroui-pro/react';
+import { Resizable } from '@heroui-pro/react/resizable';
+import type { PanelImperativeHandle } from '@heroui-pro/react/resizable';
+import { WorkspaceFilePreview, type PreviewFile, type ReferenceSelection } from '../components/WorkspaceFilePreview';
+import { useNoticeToast } from '../components/NoticeToast';
+import type { TodeXSession } from '../session/useTodeXSession';
+import { latencyLabelOf, terminalIdForConversation, terminalStatusLabel } from '../session/helpers';
+import type { OpenPanelOptions, WorkbenchTab } from '../lib/panels';
+import { prepareBrowserSnapshot } from '../lib/browserSnapshot';
+import { normalizeWorkbenchLayout } from '../session/workbenchLayout';
+import { SETTINGS_STORAGE_KEY, attachmentId, referenceToken, uniqueReferenceName } from '../session/helpers';
+import { V2ApiClient } from '@todex/protocol/v2';
+
+type Props = {
+  scopeKey?: string;
+  onTargetConsumed?: () => void;
+  session: TodeXSession;
+  tab: WorkbenchTab;
+  target?: OpenPanelOptions;
+  onTabChange: (tab: WorkbenchTab) => void;
+};
+
+type WorkbenchItem = { id: string; type: WorkbenchTab; title: string; target?: OpenPanelOptions };
+
+type StoredWorkbenchState = {
+  items: WorkbenchItem[];
+  activeId: string;
+};
+
+const WORKBENCH_TYPES = new Set<WorkbenchTab>(['terminal', 'browser', 'files', 'git-diff']);
+
+const WORKBENCH_LABELS: Record<WorkbenchTab, string> = {
+  terminal: '终端',
+  browser: '浏览器',
+  files: '文件',
+  'git-diff': 'Git Diff',
+};
+
+const WORKBENCH_ICONS = {
+  terminal: RiTerminalBoxLine,
+  browser: RiGlobalLine,
+  files: RiFileTextLine,
+  'git-diff': RiGitBranchLine,
+};
+
+function parseStoredWorkbenchState(value: unknown): StoredWorkbenchState {
+  if (!value || typeof value !== 'object') return { items: [], activeId: '' };
+  const candidate = value as Partial<StoredWorkbenchState>;
+  const seen = new Set<string>();
+  const items = Array.isArray(candidate.items)
+    ? candidate.items.filter((item): item is WorkbenchItem => {
+      if (!item || typeof item !== 'object') return false;
+      const entry = item as Partial<WorkbenchItem>;
+      if (typeof entry.id !== 'string' || seen.has(entry.id)) return false;
+      if (typeof entry.title !== 'string' || !WORKBENCH_TYPES.has(entry.type as WorkbenchTab)) return false;
+      seen.add(entry.id);
+      return true;
+    })
+    : [];
+  const activeId = typeof candidate.activeId === 'string' && items.some((item) => item.id === candidate.activeId)
+    ? candidate.activeId
+    : items[0]?.id ?? '';
+  return { items: items.map(item => ({ ...item, target: normalizeWorkbenchLayout({ target: item.target }).target })), activeId };
+}
+
+const PLACEHOLDER_FILES: Record<string, { title: string; language: string; body: string }> = {
+  readme: {
+    title: 'README.md',
+    language: 'markdown',
+    body: '# 工作区\n\n文件预览目前是前端占位。\n接入后端目录接口后，这里会显示真实文件内容。',
+  },
+  agent: {
+    title: 'AGENTS.md',
+    language: 'markdown',
+    body: '# Agents\n\nTodeX 桌面端会在右侧面板预览工作区文件。\n当前后端文件接口尚未接入。',
+  },
+  package: {
+    title: 'package.json',
+    language: 'json',
+    body: '{\n  "name": "workspace",\n  "private": true\n}',
+  },
+};
+
+export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = session.activeConversation?.id || '', onTargetConsumed }: Props) {
+  const storageKey = `${SETTINGS_STORAGE_KEY}.workbenchTabs.v1:${scopeKey}`;
+  const [items, setItems] = useState<WorkbenchItem[]>([]);
+  const [activeId, setActiveId] = useState('');
+  const [restored, setRestored] = useState(false);
+  const requestedTargetRef = useRef(target);
+  const openedTargetRef = useRef<{ target: OpenPanelOptions; tab: WorkbenchTab } | null>(null);
+  requestedTargetRef.current = target;
+
+  useEffect(() => {
+    let cancelled = false;
+    void window.todexWeb.store.get(storageKey)
+      .then((value) => {
+        if (cancelled) return;
+        const stored = parseStoredWorkbenchState(value);
+        setItems(stored.items);
+        setActiveId(stored.activeId);
+        const active = stored.items.find((item) => item.id === stored.activeId);
+        if (active && !requestedTargetRef.current?.filePath && !requestedTargetRef.current?.url) onTabChange(active.type);
+      })
+      .catch((reason) => {
+        console.error('Failed to restore workbench tabs', reason);
+      })
+      .finally(() => {
+        if (!cancelled) setRestored(true);
+      });
+    return () => { cancelled = true; };
+  }, [onTabChange, storageKey]);
+
+  useEffect(() => {
+    if (!restored) return;
+    void window.todexWeb.store.set(storageKey, { items: items.map(item => ({ ...item, target: normalizeWorkbenchLayout({ target: item.target }).target })), activeId } satisfies StoredWorkbenchState)
+      .catch((reason) => {
+        console.error('Failed to persist workbench tabs', reason);
+      });
+  }, [activeId, items, restored, storageKey]);
+
+  useEffect(() => {
+    if (!restored) return;
+    if (items.some(item => item.id === activeId && item.type === tab)) return;
+    const next = items.find((item) => item.type === tab);
+    if (next && next.id !== activeId) {
+      setActiveId(next.id);
+    }
+  }, [activeId, items, restored, tab]);
+
+  useEffect(() => {
+    if (!restored || !target || !(tab === 'files' && target.filePath
+      || tab === 'browser' && (target.url || target.filePath))) return;
+    if (openedTargetRef.current?.target === target && openedTargetRef.current.tab === tab) return;
+    openedTargetRef.current = { target, tab };
+    const existing = items.find(item => item.id === activeId && item.type === tab) ?? items.find(item => item.type === tab);
+    if (existing) {
+      setActiveId(existing.id);
+      return;
+    }
+    const item = { id: `${tab}-${Date.now()}`, type: tab, title: `${WORKBENCH_LABELS[tab]} 1` };
+    setItems(current => [...current, item]);
+    setActiveId(item.id);
+    // Consume an explicit open request, including repeated clicks on one path.
+    // Tab-list changes alone must not steal focus from a manually selected tab.
+  }, [restored, tab, target]);
+
+  const updateTabTarget = useCallback((id: string, nextTarget: OpenPanelOptions) => {
+    setItems(current => current.some(item => item.id === id && item.target !== nextTarget) ? current.map(item => item.id === id ? { ...item, target: nextTarget } : item) : current);
+    if (id === activeId && items.some(item => item.id === id && item.type === tab) && nextTarget === requestedTargetRef.current) onTargetConsumed?.();
+  }, [activeId, items, onTargetConsumed, tab]);
+
+  const active = items.find((item) => item.id === activeId) ?? null;
+  const addTab = (type: WorkbenchTab) => {
+    if (!restored) return;
+    const count = items.filter((item) => item.type === type).length + 1;
+    const item = { id: `${type}-${Date.now()}`, type, title: `${WORKBENCH_LABELS[type]} ${count}` };
+    setItems((current) => [...current, item]);
+    setActiveId(item.id);
+    onTabChange(type);
+  };
+  const closeTab = (id: string) => {
+    setItems((current) => {
+      const next = current.filter((item) => item.id !== id);
+      if (id === activeId) {
+        const replacement = next[Math.max(0, current.findIndex((item) => item.id === id) - 1)] ?? next[0];
+        setActiveId(replacement?.id ?? '');
+        if (replacement) onTabChange(replacement.type);
+      }
+      return next;
+    });
+  };
+
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="flex min-h-10 items-center border-b border-separator px-2">
+        <div className="flex min-w-0 flex-1 overflow-x-auto">
+          {items.map((item) => {
+            const Icon = WORKBENCH_ICONS[item.type];
+            const workspacePath = session.activeWorkspace?.path;
+            const location = item.type === 'terminal'
+              ? session.terminalById[terminalIdForConversation(scopeKey, item.id)]?.cwd || workspacePath
+              : item.type === 'browser'
+                ? item.target?.url || item.target?.filePath || 'http://127.0.0.1:7345'
+                : item.target?.filePath || workspacePath;
+            const title = location ? `${WORKBENCH_LABELS[item.type]} ${location}` : item.title;
+            return (
+              <div key={item.id} className={`group flex h-10 shrink-0 items-center border-r border-separator ${item.id === activeId ? 'bg-surface text-foreground' : 'text-muted'}`}>
+                <Tooltip delay={200}>
+                  <Button
+                    isIconOnly variant="ghost" aria-label={title} aria-pressed={item.id === activeId}
+                    className="size-10 min-w-10 rounded-none text-inherit"
+                    onPress={() => { setActiveId(item.id); onTabChange(item.type); }}
+                  >
+                    <Icon aria-hidden="true" className="size-4" />
+                  </Button>
+                  <Tooltip.Content placement="bottom" className="max-w-sm break-all text-xs">
+                    {title}
+                  </Tooltip.Content>
+                </Tooltip>
+                <Button
+                  isIconOnly size="sm" variant="ghost" aria-label={`关闭${title}`}
+                  className="mr-1 size-5 min-w-5 rounded-sm text-muted opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100"
+                  onPress={() => closeTab(item.id)}
+                >
+                  <RiCloseLine aria-hidden="true" className="size-3" />
+                </Button>
+              </div>
+            );
+          })}
+        </div>
+        <Dropdown>
+          <Dropdown.Trigger isDisabled={!restored} aria-label="新建工作台标签" className="inline-flex size-8 items-center justify-center"><RiAddLine className="size-4" /></Dropdown.Trigger>
+          <Dropdown.Popover>
+            <Dropdown.Menu onAction={(key) => addTab(String(key) as WorkbenchTab)}>
+              <Dropdown.Item id="terminal" textValue="终端">终端</Dropdown.Item>
+              <Dropdown.Item id="browser" textValue="浏览器">浏览器</Dropdown.Item>
+              <Dropdown.Item id="files" textValue="文件">文件</Dropdown.Item>
+              <Dropdown.Item id="git-diff" textValue="Git Diff">Git Diff</Dropdown.Item>
+            </Dropdown.Menu>
+          </Dropdown.Popover>
+        </Dropdown>
+      </div>
+      <div className="min-h-0 flex-1 overflow-hidden">
+        {!active ? (
+          <div className="text-muted flex h-full items-center justify-center text-sm">暂无打开的标签</div>
+        ) : null}
+        {items.map((item) => (
+          <div key={item.id} className={item.id === active?.id ? 'h-full' : 'hidden'}>
+            {item.type === 'terminal' ? <TerminalPane session={session} terminalId={terminalIdForConversation(scopeKey, item.id)} /> : null}
+            {item.type === 'browser' ? <BrowserPane workspacePath={session.activeWorkspace?.path} session={session} target={item.type === tab && item.id === active?.id && (target?.filePath || target?.url) ? target : item.target} onTargetChange={next => updateTabTarget(item.id, next)} /> : null}
+            {item.type === 'files' ? <FilesPane session={session} target={item.type === tab && item.id === active?.id && (target?.filePath || target?.url) ? target : item.target} onTargetChange={next => updateTabTarget(item.id, next)} /> : null}
+            {item.type === 'git-diff' ? <GitDiffPane session={session} /> : null}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function TerminalPane({ session, terminalId }: { session: TodeXSession; terminalId: string }) {
+  const [input, setInput] = useState('');
+  const workspace = session.activeWorkspace;
+  const conversation = session.activeConversation;
+  const backendIdentity = workspace?.backendConnectionId || session.activeBackendConnectionId || session.settings.serverUrl;
+  const autoStartAttempts = useRef(new Set<string>());
+  const manualStopRef = useRef(false);
+  const reconnectTimerRef = useRef<number | null>(null);
+  const reconnectAttemptRef = useRef(0);
+  const terminalByIdRef = useRef(session.terminalById);
+  const terminal = terminalId ? session.terminalById[terminalId] : undefined;
+  const lines = terminal?.output ?? [];
+
+  terminalByIdRef.current = session.terminalById;
+
+  useEffect(() => {
+    setInput('');
+    autoStartAttempts.current.clear();
+    manualStopRef.current = false;
+    reconnectAttemptRef.current = 0;
+    if (reconnectTimerRef.current !== null) {
+      window.clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
+  }, [terminalId, backendIdentity]);
+
+  useEffect(() => {
+    if (!workspace || !conversation || !terminalId || session.connectionState !== 'open') {
+      return;
+    }
+    const current = terminalByIdRef.current[terminalId];
+    if (current && current.status !== 'idle') {
+      return;
+    }
+    const attemptKey = `${conversation.id}:${terminalId}`;
+    if (autoStartAttempts.current.has(attemptKey)) {
+      return;
+    }
+    autoStartAttempts.current.add(attemptKey);
+    session.requestTerminalStatus(workspace, conversation, terminalId);
+    const timeoutId = window.setTimeout(() => {
+      const latest = terminalByIdRef.current[terminalId];
+      if (!latest || latest.status === 'idle') {
+        session.startTerminalSession(workspace, conversation, {
+          terminalId,
+          cwd: workspace.path,
+          shell: '',
+          rows: 24,
+          cols: 80,
+        });
+      }
+    }, 300);
+    return () => window.clearTimeout(timeoutId);
+  }, [
+    conversation?.id,
+    session.connectionState,
+    session.requestTerminalStatus,
+    session.startTerminalSession,
+    terminalId,
+    workspace?.id,
+    workspace?.path,
+  ]);
+
+  useEffect(() => {
+    if (!workspace || !conversation || !terminalId || session.connectionState !== 'open' || manualStopRef.current) {
+      return;
+    }
+    if (terminal?.status === 'running') {
+      reconnectAttemptRef.current = 0;
+      return;
+    }
+    if (terminal?.status !== 'error' && terminal?.status !== 'exited') {
+      return;
+    }
+    if (reconnectTimerRef.current !== null) {
+      return;
+    }
+    const delay = Math.min(10_000, 1000 * 2 ** reconnectAttemptRef.current);
+    reconnectAttemptRef.current += 1;
+    reconnectTimerRef.current = window.setTimeout(() => {
+      reconnectTimerRef.current = null;
+      const latest = terminalByIdRef.current[terminalId];
+      session.startTerminalSession(workspace, conversation, {
+        terminalId,
+        cwd: latest?.cwd || workspace.path,
+        shell: latest?.shell || '',
+        rows: latest?.rows || 24,
+        cols: latest?.cols || 80,
+      });
+    }, delay);
+    return () => {
+      if (reconnectTimerRef.current !== null) {
+        window.clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = null;
+      }
+    };
+  }, [conversation, session.connectionState, session.startTerminalSession, terminal?.status, terminalId, workspace]);
+
+  const defaultPath = workspace?.path || '';
+  const [cwdDraft, setCwdDraft] = useState(defaultPath);
+
+  useEffect(() => {
+    setCwdDraft(workspace?.path || '');
+  }, [workspace?.path]);
+
+  const handleCwdSubmit = (targetPath: string) => {
+    const trimmed = targetPath.trim();
+    if (!trimmed || !terminalId || !workspace) return;
+    session.sendTerminalInput(terminalId, workspace.tenantId || session.settings.tenantId, `cd "${trimmed.replace(/"/g, '\\"')}"\n`);
+  };
+
+  return (
+    <div className="flex h-full min-h-0 flex-col px-4 pb-4 pt-3">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            handleCwdSubmit(cwdDraft);
+          }}
+          className="min-w-0 flex-1"
+        >
+          <TextField aria-label="终端路径" className="w-full" value={cwdDraft} onChange={setCwdDraft}>
+            <Input
+              placeholder="/path/to/directory..."
+              className="text-xs"
+            />
+          </TextField>
+        </form>
+        <div className="flex shrink-0 items-center gap-2">
+          <Chip size="sm" variant="soft">
+            {session.connectionState === 'open'
+              ? session.connectionHealth.latencyMs === null ? '检测中' : latencyLabelOf(session.connectionHealth.latencyMs)
+              : '未连接'}
+          </Chip>
+          <Button
+            size="sm"
+            variant="danger-soft"
+            isDisabled={!terminalId || !terminal || terminal.status === 'exited'}
+            onPress={() => {
+              manualStopRef.current = true;
+              if (reconnectTimerRef.current !== null) {
+                window.clearTimeout(reconnectTimerRef.current);
+                reconnectTimerRef.current = null;
+              }
+              if (terminalId) {
+                session.stopTerminalSession(terminalId, workspace?.tenantId || session.settings.tenantId);
+              }
+            }}
+            aria-label="停止终端"
+            className="expandable-action-btn"
+          >
+            <span className="expandable-action-btn__icon">
+              <RiStopCircleLine className="size-4" />
+            </span>
+            <span className="expandable-action-btn__label">停止</span>
+          </Button>
+        </div>
+      </div>
+      <div className="bg-surface-secondary flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-separator">
+        <ScrollShadow className="min-h-0 flex-1 px-4 py-3">
+          <div className="font-mono text-xs leading-5">
+            {lines.length ? lines.map((entry) => (
+              <div
+                key={entry.id}
+                className={entry.kind === 'stderr' || entry.kind === 'error'
+                  ? 'whitespace-pre-wrap break-words text-danger'
+                  : entry.kind === 'input'
+                    ? 'whitespace-pre-wrap break-words text-success'
+                    : 'text-foreground whitespace-pre-wrap break-words'}
+              >
+                {entry.text}
+              </div>
+            )) : (
+              <div className="text-muted">{session.connectionState === 'open' ? '$ 正在连接终端...' : '$ 等待连接到 todex-agentd'}</div>
+            )}
+          </div>
+        </ScrollShadow>
+        <form
+          className="bg-surface flex gap-2 border-t border-separator p-2.5"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (!input.trim() || !terminalId || !workspace) return;
+            session.sendTerminalInput(terminalId, workspace.tenantId || session.settings.tenantId, `${input}\n`);
+            setInput('');
+          }}
+        >
+          <span className="text-success self-center font-mono text-sm">$</span>
+          <TextField aria-label="终端输入" className="min-w-0 flex-1" value={input} onChange={setInput}>
+            <Input placeholder="输入命令" className="border-0 bg-transparent font-mono text-xs" />
+          </TextField>
+          <Button size="sm" variant="secondary" type="submit" isDisabled={!conversation || terminal?.status !== 'running'}>
+            发送
+          </Button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function BrowserPane({ workspacePath, session, target, onTargetChange }: { workspacePath?: string; session: TodeXSession; target?: OpenPanelOptions; onTargetChange?: (target: OpenPanelOptions) => void }) {
+  const targetChangeRef = useRef(onTargetChange);
+  targetChangeRef.current = onTargetChange;
+  const [draft, setDraft] = useState('http://127.0.0.1:7345');
+  const [url, setUrl] = useState('');
+  const [srcDoc, setSrcDoc] = useState('');
+  const [error, setError] = useState('');
+  const [inspect, setInspect] = useState(false);
+  const frameRef = useRef<HTMLIFrameElement>(null);
+  const selectedRef = useRef<HTMLElement | null>(null);
+  const selectionAnchorRef = useRef<HTMLElement | null>(null);
+  useNoticeToast(error, { variant: 'danger', scope: workspacePath });
+
+  const loadSnapshot = useCallback(async (targetUrl: string) => {
+    try {
+      const parsed = new URL(targetUrl);
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') throw new Error('仅支持 HTTP 和 HTTPS 地址');
+      setUrl(parsed.toString());
+      setSrcDoc('');
+      setError('');
+      const api = new V2ApiClient({ serverUrl: session.settings.serverUrl, authToken: session.settings.authToken });
+      const result = await api.fetchBrowser(parsed.toString());
+      if (!result.contentType.toLowerCase().includes('text/html')) {
+        throw new Error(`无法预览 ${result.contentType || '非 HTML 内容'}`);
+      }
+      setUrl(result.url);
+      targetChangeRef.current?.({ url: result.url });
+      setSrcDoc(prepareBrowserSnapshot(result.body, result.url));
+    } catch (reason) {
+      setSrcDoc('');
+      setError(reason instanceof Error ? reason.message : '网页快照加载失败');
+    }
+  }, [session.settings.authToken, session.settings.serverUrl]);
+
+  useEffect(() => {
+    if (target?.url) {
+      targetChangeRef.current?.(target);
+      setDraft(target.url);
+      void loadSnapshot(target.url);
+      return;
+    }
+    if (!target?.filePath) return;
+    targetChangeRef.current?.(target);
+    setDraft(target.filePath);
+    setUrl('');
+    setSrcDoc('');
+    setError('');
+    const api = new V2ApiClient({ serverUrl: session.settings.serverUrl, authToken: session.settings.authToken });
+    void api.readWorkspaceFile(target.filePath)
+      .then((file) => {
+        if (!file.text) throw new Error('该网页文件无法作为文本加载');
+        setSrcDoc(file.text);
+      })
+      .catch((reason) => setError(reason instanceof Error ? reason.message : '网页文件读取失败'));
+  }, [loadSnapshot, session.settings.authToken, session.settings.serverUrl, target?.filePath, target?.url]);
+
+  const appendReference = useCallback((element: HTMLElement) => {
+    const tag = element.tagName.toLowerCase();
+    const text = (element.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 160);
+    const id = element.id ? `#${element.id}` : '';
+    const reference = `[网页元素 ${tag}${id}${text ? `: ${text}` : ''}]`;
+    const conversationId = session.activeConversation?.id;
+    if (conversationId) {
+      session.setConversationChatDraft(conversationId, (current) => `${current}${current ? '\n' : ''}${reference}`);
+    }
+  }, [session.activeConversation?.id, session.setConversationChatDraft]);
+
+  useEffect(() => {
+    const frame = frameRef.current;
+    if (!frame || !inspect) return;
+    const bind = () => {
+      try {
+        const doc = frame.contentDocument;
+        const frameWindow = frame.contentWindow;
+        if (!doc || !frameWindow) return;
+        const FrameHTMLElement = (frameWindow as Window & typeof globalThis).HTMLElement;
+        let hovered: HTMLElement | null = null;
+        const isFrameElement = (value: EventTarget | Element | null): value is HTMLElement => (
+          value instanceof FrameHTMLElement
+        );
+        const createOverlay = (color: string) => {
+          const overlay = doc.createElement('div');
+          overlay.setAttribute('aria-hidden', 'true');
+          Object.assign(overlay.style, {
+            position: 'fixed',
+            pointerEvents: 'none',
+            zIndex: '2147483647',
+            border: `2px solid ${color}`,
+            boxSizing: 'border-box',
+            display: 'none',
+          });
+          doc.body.appendChild(overlay);
+          return overlay;
+        };
+        const hoverOverlay = createOverlay('#0ea5e9');
+        const selectedOverlay = createOverlay('#2563eb');
+        const positionOverlay = (overlay: HTMLDivElement, element: HTMLElement | null) => {
+          if (!element || !element.isConnected) {
+            overlay.style.display = 'none';
+            return;
+          }
+          const rect = element.getBoundingClientRect();
+          Object.assign(overlay.style, {
+            display: 'block',
+            left: `${rect.left}px`,
+            top: `${rect.top}px`,
+            width: `${rect.width}px`,
+            height: `${rect.height}px`,
+          });
+        };
+        const previousCursor = doc.documentElement.style.cursor;
+        doc.documentElement.style.cursor = 'crosshair';
+        const move = (event: MouseEvent) => {
+          const element = isFrameElement(event.target) ? event.target : null;
+          hovered = element;
+          if (!selectedRef.current) selectionAnchorRef.current = element;
+          positionOverlay(hoverOverlay, element === selectedRef.current ? null : element);
+        };
+        const click = (event: MouseEvent) => {
+          event.preventDefault(); event.stopPropagation();
+          if (isFrameElement(event.target)) {
+            selectedRef.current = event.target;
+            selectionAnchorRef.current = event.target;
+            positionOverlay(selectedOverlay, event.target);
+            positionOverlay(hoverOverlay, null);
+            appendReference(event.target);
+          }
+        };
+        const wheel = (event: WheelEvent) => {
+          const current = selectedRef.current ?? hovered;
+          if (!current) return;
+          event.preventDefault();
+          const anchor = selectionAnchorRef.current ?? current;
+          selectionAnchorRef.current = anchor;
+          const candidate = event.deltaY > 0
+            ? current.parentElement && current.parentElement !== doc.documentElement ? current.parentElement : null
+            : anchor && current !== anchor
+              ? Array.from(current.children).find((child) => child.contains(anchor))
+              : current.firstElementChild;
+          const next = candidate ?? null;
+          if (isFrameElement(next)) {
+            if (selectedRef.current) {
+              selectedRef.current = next;
+              positionOverlay(selectedOverlay, next);
+            } else {
+              hovered = next;
+              positionOverlay(hoverOverlay, next);
+            }
+          }
+        };
+        const reposition = () => {
+          positionOverlay(hoverOverlay, hovered === selectedRef.current ? null : hovered);
+          positionOverlay(selectedOverlay, selectedRef.current);
+        };
+        doc.addEventListener('mousemove', move, true);
+        doc.addEventListener('click', click, true);
+        frameWindow.addEventListener('wheel', wheel, { capture: true, passive: false });
+        doc.addEventListener('scroll', reposition, true);
+        frameWindow.addEventListener('resize', reposition);
+        return () => {
+          doc.removeEventListener('mousemove', move, true);
+          doc.removeEventListener('click', click, true);
+          frameWindow.removeEventListener('wheel', wheel, true);
+          doc.removeEventListener('scroll', reposition, true);
+          frameWindow.removeEventListener('resize', reposition);
+          doc.documentElement.style.cursor = previousCursor;
+          hoverOverlay.remove();
+          selectedOverlay.remove();
+        };
+      } catch { toast.danger('该页面禁止读取元素，无法使用检查功能'); }
+      return undefined;
+    };
+    let cleanup = bind();
+    const handleLoad = () => {
+      cleanup?.();
+      selectedRef.current = null;
+      selectionAnchorRef.current = null;
+      cleanup = bind();
+    };
+    frame.addEventListener('load', handleLoad);
+    return () => {
+      frame.removeEventListener('load', handleLoad);
+      cleanup?.();
+    };
+  }, [appendReference, inspect]);
+
+  return (
+    <div className="flex h-full min-h-0 flex-col px-4 pb-4 pt-3">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            const target = draft.trim();
+            if (target) void loadSnapshot(target);
+          }}
+          className="min-w-0 flex-1"
+        >
+          <TextField aria-label="地址" className="w-full" value={draft} onChange={setDraft}>
+            <Input placeholder="http://127.0.0.1:..." className="text-xs" />
+          </TextField>
+        </form>
+        <div className="flex shrink-0 items-center gap-2">
+          <Button
+            size="sm"
+            variant="tertiary"
+            isDisabled={!url && !srcDoc}
+            onPress={() => {
+              const target = draft.trim();
+              if (target) void loadSnapshot(target);
+            }}
+            aria-label="刷新网页"
+            className="expandable-action-btn"
+          >
+            <span className="expandable-action-btn__icon">
+              <RiRefreshLine className="size-4" />
+            </span>
+            <span className="expandable-action-btn__label">刷新</span>
+          </Button>
+          <Button
+            size="sm"
+            variant={inspect ? 'primary' : 'tertiary'}
+            onPress={() => {
+              setInspect((current) => {
+                if (!current) {
+                  selectedRef.current = null;
+                  selectionAnchorRef.current = null;
+                }
+                return !current;
+              });
+            }}
+            aria-label={inspect ? '退出检查' : '选择元素'}
+            className="expandable-action-btn"
+          >
+            <span className="expandable-action-btn__icon">
+              <RiFocus3Line className="size-4" />
+            </span>
+            <span className="expandable-action-btn__label">{inspect ? '退出检查' : '选择元素'}</span>
+          </Button>
+        </div>
+      </div>
+      {srcDoc ? (
+        <div className="bg-surface min-h-0 flex-1 overflow-hidden rounded-xl">
+          <iframe ref={frameRef} title="网页预览" srcDoc={srcDoc} className="size-full border-0" sandbox="allow-same-origin" />
+        </div>
+      ) : (
+        <div className="bg-surface-secondary flex min-h-0 flex-1 flex-col items-center justify-center gap-2 rounded-xl px-6 text-center">
+          <RiGlobalLine className="text-muted size-6" />
+          <p className="text-sm font-medium">浏览器预览</p>
+          <p className="text-muted max-w-xs text-xs">输入地址后由 backend 所在机器请求并返回内容。工作区 {workspacePath || '尚未选择'}。</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function GitDiffPane({ session }: { session: TodeXSession }) {
+  const conversation = session.activeConversation;
+  const state = conversation ? session.gitDiffByConversation[conversation.id] : undefined;
+  const workspacePath = session.activeWorkspace?.path || '';
+  const [pathDraft, setPathDraft] = useState(workspacePath);
+  useNoticeToast(state?.error !== session.lastError ? state?.error : null, { variant: 'danger', scope: conversation?.id });
+
+  useEffect(() => {
+    setPathDraft(workspacePath);
+  }, [workspacePath]);
+
+  const handleRefresh = () => {
+    if (conversation) {
+      void session.requestGitDiff(conversation.id);
+    }
+  };
+
+  return (
+    <div className="flex h-full min-h-0 flex-col px-4 pb-4 pt-3">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            handleRefresh();
+          }}
+          className="min-w-0 flex-1"
+        >
+          <TextField aria-label="Git 工作区路径" className="w-full" value={pathDraft} onChange={setPathDraft}>
+            <Input placeholder="/path/to/workspace..." className="text-xs" />
+          </TextField>
+        </form>
+        <div className="flex shrink-0 items-center gap-2">
+          <Button
+            size="sm"
+            variant="tertiary"
+            isDisabled={!conversation || state?.status === 'loading'}
+            onPress={handleRefresh}
+            aria-label="刷新 Git Diff"
+            className="expandable-action-btn"
+          >
+            <span className="expandable-action-btn__icon">
+              <RiRefreshLine className={`size-4 ${state?.status === 'loading' ? 'animate-spin' : ''}`} />
+            </span>
+            <span className="expandable-action-btn__label">刷新</span>
+          </Button>
+        </div>
+      </div>
+      <ScrollShadow className="bg-surface-secondary min-h-0 flex-1 rounded-xl p-3">
+        {state?.error ? null : <pre className="font-mono text-xs whitespace-pre-wrap">{state?.diff || '暂无 diff。'}</pre>}
+      </ScrollShadow>
+    </div>
+  );
+}
+
+type FileTreeEntry = {
+  name: string;
+  path: string;
+  kind: 'directory' | 'file';
+  children?: FileTreeEntry[];
+};
+
+function absoluteEntryPath(cwd: string, relativePath: string): string {
+  return `${cwd.replace(/[\\/]$/, '')}/${relativePath.replace(/^[/\\]+/, '').replace(/[/\\]+/g, '/')}`;
+}
+
+function findFileTreeEntry(entries: FileTreeEntry[], path: string): FileTreeEntry | undefined {
+  for (const entry of entries) {
+    if (entry.path === path) return entry;
+    const nested = entry.children ? findFileTreeEntry(entry.children, path) : undefined;
+    if (nested) return nested;
+  }
+  return undefined;
+}
+
+function replaceFileTreeChildren(entries: FileTreeEntry[], path: string, children: FileTreeEntry[]): FileTreeEntry[] {
+  return entries.map((entry) => {
+    if (entry.path === path) return { ...entry, children };
+    return entry.children ? { ...entry, children: replaceFileTreeChildren(entry.children, path, children) } : entry;
+  });
+}
+
+function FilesPane({ session, target, onTargetChange }: { session: TodeXSession; target?: OpenPanelOptions; onTargetChange?: (target: OpenPanelOptions) => void }) {
+  const targetChangeRef = useRef(onTargetChange);
+  targetChangeRef.current = onTargetChange;
+  const [entries, setEntries] = useState<FileTreeEntry[]>([]);
+  const [selected, setSelected] = useState('');
+  const [expandedKeys, setExpandedKeys] = useState<Selection>(new Set());
+  const [file, setFile] = useState<PreviewFile | null>(null);
+  const [fileLoading, setFileLoading] = useState(false);
+  const fileRequestRef = useRef(0);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [treeCollapsed, setTreeCollapsed] = useState(false);
+  const treePanelRef = useRef<PanelImperativeHandle>(null);
+  const appliedTargetRef = useRef<OpenPanelOptions | undefined>(undefined);
+  const defaultPath = session.activeWorkspace?.path || '';
+  const [currentPath, setCurrentPath] = useState(defaultPath);
+  const [pathDraft, setPathDraft] = useState(defaultPath);
+  useNoticeToast(error, { variant: 'danger', scope: currentPath });
+
+  useEffect(() => {
+    const next = session.activeWorkspace?.path || '';
+    setCurrentPath(next);
+    setPathDraft(next);
+  }, [session.activeWorkspace?.path]);
+
+  const rootName = useMemo(() => {
+    if (!currentPath) return 'workspace';
+    return currentPath.split(/[/\\]/).filter(Boolean).pop() || currentPath;
+  }, [currentPath]);
+
+  const readFile = useCallback(async (path: string, sourceTarget?: OpenPanelOptions) => {
+    targetChangeRef.current?.(sourceTarget ?? { filePath: path });
+    const request = ++fileRequestRef.current;
+    setSelected(path);
+    setFile(null);
+    setFileLoading(true);
+    setError('');
+    const api = new V2ApiClient({ serverUrl: session.settings.serverUrl, authToken: session.settings.authToken });
+    try {
+      const next = await api.readWorkspaceFile(path);
+      if (request === fileRequestRef.current) setFile(next);
+    } catch (reason) {
+      if (request === fileRequestRef.current) setError(reason instanceof Error ? reason.message : '文件读取失败');
+    } finally {
+      if (request === fileRequestRef.current) setFileLoading(false);
+    }
+  }, [session.settings.authToken, session.settings.serverUrl]);
+
+  useEffect(() => () => { fileRequestRef.current += 1; }, []);
+
+  const addReferenceToChat = useCallback((selection: ReferenceSelection) => {
+    const conversationId = session.activeConversation?.id;
+    if (!conversationId || !file) {
+      toast.danger('请先选择一个对话，再添加引用');
+      return;
+    }
+    const baseName = file.name || file.path.split(/[\\/]/).pop() || file.path;
+    const base = selection.lineStart
+      ? `${baseName}:${selection.lineStart}${selection.lineEnd && selection.lineEnd !== selection.lineStart ? `-${selection.lineEnd}` : ''}`
+      : `${baseName} 摘录`;
+    const draft = session.chatDrafts[conversationId] ?? '';
+    const name = uniqueReferenceName(base, session.composerAttachments[conversationId] ?? [], draft);
+    session.setConversationAttachments(conversationId, (current) => [...current, {
+      id: attachmentId(), kind: 'reference', name, mimeType: 'text/plain',
+      sizeBytes: new TextEncoder().encode(selection.text).length, dataUrl: '',
+      textContent: selection.text, source: 'preview', path: file.path,
+      ...(selection.lineStart ? { lineStart: selection.lineStart, lineEnd: selection.lineEnd ?? selection.lineStart } : {}),
+    }]);
+    const token = referenceToken(name);
+    session.setConversationChatDraft(conversationId, (current) => current ? `${current}\n${token}` : token);
+    toast.success(`已添加引用 ${name}`);
+  }, [file, session]);
+
+  const loadDirectory = useCallback(async (directory: string) => {
+    setLoading(true);
+    setError('');
+    const api = new V2ApiClient({ serverUrl: session.settings.serverUrl, authToken: session.settings.authToken });
+    try {
+      const snapshot = await api.listWorkspaceEntries(directory, '', 100);
+      const children = snapshot.entries
+        .map((entry) => ({ ...entry, path: absoluteEntryPath(directory, entry.path) }))
+        .sort((left, right) => Number(right.kind === 'directory') - Number(left.kind === 'directory') || left.name.localeCompare(right.name));
+      setEntries((current) => directory === currentPath ? children : replaceFileTreeChildren(current, directory, children));
+      setExpandedKeys((current) => new Set([...current, directory]));
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : '目录读取失败');
+    } finally {
+      setLoading(false);
+    }
+  }, [currentPath, session.settings.authToken, session.settings.serverUrl]);
+
+  useEffect(() => {
+    setEntries([]);
+    setSelected('');
+    setFile(null);
+    setExpandedKeys(new Set());
+    appliedTargetRef.current = undefined;
+    fileRequestRef.current += 1;
+    setFileLoading(false);
+    if (currentPath) void loadDirectory(currentPath);
+  }, [currentPath, loadDirectory]);
+
+  const handleNavigatePath = (path: string) => {
+    const trimmed = path.trim();
+    if (!trimmed) return;
+    setCurrentPath(trimmed);
+  };
+
+  useEffect(() => {
+    if (!target?.filePath || target === appliedTargetRef.current) return;
+    appliedTargetRef.current = target;
+    void readFile(target.filePath, target);
+  }, [readFile, target]);
+
+  const handleAction = async (key: string) => {
+    const entry = findFileTreeEntry(entries, key);
+    if (!entry) return;
+    if (entry.kind === 'directory') {
+      if (!entry.children) await loadDirectory(entry.path);
+      setExpandedKeys((current) => new Set([...current, entry.path]));
+    } else {
+      await readFile(entry.path);
+    }
+  };
+
+  const renderEntry = (entry: FileTreeEntry): ReactNode => (
+    <FileTree.Item
+      key={entry.path}
+      icon={entry.kind === 'directory' ? <RiFolder3Line /> : <RiFileTextLine />}
+      id={entry.path}
+      textValue={entry.name}
+      title={entry.name}
+    >
+      {entry.children?.map(renderEntry)}
+    </FileTree.Item>
+  );
+
+  const toggleTree = () => {
+    if (treePanelRef.current?.isCollapsed()) treePanelRef.current.expand();
+    else treePanelRef.current?.collapse();
+  };
+
+  return (
+    <div className="flex h-full min-h-0 flex-col px-4 pb-4 pt-3">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            handleNavigatePath(pathDraft);
+          }}
+          className="min-w-0 flex-1"
+        >
+          <TextField aria-label="路径" className="w-full" value={pathDraft} onChange={setPathDraft}>
+            <Input placeholder="/path/to/directory..." className="text-xs" />
+          </TextField>
+        </form>
+        <div className="flex shrink-0 items-center gap-2">
+          <Button
+            size="sm"
+            variant="tertiary"
+            isDisabled={!currentPath || loading}
+            onPress={() => currentPath && void loadDirectory(currentPath)}
+            aria-label="刷新目录"
+            className="expandable-action-btn"
+          >
+            <span className="expandable-action-btn__icon">
+              <RiRefreshLine className="size-4" />
+            </span>
+            <span className="expandable-action-btn__label">刷新</span>
+          </Button>
+          <Button
+            size="sm"
+            variant="tertiary"
+            onPress={toggleTree}
+            aria-label={treeCollapsed ? '显示文件树' : '收起文件树'}
+            className="expandable-action-btn"
+          >
+            <span className="expandable-action-btn__icon">
+              {treeCollapsed ? <RiArrowRightDoubleLine className="size-4" /> : <RiArrowLeftDoubleLine className="size-4" />}
+            </span>
+            <span className="expandable-action-btn__label">{treeCollapsed ? '展开文件树' : '收起文件树'}</span>
+          </Button>
+        </div>
+      </div>
+      <Resizable autoSaveId="todex.files-pane" className="min-h-0 flex-1 gap-3" onLayoutChange={() => setTreeCollapsed(Boolean(treePanelRef.current?.isCollapsed()))}>
+        <Resizable.Panel
+          id="file-tree"
+          handleRef={treePanelRef}
+          defaultSize="30%"
+          minSize="18%"
+          maxSize="50%"
+          collapsedSize="0px"
+          collapsible
+          onCollapse={() => setTreeCollapsed(true)}
+          onExpand={() => setTreeCollapsed(false)}
+          className="min-h-0"
+        >
+          <ScrollShadow className="bg-surface-secondary h-full min-h-0 rounded-xl p-2">
+          <FileTree
+            aria-label="工作区文件"
+            className="w-full"
+            selectedKeys={selected ? new Set([selected]) : new Set()}
+            expandedKeys={expandedKeys}
+            selectionMode="single"
+            selectionBehavior="replace"
+            onSelectionChange={(keys: Selection) => {
+              const key = keys === 'all' ? '' : String([...keys][0] ?? '');
+              if (key) void handleAction(key);
+            }}
+            onExpandedChange={setExpandedKeys}
+          >
+            <FileTree.Item icon={<RiFolder3Line />} id={currentPath || 'root'} textValue={rootName} title={rootName}>
+              {entries.map(renderEntry)}
+            </FileTree.Item>
+          </FileTree>
+          </ScrollShadow>
+        </Resizable.Panel>
+        <Resizable.Handle type="pill" withIndicator aria-label="调整文件树宽度" />
+        <Resizable.Panel defaultSize="70%" minSize="50%" className="min-h-0">
+          <ScrollShadow className="bg-surface-secondary h-full min-h-0 rounded-xl p-3">
+            <p className="text-muted mb-2 truncate text-xs">{selected || '选择文件预览'}</p>
+            {fileLoading ? <Spinner size="sm" aria-label="正在读取文件" /> : error ? null : <WorkspaceFilePreview file={file} onAddReference={addReferenceToChat} />}
+          </ScrollShadow>
+        </Resizable.Panel>
+      </Resizable>
+    </div>
+  );
+}

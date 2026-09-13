@@ -1,0 +1,110 @@
+{
+  "checkedAt": "2026-09-10",
+  "desktop": [
+    {
+      "version": "v2.0.0",
+      "url": "https://github.com/youtonghy/TodeX_desktop/releases/tag/v2.0.0",
+      "assets": [
+        {
+          "name": "SHA256SUMS",
+          "url": "https://github.com/youtonghy/TodeX_desktop/releases/download/v2.0.0/SHA256SUMS",
+          "size": 479
+        },
+        {
+          "name": "TodeX-v2.0.0-linux-x86_64.AppImage",
+          "url": "https://github.com/youtonghy/TodeX_desktop/releases/download/v2.0.0/TodeX-v2.0.0-linux-x86_64.AppImage",
+          "size": 160526153
+        },
+        {
+          "name": "TodeX-v2.0.0-macos-arm64.dmg",
+          "url": "https://github.com/youtonghy/TodeX_desktop/releases/download/v2.0.0/TodeX-v2.0.0-macos-arm64.dmg",
+          "size": 161892281
+        },
+        {
+          "name": "TodeX-v2.0.0-windows-arm64.exe",
+          "url": "https://github.com/youtonghy/TodeX_desktop/releases/download/v2.0.0/TodeX-v2.0.0-windows-arm64.exe",
+          "size": 126471413
+        },
+        {
+          "name": "TodeX-v2.0.0-windows-x64.exe",
+          "url": "https://github.com/youtonghy/TodeX_desktop/releases/download/v2.0.0/TodeX-v2.0.0-windows-x64.exe",
+          "size": 132562671
+        },
+        {
+          "name": "TodeX-v2.0.0-windows.exe",
+          "url": "https://github.com/youtonghy/TodeX_desktop/releases/download/v2.0.0/TodeX-v2.0.0-windows.exe",
+          "size": 258466010
+        }
+      ]
+    }
+  ],
+  "backend": [
+    {
+      "version": "v2.0.1",
+      "url": "https://github.com/youtonghy/TodeX_backend/releases/tag/v2.0.1",
+      "assets": [
+        {
+          "name": "SHA256SUMS",
+          "url": "https://github.com/youtonghy/TodeX_backend/releases/download/v2.0.1/SHA256SUMS",
+          "size": 622
+        },
+        {
+          "name": "todex-agentd-v2.0.1-linux-x64-gnu.bin",
+          "url": "https://github.com/youtonghy/TodeX_backend/releases/download/v2.0.1/todex-agentd-v2.0.1-linux-x64-gnu.bin",
+          "size": 31112248
+        },
+        {
+          "name": "todex-agentd-v2.0.1-linux-x64-gnu.tar.gz",
+          "url": "https://github.com/youtonghy/TodeX_backend/releases/download/v2.0.1/todex-agentd-v2.0.1-linux-x64-gnu.tar.gz",
+          "size": 10313350
+        },
+        {
+          "name": "todex-agentd-v2.0.1-macos-arm64.bin",
+          "url": "https://github.com/youtonghy/TodeX_backend/releases/download/v2.0.1/todex-agentd-v2.0.1-macos-arm64.bin",
+          "size": 25708224
+        },
+        {
+          "name": "todex-agentd-v2.0.1-macos-arm64.tar.gz",
+          "url": "https://github.com/youtonghy/TodeX_backend/releases/download/v2.0.1/todex-agentd-v2.0.1-macos-arm64.tar.gz",
+          "size": 9202310
+        },
+        {
+          "name": "todex-agentd-v2.0.1-windows-x64.exe",
+          "url": "https://github.com/youtonghy/TodeX_backend/releases/download/v2.0.1/todex-agentd-v2.0.1-windows-x64.exe",
+          "size": 26664960
+        },
+        {
+          "name": "todex-agentd-v2.0.1-windows-x64.zip",
+          "url": "https://github.com/youtonghy/TodeX_backend/releases/download/v2.0.1/todex-agentd-v2.0.1-windows-x64.zip",
+          "size": 8903461
+        }
+      ]
+    },
+    {
+      "version": "v2.0.0",
+      "url": "https://github.com/youtonghy/TodeX_backend/releases/tag/v2.0.0",
+      "assets": [
+        {
+          "name": "SHA256SUMS",
+          "url": "https://github.com/youtonghy/TodeX_backend/releases/download/v2.0.0/SHA256SUMS",
+          "size": 314
+        },
+        {
+          "name": "todex-agentd-v2.0.0-linux-x64-gnu.tar.gz",
+          "url": "https://github.com/youtonghy/TodeX_backend/releases/download/v2.0.0/todex-agentd-v2.0.0-linux-x64-gnu.tar.gz",
+          "size": 9007947
+        },
+        {
+          "name": "todex-agentd-v2.0.0-macos-arm64.tar.gz",
+          "url": "https://github.com/youtonghy/TodeX_backend/releases/download/v2.0.0/todex-agentd-v2.0.0-macos-arm64.tar.gz",
+          "size": 8023531
+        },
+        {
+          "name": "todex-agentd-v2.0.0-windows-x64.zip",
+          "url": "https://github.com/youtonghy/TodeX_backend/releases/download/v2.0.0/todex-agentd-v2.0.0-windows-x64.zip",
+          "size": 7665750
+        }
+      ]
+    }
+  ]
+}

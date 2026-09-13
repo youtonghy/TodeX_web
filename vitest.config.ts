@@ -1,0 +1,20 @@
+import { resolve } from 'node:path';
+import { defineConfig } from 'vitest/config';
+
+const webRoot = import.meta.dirname;
+
+export default defineConfig({
+  resolve: {
+    alias: {
+      '@renderer': resolve(webRoot, 'src/renderer'),
+      '@todex/protocol': resolve(webRoot, '../TodeX_app/src/lib'),
+      '@react-native-community/netinfo': resolve(webRoot, 'src/renderer/stubs/netinfo.ts'),
+    },
+  },
+  test: {
+    environment: 'jsdom',
+    include: ['tests/unit/**/*.test.ts'],
+    clearMocks: true,
+    restoreMocks: true,
+  },
+});

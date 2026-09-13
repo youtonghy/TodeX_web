@@ -1,0 +1,1042 @@
+import { PiExtensionPanel } from '../components/PiExtensionPanel';
+import { piCommandCompatibility, piTodexCommands } from '../session/providerCommands';
+import { ConversationControls } from '../components/ConversationControls';
+import { NoticeToast } from '../components/NoticeToast';
+import { RiArrowDownDoubleLine, RiAttachment2, RiBarChartBoxLine, RiClipboardLine, RiCpuLine, RiGitBranchLine, RiListCheck2, RiShieldLine, RiStopCircleLine } from '@remixicon/react';
+import { useEffect, useRef, useState } from 'react';
+import type { KeyboardEvent } from 'react';
+import { Button, Label, ListBox, Popover, ScrollShadow, Select, Tooltip, toast } from '@heroui/react';
+import { ChainOfThought, ChatAttachment, ChatAttachmentGroup, ChatAttachmentInput, ChatMessage, HoverCard, PromptInput } from '@heroui-pro/react';
+import { ChatMessageActions } from '@heroui-pro/react/chat-message-actions';
+import { ChatTool } from '@heroui-pro/react/chat-tool';
+import { Markdown } from '@heroui-pro/react/markdown';
+import { providerDisplayName, type ProviderKind, type PermissionMode } from '@todex/protocol/v2';
+import { ConversationPermissionActions, ConversationPromptInput, ConversationRunStatus, TurnUsageSummary } from '../components/ConversationRunStatus';
+import { ReferenceComposer, type ReferenceComposerHandle } from '../components/ReferenceComposer';
+import { activeChatProcessId, buildChatRenderItems, isChatTimelineEntry, isChatToolEntry, latestIncomingEntryIds } from '../components/conversationTimeline';
+import { ModelReasoningCard } from '../components/ModelReasoningCard';
+import { ProviderIcon } from '../components/ProviderIcon';
+import type { TodeXSession } from '../session/useTodeXSession';
+import {
+  conversationPermissionMode,
+  conversationPermissionCapabilities,
+  attachmentId,
+  canSwitchConversationAgent,
+  conversationImageInputSupport,
+  inferMimeType,
+  isImageMimeType,
+  isStepProgressEntry,
+  isV2Conversation,
+  MAX_COMPOSER_ATTACHMENTS,
+  SLASH_COMMANDS,
+  findMentionTrigger,
+  buildMentionSuggestions,
+  insertMention,
+  canonicalSlashCommand,
+  modelDisplayLabel,
+  reasoningEffortLabel,
+  workspaceLinkTarget,
+  referencePreview,
+  referenceToken,
+  uniqueReferenceName,
+} from '../session/helpers';
+import { selectionInside } from '../lib/selection';
+import { findCapabilityHashTrigger } from '@todex/protocol/todex';
+
+type Props = {
+  session: TodeXSession;
+};
+
+const MAX_WEB_IMAGE_BYTES = 2_500_000;
+const MAX_WEB_TEXT_BYTES = 512 * 1024;
+const COMPOSER_IMAGE_ACCEPT = 'image/png,image/jpeg,image/gif,image/webp';
+const COMPOSER_TEXT_ACCEPT = 'text/*,.md,.mdx,.json,.yaml,.yml,.toml,.csv,.tsv,.ts,.tsx,.js,.jsx,.css,.html,.xml,.svg,.sh,.py,.rs,.go,.java,.kt,.swift';
+const SUPPORTED_COMPOSER_IMAGE_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
+
+function isSupportedComposerImage(mimeType: string): boolean {
+  return SUPPORTED_COMPOSER_IMAGE_MIME_TYPES.has(mimeType.trim().toLowerCase());
+}
+
+function isTextFile(file: File): boolean {
+  return file.type.startsWith('text/') || /\.(md|mdx|txt|json|ya?ml|toml|csv|tsv|tsx?|jsx?|css|html?|xml|svg|sh|py|rs|go|java|kt|swift)$/i.test(file.name);
+}
+
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error ?? new Error('无法读取图片'));
+    reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '');
+    reader.readAsDataURL(file);
+  });
+}
+
+function clipboardFiles(data: DataTransfer): File[] {
+  const files = Array.from(data.items)
+    .filter((item) => item.kind === 'file')
+    .flatMap((item) => {
+      const file = item.getAsFile();
+      return file ? [file] : [];
+    });
+  return files.length > 0 ? files : Array.from(data.files);
+}
+
+function attachmentName(file: File, index: number, mimeType: string, source: 'clipboard' | 'file'): string {
+  if (file.name.trim()) return file.name;
+  const extension = mimeType === 'image/jpeg' ? 'jpg'
+    : mimeType === 'image/gif' ? 'gif'
+      : mimeType === 'image/webp' ? 'webp'
+        : mimeType === 'image/png' ? 'png'
+          : 'bin';
+  return `${source === 'clipboard' ? 'pasted' : 'attachment'}-${index + 1}.${extension}`;
+}
+
+function toolPresentation(raw: string) {
+  try {
+    const value = JSON.parse(raw) as Record<string, unknown>;
+    const toolName = typeof value.toolName === 'string' ? value.toolName
+      : typeof value.tool === 'string' ? value.tool
+        : typeof value.command === 'string' ? '命令执行' : '工具调用';
+    const args = value.arguments ?? value.input ?? (typeof value.command === 'string' ? { command: value.command } : {});
+    return { toolName, argsText: typeof args === 'string' ? args : JSON.stringify(args, null, 2) };
+  } catch {
+    return { toolName: '工具调用', argsText: raw };
+  }
+}
+
+const PERMISSION_LABELS: Record<PermissionMode, string> = {
+  ask: '请求审批',
+  auto: '自动审批',
+  'full-access': '完全访问',
+};
+
+function formatTokenCount(value: number): string {
+  return new Intl.NumberFormat('zh-CN', { notation: value >= 10_000 ? 'compact' : 'standard', maximumFractionDigits: 1 }).format(value);
+}
+
+function isImeCompositionKey(event: KeyboardEvent): boolean {
+  // WebKit may expose an active IME key as 229 even when isComposing is false.
+  return event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229;
+}
+
+function isChatReminderEntry(entry: { subtitle: string; title: string }): boolean {
+  return entry.subtitle.includes('本地会话启动超时')
+    || entry.title === '本地会话启动超时'
+    || entry.subtitle.trim() === 'codex.local.start';
+}
+
+function ContextUsageIndicator({
+  usedTokens,
+  contextWindow,
+  inputTokens,
+  outputTokens,
+  cachedInputTokens,
+  cacheWriteTokens,
+}: {
+  usedTokens: number;
+  contextWindow?: number;
+  inputTokens: number;
+  outputTokens: number;
+  cachedInputTokens: number;
+  cacheWriteTokens: number;
+}) {
+  const percent = contextWindow ? Math.min(100, Math.max(0, usedTokens / contextWindow * 100)) : null;
+  const progress = percent ?? 0;
+  return (
+    <Tooltip delay={100}>
+      <Tooltip.Trigger>
+        <Button
+          isIconOnly
+          variant="ghost"
+          className="context-usage-ring min-w-0 p-0"
+          aria-label={percent === null ? '上下文用量等待 Provider 返回' : `上下文已使用 ${percent.toFixed(1)}%`}
+          style={{ background: `conic-gradient(var(--accent) ${progress}%, var(--separator) ${progress}% 100%)` }}
+        >
+          <span />
+        </Button>
+      </Tooltip.Trigger>
+      <Tooltip.Content>
+        <div className="min-w-48 space-y-1 p-1 text-xs">
+          <p className="font-medium">上下文使用情况</p>
+          {percent === null ? <p className="text-muted">等待 Provider 返回上下文窗口。</p> : (
+            <>
+              <p>{formatTokenCount(usedTokens)} / {formatTokenCount(contextWindow!)} tokens · {percent.toFixed(1)}%</p>
+              <p className="text-muted">输入 {formatTokenCount(inputTokens)} · 输出 {formatTokenCount(outputTokens)}</p>
+              <p className="text-muted">缓存读取 {formatTokenCount(cachedInputTokens)} · 缓存写入 {formatTokenCount(cacheWriteTokens)}</p>
+            </>
+          )}
+        </div>
+      </Tooltip.Content>
+    </Tooltip>
+  );
+}
+
+function AgentMessageActions({
+  conversationId,
+  entry,
+  session,
+}: {
+  conversationId: string;
+  entry: { id: string; subtitle: string; at: number; turnId?: string };
+  session: TodeXSession;
+}) {
+  const conversation = session.conversations.find(item => item.id === conversationId);
+  const provider = session.v2Providers.find(item => item.id === conversation?.provider);
+  const canFork = provider?.capabilities.controlActions?.includes('fork') === true;
+  const records = entry.turnId ? session.usageRecords.filter(record =>
+    (record.conversationId === conversationId || record.conversationId === conversation?.v2ConversationId)
+    && record.turnId === entry.turnId) : [];
+
+  return (
+    <ChatMessageActions className="mt-1">
+      <ChatMessageActions.Copy
+        aria-label="复制回复"
+        tooltip="复制回复"
+        onPress={() => void navigator.clipboard.writeText(entry.subtitle)
+          .then(() => toast.success('已复制回复'))
+          .catch(() => toast.danger('复制失败，请重试'))}
+      >
+        <RiClipboardLine aria-hidden="true" />
+      </ChatMessageActions.Copy>
+      <ChatMessage.Action
+        isIconOnly
+        size="sm"
+        variant="ghost"
+        aria-label="Fork 对话"
+        tooltip={canFork ? "Fork 对话" : "当前 Agent 未声明支持分叉"}
+        isDisabled={!canFork}
+        onPress={() => session.forkConversation(conversationId)}
+      >
+        <RiGitBranchLine aria-hidden="true" />
+      </ChatMessage.Action>
+      <HoverCard>
+        <HoverCard.Trigger>
+          <ChatMessage.Action isIconOnly size="sm" variant="ghost" aria-label="查看回复统计">
+            <RiBarChartBoxLine aria-hidden="true" />
+          </ChatMessage.Action>
+        </HoverCard.Trigger>
+        <HoverCard.Content>
+          <HoverCard.Arrow />
+          <TurnUsageSummary records={records} />
+        </HoverCard.Content>
+      </HoverCard>
+    </ChatMessageActions>
+  );
+}
+
+export function ChatPanel({ session }: Props) {
+  const conversation = session.activeConversation;
+  const workspace = session.activeWorkspace;
+  const draft = conversation ? (session.chatDrafts[conversation.id] ?? '') : '';
+  const composerRef = useRef<ReferenceComposerHandle>(null);
+  const mention = findMentionTrigger(draft, conversation ? (session.composerSelections[conversation.id]?.end ?? draft.length) : 0);
+  const [mentionSuggestions, setMentionSuggestions] = useState<Array<{ id: string; title: string; description: string; insertText: string }>>([]);
+  const [suggestionIndex, setSuggestionIndex] = useState(0);
+  const [isDraggingAttachment, setIsDraggingAttachment] = useState(false);
+  const isComposingRef = useRef(false);
+  useEffect(() => {
+    let active = true;
+    if (!mention || !workspace) {
+      setMentionSuggestions([]);
+      return () => { active = false; };
+    }
+    void session.fetchWorkspaceEntries(workspace.path, mention.query)
+      .then((result) => {
+        if (active) setMentionSuggestions(buildMentionSuggestions(mention, result.entries));
+      })
+      .catch(() => {
+        if (active) setMentionSuggestions([]);
+      });
+    return () => { active = false; };
+  }, [mention?.query, mention?.start, workspace?.path, session.fetchWorkspaceEntries]);
+  const messagesRef = useRef<HTMLDivElement>(null);
+  const [quote, setQuote] = useState<{ text: string; left: number; top: number; messageId?: string } | null>(null);
+  useEffect(() => {
+    const update = () => {
+      const container = messagesRef.current;
+      const inside = container ? selectionInside(container) : null;
+      if (!inside) {
+        setQuote(null);
+        return;
+      }
+      const anchor = window.getSelection()?.anchorNode;
+      const element = anchor instanceof Element ? anchor : anchor?.parentElement;
+      const messageId = element?.closest('[data-message-id]')?.getAttribute('data-message-id') ?? undefined;
+      setQuote({ ...inside, messageId });
+    };
+    const hide = () => setQuote(null);
+    document.addEventListener('selectionchange', update);
+    document.addEventListener('scroll', hide, true);
+    return () => {
+      document.removeEventListener('selectionchange', update);
+      document.removeEventListener('scroll', hide, true);
+    };
+  }, []);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const atBottomRef = useRef(true);
+  const [isAtBottom, setIsAtBottom] = useState(true);
+  const scrollToLatest = (behavior: ScrollBehavior = 'auto') => {
+    const element = scrollRef.current;
+    if (element) element.scrollTo({ top: element.scrollHeight, behavior });
+  };
+  const updateScrollPosition = () => {
+    const element = scrollRef.current;
+    if (!element) return;
+    const atBottom = element.scrollHeight - element.scrollTop - element.clientHeight < 120;
+    atBottomRef.current = atBottom;
+    setIsAtBottom(atBottom);
+  };
+  useEffect(() => {
+    atBottomRef.current = true;
+    setIsAtBottom(true);
+    scrollToLatest();
+  }, [conversation?.id]);
+  useEffect(() => {
+    if (atBottomRef.current) scrollToLatest();
+  }, [session.timeline]);
+  if (!conversation || !workspace) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center px-8 text-center">
+        <p className="text-sm font-medium">选择一个对话</p>
+        <p className="text-muted mt-1 max-w-sm text-sm">从左侧打开工作区和对话，或新建后开始聊天。</p>
+      </div>
+    );
+  }
+
+  const attachments = session.composerAttachments[conversation.id] ?? [];
+  const fileAttachments = attachments.filter((attachment) => attachment.kind !== 'reference');
+  const chatEntries = [...session.timeline.filter((entry) => entry.conversationId === conversation.id)]
+    .filter((entry) => isChatTimelineEntry(entry) && !isChatReminderEntry(entry))
+    .sort((left, right) => {
+      if (left.sequence !== undefined && right.sequence !== undefined && left.sequence !== right.sequence) {
+        return left.sequence - right.sequence;
+      }
+      return left.at - right.at;
+    });
+  const items = buildChatRenderItems(chatEntries);
+  const actionableIncoming = latestIncomingEntryIds(chatEntries);
+  const currentProvider = isV2Conversation(conversation) ? conversation.provider || '' : '';
+  const agentProvider = conversation.provider || (isV2Conversation(conversation) ? '' : 'codex');
+  const slashTrigger = draft.trim().startsWith('/') ? draft.trim() : '';
+  const commandCatalog = session.getProviderCommandCatalog(conversation.id);
+  const liveCommands = commandCatalog?.status === 'ready' ? commandCatalog.commands : [];
+  const providerSlashCatalog = liveCommands.length > 0
+    ? liveCommands.map((item) => ({
+      command: `/${item.name}`,
+      title: item.name,
+      description: `${item.description || `${item.source} command`}${currentProvider === 'pi' ? ` · ${piCommandCompatibility(item).label}` : ''}`,
+      category: 'context' as const,
+    }))
+    : currentProvider === 'pi' ? [] : SLASH_COMMANDS;
+  const canCompact = !isV2Conversation(conversation)
+    || session.v2Providers.find(item => item.id === currentProvider)?.capabilities.controlActions?.includes('compact') === true;
+  const slashCatalog = currentProvider === 'pi' ? [...providerSlashCatalog, ...piTodexCommands] : [
+    ...(canCompact ? [{ command: '/compact', title: '压缩上下文', description: '压缩上下文，保留关键进展', category: 'thread' as const }] : []),
+    ...providerSlashCatalog.filter(item => canonicalSlashCommand(item.command) !== '/compact'),
+  ];
+  const chooseSlashCommand = (command: string) => {
+    if (command === '/compact' && currentProvider !== 'pi') {
+      if (thinking || executionUnknown || submissionStatus === 'sending' || compaction?.status === 'running') return;
+      session.sendSlashCommand(command, conversation.id);
+      session.setConversationChatDraft(conversation.id, '');
+    } else session.setConversationChatDraft(conversation.id, `${command} `);
+  };
+  const selectingPiCommand = /^\/[^\s]*$/.test(draft.trimStart()) || /^\/todex [^\s]*$/.test(draft.trimStart());
+  const slashSuggestions = slashTrigger && (currentProvider !== 'pi' || selectingPiCommand)
+    ? slashCatalog.filter(item => currentProvider === 'pi'
+      ? item.command.startsWith(slashTrigger.startsWith('/todex ') ? slashTrigger : slashTrigger.split(/\s+/)[0])
+      : canonicalSlashCommand(item.command).startsWith(canonicalSlashCommand(slashTrigger.split(/\s+/)[0] || slashTrigger)))
+    : [];
+  const suggestionCount = slashSuggestions.length > 0 ? Math.min(12, slashSuggestions.length) : mentionSuggestions.length;
+  const applySuggestion = (index: number) => {
+    if (slashSuggestions.length > 0) {
+      const item = slashSuggestions[index];
+      if (item) chooseSlashCommand(item.command);
+      return;
+    }
+    const item = mentionSuggestions[index];
+    if (!item || !mention) return;
+    session.setConversationChatDraft(conversation.id, insertMention(draft, mention, item.insertText));
+    const cursor = mention.start + item.insertText.length;
+    session.setConversationComposerSelection(conversation.id, { start: cursor, end: cursor });
+    composerRef.current?.focus(cursor);
+  };
+  const handleSuggestionKeyDown = (event: KeyboardEvent) => {
+    if (isComposingRef.current || isImeCompositionKey(event)) return;
+    if (!suggestionCount) return;
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      setSuggestionIndex((current) => (current + (event.key === 'ArrowDown' ? 1 : -1) + suggestionCount) % suggestionCount);
+    } else if (event.key === 'Enter') {
+      event.preventDefault();
+      applySuggestion(suggestionIndex);
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
+      setSuggestionIndex(0);
+    }
+  };
+  const capability = findCapabilityHashTrigger(draft, session.composerSelections[conversation.id]?.end ?? draft.length);
+  const thinking = session.thinkingConversations[conversation.id] === true;
+  const submissionStatus = session.submissionStatusByConversation[conversation.id];
+  const executionUnknown = submissionStatus === 'unknown';
+  const runtime = session.conversationRuntimeById[conversation.id];
+  const sessionPermissionIds = new Set((runtime?.pendingPermissions ?? []).filter(item => item.scope === 'session').map(item => item.id));
+  const pendingPermissionIds = new Set((runtime?.pendingPermissions ?? []).map(item => item.id));
+  const permissionRequests = session.pendingRequests.filter(item => item.requestId && pendingPermissionIds.has(item.requestId));
+  const compaction = session.compactionByConversation[conversation.id];
+  const conversationTimeline = session.timeline.filter((entry) => entry.conversationId === conversation.id);
+  const canSwitchAgent = canSwitchConversationAgent(conversation, {
+    timeline: conversationTimeline,
+    thinking,
+  });
+  const agentLabel = agentProvider
+    ? providerDisplayName(agentProvider, 'Agent')
+    : 'Agent';
+  const availableProviders = session.v2Providers.filter((item) => item.available);
+  const providerDescriptor = session.v2Providers.find((item) => item.id === currentProvider);
+  const providerModels = session.providerModels[currentProvider as ProviderKind] ?? providerDescriptor?.models ?? [];
+  const imageInputSupport = conversationImageInputSupport(conversation, session.v2Providers, {
+    models: providerModels,
+    profileCapability: session.providerImageInput[conversation.id],
+  });
+  const hasBlockedImageAttachment = !imageInputSupport.supported
+    && attachments.some((attachment) => attachment.kind === 'image');
+  const attachmentAccept = imageInputSupport.supported
+    ? `${COMPOSER_IMAGE_ACCEPT},${COMPOSER_TEXT_ACCEPT}`
+    : COMPOSER_TEXT_ACCEPT;
+  const currentModel = conversation.model || providerModels.find((item) => item.isDefault)?.id || (currentProvider === 'codex' ? workspace.model || session.settings.defaultModel : '');
+  const currentModelDescriptor = providerModels.find((item) => item.id === currentModel);
+  const supportedReasoningEfforts = currentModelDescriptor?.supportedReasoningEfforts ?? [];
+  // An unset Pi/agent effort is meaningful: let the provider apply its own default.
+  const currentReasoningEffort = conversation.reasoningEffort ?? null;
+  const displayedReasoningEffort = currentReasoningEffort
+    ?? currentModelDescriptor?.defaultReasoningEffort
+    ?? (supportedReasoningEfforts.includes('medium') ? 'medium' : supportedReasoningEfforts[0])
+    ?? null;
+  const reasoningIndex = Math.max(0, supportedReasoningEfforts.indexOf(displayedReasoningEffort ?? ''));
+  const fastEnabled = workspace.serviceTier === 'priority' || workspace.serviceTier === 'fast';
+  const contextUsage = session.contextUsageByConversation[conversation.id];
+  const contextModelId = contextUsage?.model || currentModel;
+  const currentContextWindow = contextUsage?.contextWindow
+    ?? providerModels.find((item) => item.id === contextModelId || item.id.endsWith(`/${contextModelId}`))?.contextWindow;
+  const permissionConfig = conversationPermissionCapabilities(conversation, session.v2Providers);
+  const permissionModes = (permissionConfig?.modes ?? []).filter((mode) => Object.hasOwn(PERMISSION_LABELS, mode));
+  const currentPermission = conversationPermissionMode(conversation, workspace, session.v2Providers);
+  const fixedPermission = permissionModes.length === 1;
+  const canChoosePermission = permissionModes.length > 0;
+  const permissionHint = agentProvider === 'pi' ? 'Pi 固定完全访问，无内建审批机制；访问范围由运行环境限制。'
+    : !canChoosePermission ? '当前后端尚未提供权限模式能力，请升级或检查 Agent 配置。'
+      : !currentPermission ? '当前权限配置需要重新选择后才能执行。'
+        : '权限和工作模式将在下次发送时应用。';
+
+  const isToolCallEntry = isChatToolEntry;
+
+  const addBrowserFiles = async (files: File[], source: 'clipboard' | 'file' = 'file') => {
+    const remaining = MAX_COMPOSER_ATTACHMENTS - attachments.length;
+    if (remaining <= 0) {
+      toast.danger(`一次最多附加 ${MAX_COMPOSER_ATTACHMENTS} 个文件`);
+      return;
+    }
+    const nextAttachments: (typeof attachments) = [];
+    let reachedLimit = false;
+    for (const [index, file] of files.entries()) {
+      if (nextAttachments.length >= remaining) {
+        reachedLimit = true;
+        break;
+      }
+      try {
+        const mimeType = file.type || inferMimeType(file.name);
+        const image = isSupportedComposerImage(mimeType);
+        if (image && !imageInputSupport.supported) {
+          throw new Error(imageInputSupport.reason || '当前 Agent 不支持图片输入');
+        }
+        if (!image && isImageMimeType(mimeType) && !isTextFile(file)) {
+          throw new Error('仅支持 PNG、JPEG、GIF 或 WebP 图片');
+        }
+        if (image && file.size > MAX_WEB_IMAGE_BYTES) throw new Error('图片不能超过 2.5 MB');
+        if (!image && (!isTextFile(file) || file.size > MAX_WEB_TEXT_BYTES)) {
+          throw new Error('仅支持 512 KB 以内的文本文件，其他文件请放入 Backend 工作区后用 @ 引用');
+        }
+        nextAttachments.push({
+          id: attachmentId(),
+          kind: image ? 'image' : 'file',
+          name: attachmentName(file, index, mimeType, source),
+          mimeType,
+          sizeBytes: file.size,
+          dataUrl: image ? await readFileAsDataUrl(file) : '',
+          textContent: image ? undefined : await file.text(),
+          source,
+        });
+      } catch (error) {
+        toast.danger(error instanceof Error ? error.message : '无法读取附件');
+      }
+    }
+    if (nextAttachments.length > 0) {
+      session.setConversationAttachments(conversation.id, (current) => [
+        ...current,
+        ...nextAttachments,
+      ].slice(0, MAX_COMPOSER_ATTACHMENTS));
+    }
+    if (reachedLimit) {
+      toast.danger(`一次最多附加 ${MAX_COMPOSER_ATTACHMENTS} 个文件`);
+    }
+  };
+
+  const submitComposer = () => {
+    if (executionUnknown || submissionStatus === 'sending') return;
+    if (hasBlockedImageAttachment) {
+      toast.danger('当前无法发送图片', { description: imageInputSupport.reason });
+      return;
+    }
+    if (currentProvider !== 'pi' && draft.trim().startsWith('/')) {
+      session.sendSlashCommand(draft, conversation.id);
+    } else session.submitChat(conversation.id);
+  };
+
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="relative min-h-0 flex-1">
+        <ScrollShadow ref={scrollRef} onScroll={updateScrollPosition} className="h-full px-5 py-5">
+        <div ref={messagesRef} className="mx-auto flex max-w-2xl flex-col gap-3">
+          {items.length === 0 ? (
+            <p className="text-muted py-16 text-center text-sm" role="status">
+              {thinking ? '正在工作'
+                : session.recoveringConversations[conversation.id] ? '正在恢复对话记录…'
+                  : '还没有消息。输入内容后发送。'}
+            </p>
+          ) : null}
+          {items.map((item) => {
+            if (item.type === 'executionGroup') {
+              const expanded = thinking && item.entries.some((entry) => entry.at >= (conversationTimeline.at(-1)?.at ?? 0));
+              return (
+                <ChainOfThought key={item.id} defaultExpanded={expanded} isStreaming={expanded} className="chat-process-trace min-w-0">
+                  <ChainOfThought.Trigger className="min-h-7 py-1 text-xs">执行步骤</ChainOfThought.Trigger>
+                  <ChainOfThought.Content>
+                    <ChainOfThought.Steps>
+                      {item.entries.map((entry) => (
+                        <ChainOfThought.Step key={entry.id} label={entry.title}>
+                          {isToolCallEntry(entry) ? (() => {
+                            const { toolName, argsText } = toolPresentation(entry.subtitle);
+                            return <ChatTool defaultExpanded={thinking} state={thinking ? 'input-streaming' : 'output-available'} toolName={toolName} argsText={argsText} />;
+                          })() : <p className="whitespace-pre-wrap text-xs">{entry.subtitle || entry.title}</p>}
+                        </ChainOfThought.Step>
+                      ))}
+                    </ChainOfThought.Steps>
+                  </ChainOfThought.Content>
+                </ChainOfThought>
+              );
+            }
+            const entry = item.entry;
+            if (isToolCallEntry(entry)) {
+              const { toolName, argsText } = toolPresentation(entry.subtitle);
+              return <ChatTool key={entry.id} defaultExpanded={thinking} state={thinking ? 'input-streaming' : 'output-available'} toolName={toolName} argsText={argsText} triggerPrefix={thinking ? '正在调用：' : '已调用：'} />;
+            }
+            const request = session.pendingRequests.find((pendingItem) => !sessionPermissionIds.has(pendingItem.requestId) && pendingItem.requestId && (entry.requestId === pendingItem.requestId || entry.raw.includes(pendingItem.requestId)));
+            const isUser = entry.kind === 'outgoing';
+            return (
+              <div key={entry.id} data-message-id={entry.id} className={`flex gap-3 py-1 ${isUser ? 'justify-end' : 'justify-start'}`}>
+                <div className={`min-w-0 max-w-[85%] ${isUser ? 'text-right' : ''}`}>
+                  {isUser ? <p className="text-muted text-xs font-medium">You</p> : entry.category === 'extension' ? <p className="text-muted text-xs font-medium">Pi 插件 · {entry.title}</p> : null}
+                  <div className={`${isUser ? 'mt-1' : ''} text-sm leading-6`}>
+                    {isUser ? <div className="flex flex-col items-end gap-2">
+                      {entry.sentAttachments?.length ? (
+                        <ChatAttachmentGroup aria-label="已发送的附件" className="justify-end text-left" role="list">
+                          {entry.sentAttachments.map((attachment) => (
+                            <ChatAttachment
+                              key={attachment.id}
+                              mimeType={attachment.mimeType}
+                              name={attachment.name}
+                              role="listitem"
+                              size={attachment.sizeBytes ?? undefined}
+                              src={attachment.previewUrl}
+                            >
+                              <ChatAttachment.Preview />
+                              <ChatAttachment.Info />
+                            </ChatAttachment>
+                          ))}
+                        </ChatAttachmentGroup>
+                      ) : null}
+                      {entry.subtitle ? <p className="whitespace-pre-wrap break-words">{entry.subtitle}</p> : null}
+                    </div> : (
+                      <Markdown
+                        id={entry.id}
+                        components={{
+                          a: ({ href, children, node: _node, ref: _ref, ...props }) => {
+                            const target = workspaceLinkTarget(href, workspace.path);
+                            return (
+                              <a
+                                {...props}
+                                href={href}
+                                onClick={(event) => {
+                                  if (!target) return;
+                                  event.preventDefault();
+                                  if (target.kind === 'browser-url') {
+                                    session.openPanel('Browser', { url: target.url });
+                                  } else {
+                                    session.openPanel('Files', { filePath: target.filePath });
+                                  }
+                                }}
+                              >
+                                {children}
+                              </a>
+                            );
+                          },
+                        }}
+                      >
+                        {entry.subtitle}
+                      </Markdown>
+                    )}
+                  </div>
+                  {entry.kind === 'incoming' && actionableIncoming.has(entry.id)
+                    ? <AgentMessageActions conversationId={conversation.id} entry={entry} session={session} />
+                    : null}
+                  {request ? (
+                    <ChatMessage.Actions>
+                      <ConversationPermissionActions request={request} onSelect={(option, data) => { session.sendApprovalResponse(option, request, data); }} />
+                    </ChatMessage.Actions>
+                  ) : null}
+                </div>
+                {isUser ? <ChatMessage.Avatar alt="You" fallback="You" /> : null}
+              </div>
+            );
+          })}
+        </div>
+        </ScrollShadow>
+        {isAtBottom ? null : (
+          <Button
+            size="sm"
+            variant="secondary"
+            className="absolute right-4 bottom-3 z-10 shadow-md"
+            onPress={() => scrollToLatest('smooth')}
+          >
+            <RiArrowDownDoubleLine className="size-4" />
+            前往最新
+          </Button>
+        )}
+      </div>
+      {quote ? (
+        <div className="fixed z-50 -translate-x-1/2" style={{ left: quote.left, top: quote.top }}>
+          <Button size="sm" variant="secondary" onPress={() => {
+            const existing = session.composerAttachments[conversation.id] ?? [];
+            const name = uniqueReferenceName('对话摘录', existing, draft);
+            session.setConversationAttachments(conversation.id, (current) => [...current, {
+              id: attachmentId(), kind: 'reference', name, mimeType: 'text/plain',
+              sizeBytes: new TextEncoder().encode(quote.text).length, dataUrl: '',
+              textContent: quote.text, source: 'message',
+              ...(quote.messageId ? { messageId: quote.messageId } : {}),
+            }]);
+            const token = referenceToken(name);
+            const selection = session.composerSelections[conversation.id] ?? { start: draft.length, end: draft.length };
+            session.setConversationChatDraft(conversation.id, draft.slice(0, selection.start) + token + draft.slice(selection.end));
+            const cursor = selection.start + token.length;
+            session.setConversationComposerSelection(conversation.id, { start: cursor, end: cursor });
+            composerRef.current?.focus(cursor);
+            window.getSelection()?.removeAllRanges();
+            setQuote(null);
+            toast.success('已添加引用');
+          }}>添加到对话</Button>
+        </div>
+      ) : null}
+      <div className="border-separator border-t px-5 py-4">
+        <div className="composer-container mx-auto max-w-2xl">
+          {currentProvider === 'pi' && runtime ? <PiExtensionPanel placement="aboveEditor"
+            extensionUi={runtime.extensionUi} providerRuntime={runtime.providerRuntime}
+            pendingEditorRequest={session.pendingPluginDrafts[conversation.id]}
+            onReplaceEditor={request => session.handlePluginDraft(conversation.id, request, true)}
+            onDismissEditor={request => session.handlePluginDraft(conversation.id, request, false)}
+            onStopRuntime={providerDescriptor?.capabilities.runtimeStop ? () => { void session.stopProviderRuntime(conversation.id); } : undefined}
+            isStopping={session.stoppingProviderRuntimes[conversation.id]}
+            isConnected={session.connectionState === 'open'} /> : null}
+          {permissionRequests.map(request => <div key={request.requestId} className="mb-3 rounded-xl border border-separator p-3">
+            <p className="mb-2 text-xs font-medium">{sessionPermissionIds.has(request.requestId) ? 'Pi 插件请求' : request.title || '权限审批'}</p>
+            <ConversationPermissionActions request={request} onSelect={(option, data) => { session.sendApprovalResponse(option, request, data); }} />
+          </div>)}
+          {currentProvider === 'pi' && slashTrigger ? <div className="mb-2 flex items-center gap-2 text-xs text-muted">
+            <span>{commandCatalog?.status === 'ready' ? `Pi 命令 · ${commandCatalog.source === 'session' ? '当前会话' : '工作区发现'}`
+              : commandCatalog?.status === 'error' ? '命令目录加载失败，草稿已保留' : '正在加载 Pi 命令…'}</span>
+            <Button size="sm" variant="ghost" isDisabled={commandCatalog?.status === 'loading'}
+              onPress={session.refreshProviderCommands}>刷新命令</Button>
+          </div> : null}
+          {(slashSuggestions.length > 0 || mentionSuggestions.length > 0 || (mention && mentionSuggestions.length === 0)) ? (
+            <div className="composer-suggestions-popover">
+              {slashSuggestions.length > 0 ? (
+                <ListBox
+                  aria-label="命令建议"
+                  onAction={(key) => {
+                    const item = slashSuggestions.find((candidate) => candidate.command === String(key));
+                    if (item) chooseSlashCommand(item.command);
+                  }}
+                >
+                  {slashSuggestions.slice(0, 12).map((item, index) => (
+                    <ListBox.Item key={item.command} id={item.command} isDisabled={currentProvider !== 'pi' && item.command === '/compact' && (thinking || executionUnknown || submissionStatus === 'sending' || compaction?.status === 'running')} textValue={`${item.command} ${item.description}`} className={`composer-suggestion-item ${index === suggestionIndex ? 'composer-suggestion-item--active' : ''}`}>
+                      <span className="composer-suggestion-command">{item.command}</span>
+                      <span className="composer-suggestion-description">{item.description}</span>
+                    </ListBox.Item>
+                  ))}
+                </ListBox>
+              ) : mentionSuggestions.length > 0 ? (
+                <ListBox
+                  aria-label="文件建议"
+                  onAction={(key) => {
+                    const item = mentionSuggestions.find((candidate) => candidate.id === String(key));
+                    if (!item || !mention) return;
+                    session.setConversationChatDraft(conversation.id, insertMention(draft, mention, item.insertText));
+                    const cursor = mention.start + item.insertText.length;
+                    session.setConversationComposerSelection(conversation.id, { start: cursor, end: cursor });
+                    composerRef.current?.focus(cursor);
+                  }}
+                >
+                  {mentionSuggestions.map((item, index) => (
+                    <ListBox.Item key={item.id} id={item.id} textValue={`@${item.title} ${item.description}`} className={`composer-suggestion-item ${index === suggestionIndex ? 'composer-suggestion-item--active' : ''}`}>
+                      <span className="composer-suggestion-command">@{item.title}</span>
+                      <span className="composer-suggestion-description">{item.description}</span>
+                    </ListBox.Item>
+                  ))}
+                </ListBox>
+              ) : mention ? <p className="text-muted px-2 py-1 text-xs">正在搜索工作区文件…</p> : null}
+            </div>
+          ) : null}
+          {capability ? <p className="text-muted mb-2 text-xs">输入 # 可引用 Skill 或 MCP。</p> : null}
+          {(session.selectedSkills[conversation.id] ?? []).length > 0 ? (
+            <div className="mb-2 flex flex-wrap gap-2">
+              {(session.selectedSkills[conversation.id] ?? []).map((skill) => (
+                <Button
+                  key={skill.resourceId || `${skill.name}:${skill.path}`}
+                  size="sm"
+                  variant="tertiary"
+                  onPress={() => session.setConversationSelectedSkills(conversation.id, (current) =>
+                    current.filter((item) => (item.resourceId || item.name) !== (skill.resourceId || skill.name)))}
+                >
+                  Skill · {skill.displayName || skill.name} ×
+                </Button>
+              ))}
+            </div>
+          ) : null}
+          <NoticeToast
+            message={!currentPermission && agentProvider !== 'pi' && session.connectionState === 'open'
+              && session.v2Providers.some(provider => provider.id === agentProvider) ? permissionHint : null}
+            scope={conversation.id}
+          />
+          <ConversationRunStatus
+            isRecovering={session.recoveringConversations[conversation.id] === true}
+            isConnected={session.connectionState === 'open'}
+            submissionStatus={submissionStatus}
+            runtime={runtime}
+            compaction={compaction}
+            onRecover={() => session.recoverConversation(conversation.id)}
+          />
+          {conversation.v2ConversationId ? <ConversationControls
+            runtime={runtime}
+            reportedError={session.lastError}
+            running={thinking}
+            canSteer={providerDescriptor?.capabilities.steering === true}
+            canUseNativeQueue={providerDescriptor?.capabilities.followUpQueue === true}
+            piQueue={currentProvider === 'pi'}
+            controlStatus={session.controlStatusByConversation[conversation.id]}
+            canSendText={Boolean(draft.trim()) && !attachments.length && !(session.selectedSkills[conversation.id]?.length)}
+            localQueue={session.queuedChatDrafts[conversation.id] ?? []}
+            localPaused={session.queuePausedByConversation[conversation.id] === true}
+            onSteer={() => { const text = draft.trim(); void session.controlConversation(conversation.id, { action: 'steer', text })
+              .then(ok => { if (ok) session.setConversationChatDraft(conversation.id, current => current.trim() === text ? '' : current); }); }}
+            onRecover={() => { void session.recoverConversation(conversation.id); }}
+            onRemoveNative={itemId => { void session.controlConversation(conversation.id, { action: 'queueRemove', itemId }); }}
+            onClearNative={() => { void session.controlConversation(conversation.id, { action: 'queueClear' }); }}
+            onRemoveLocal={itemId => session.removeQueuedFollowUp(conversation.id, itemId)}
+            onResumeLocal={() => { void session.resumeQueuedFollowUps(conversation.id); }}
+            onRevealPath={filePath => session.openPanel('Files', { filePath })}
+          /> : null}
+          <NoticeToast message={hasBlockedImageAttachment ? '当前无法发送图片' : null}
+            description={imageInputSupport.reason} scope={conversation.id} />
+          <ChatAttachmentInput
+            accept={attachmentAccept}
+            disabled={executionUnknown || attachments.length >= MAX_COMPOSER_ATTACHMENTS}
+            multiple
+            onFilesSelected={(files) => { void addBrowserFiles(files); }}
+          >
+            <ConversationPromptInput
+              submissionStatus={submissionStatus}
+              value={draft}
+              status={submissionStatus === 'sending' ? 'submitted' : thinking ? 'streaming' : 'ready'}
+              isDisabled={executionUnknown}
+              onKeyDownCapture={(event) => {
+                if (event.key === 'Enter' && (isComposingRef.current || isImeCompositionKey(event))) {
+                  event.stopPropagation();
+                  return;
+                }
+                // Resolve Pi suggestions first so choosing a command only fills the draft.
+                if (currentProvider === 'pi' && event.target instanceof HTMLElement
+                  && (event.target instanceof HTMLTextAreaElement || event.target.isContentEditable)) {
+                  handleSuggestionKeyDown(event);
+                  if (event.defaultPrevented) event.stopPropagation();
+                }
+              }}
+              onValueChange={(value: string) => { setSuggestionIndex(0); session.setConversationChatDraft(conversation.id, value); }}
+              onSubmit={submitComposer}
+              onStop={() => session.stopThinking(conversation.id)}
+            >
+              <PromptInput.Shell
+                data-dragging={isDraggingAttachment || undefined}
+                onDragEnter={(event) => {
+                  if (!event.dataTransfer.types.includes('Files')) return;
+                  event.preventDefault();
+                  setIsDraggingAttachment(true);
+                }}
+                onDragOver={(event) => {
+                  if (!event.dataTransfer.types.includes('Files')) return;
+                  event.preventDefault();
+                  event.dataTransfer.dropEffect = 'copy';
+                  setIsDraggingAttachment(true);
+                }}
+                onDragLeave={(event) => {
+                  const nextTarget = event.relatedTarget;
+                  if (!nextTarget || !event.currentTarget.contains(nextTarget as Node)) {
+                    setIsDraggingAttachment(false);
+                  }
+                }}
+                onDrop={(event) => {
+                  const files = Array.from(event.dataTransfer.files);
+                  if (files.length === 0) return;
+                  event.preventDefault();
+                  setIsDraggingAttachment(false);
+                  void addBrowserFiles(files);
+                }}
+                onPaste={(event) => {
+                  const files = clipboardFiles(event.clipboardData);
+                  if (files.length === 0) return;
+                  event.preventDefault();
+                  void addBrowserFiles(files, 'clipboard');
+                }}
+              >
+                <PromptInput.Content
+                  onMouseDown={(event) => {
+                    if (event.target === event.currentTarget) {
+                      event.preventDefault();
+                      composerRef.current?.focus();
+                    }
+                  }}
+                >
+                  {fileAttachments.length > 0 ? (
+                    <PromptInput.Attachments>
+                      <ChatAttachmentGroup aria-label="待发送附件" role="list">
+                        {fileAttachments.map((attachment) => (
+                          <ChatAttachment
+                            key={attachment.id}
+                            mimeType={attachment.mimeType}
+                            name={attachment.name}
+                            role="listitem"
+                            size={attachment.sizeBytes ?? undefined}
+                            src={attachment.kind === 'image' ? attachment.dataUrl : undefined}
+                          >
+                            <ChatAttachment.Preview />
+                            <ChatAttachment.Info />
+                            <ChatAttachment.Remove
+                              aria-label={`移除附件 ${attachment.name}`}
+                              onPress={() => session.setConversationAttachments(conversation.id, (current) =>
+                                current.filter((item) => item.id !== attachment.id))}
+                            />
+                          </ChatAttachment>
+                        ))}
+                      </ChatAttachmentGroup>
+                    </PromptInput.Attachments>
+                  ) : null}
+                  <ReferenceComposer
+                    ref={composerRef}
+                    value={draft}
+                    isDisabled={executionUnknown}
+                    placeholder={imageInputSupport.supported
+                      ? '发送消息，或粘贴 / 拖入图片和文件'
+                      : '发送消息，或粘贴 / 拖入文本文件'}
+                    onChange={(value) => { setSuggestionIndex(0); session.setConversationChatDraft(conversation.id, value); }}
+                    onSubmit={submitComposer}
+                    onKeyDown={currentProvider === 'pi' ? undefined : handleSuggestionKeyDown}
+                    onSelectionChange={(selection) => session.setConversationComposerSelection(conversation.id, selection)}
+                    onCompositionStart={() => { isComposingRef.current = true; }}
+                    onCompositionEnd={() => { isComposingRef.current = false; }}
+                    resolveReference={(name) => {
+                      const item = attachments.find((entry) => entry.kind === 'reference' && entry.name === name);
+                      return item ? referencePreview(item.textContent) || item.name : undefined;
+                    }}
+                    onReferenceClick={(name) => {
+                      const item = attachments.find((entry) => entry.kind === 'reference' && entry.name === name);
+                      if (!item) return;
+                      if (item.path) {
+                        session.openPanel('Files', { filePath: item.path });
+                        return;
+                      }
+                      if (item.messageId) {
+                        messagesRef.current
+                          ?.querySelector(`[data-message-id="${CSS.escape(item.messageId)}"]`)
+                          ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                      }
+                    }}
+                  />
+                </PromptInput.Content>
+                <PromptInput.Toolbar className="composer-toolbar">
+                  <PromptInput.ToolbarStart className="min-w-0 flex-1">
+                    <Select
+                      className="composer-control"
+                      variant="secondary"
+                      placeholder="选择 Agent"
+                      selectedKey={currentProvider || agentProvider || null}
+                      isDisabled={!canSwitchAgent}
+                      onSelectionChange={(key) => {
+                        if (typeof key !== 'string' || !key || key === currentProvider) {
+                          return;
+                        }
+                        session.switchConversationAgent(conversation.id, key as ProviderKind);
+                      }}
+                    >
+                      <Label className="hidden">选择 Agent</Label>
+                      <Select.Trigger className="composer-control__trigger">
+                        <Select.Value><ProviderIcon className="composer-control__icon" provider={agentProvider} /><span className="composer-control__text">{agentLabel}</span></Select.Value>
+                        <Select.Indicator className="composer-control__indicator" />
+                      </Select.Trigger>
+                      <Select.Popover>
+                        <ListBox>
+                          {availableProviders.map((item) => (
+                            <ListBox.Item
+                              key={item.id}
+                              id={item.id}
+                              textValue={providerDisplayName(item.id, item.displayName)}
+                            >
+                              <ProviderIcon provider={item.id} />
+                              {providerDisplayName(item.id, item.displayName)}
+                              <ListBox.ItemIndicator />
+                            </ListBox.Item>
+                          ))}
+                        </ListBox>
+                      </Select.Popover>
+                    </Select>
+                    <Popover>
+                      <Button
+                        className={`composer-control composer-model-control__trigger ${displayedReasoningEffort ? 'has-effort' : ''}`}
+                        size="sm"
+                        variant="secondary"
+                        isDisabled={providerModels.length === 0}
+                        aria-label="选择模型和思考强度"
+                      >
+                        <RiCpuLine className={`composer-control__icon ${displayedReasoningEffort ? 'text-accent' : ''}`} />
+                        <span className="composer-control__text">{modelDisplayLabel(currentModel, session.modelCatalog)}</span>
+                        {displayedReasoningEffort ? (
+                          <span className="composer-control__effort">
+                            · {reasoningEffortLabel(displayedReasoningEffort)}
+                          </span>
+                        ) : null}
+                      </Button>
+                      <Popover.Content className="composer-model-popover" placement="top start" offset={8}>
+                        <Popover.Dialog className="composer-model-popover__dialog" aria-label="模型和思考强度">
+                          <ModelReasoningCard
+                            currentModel={currentModel}
+                            currentModelDescriptor={currentModelDescriptor}
+                            modelCatalog={session.modelCatalog}
+                            providerModels={providerModels}
+                            supportedReasoningEfforts={supportedReasoningEfforts}
+                            currentReasoningEffort={currentReasoningEffort}
+                            displayedReasoningEffort={displayedReasoningEffort}
+                            fastEnabled={fastEnabled}
+                            canToggleFast={agentProvider === 'codex'}
+                            onToggleFast={() => session.toggleFastServiceTier(conversation.id)}
+                            onSelectModel={(modelId) => {
+                              session.applyConversationModelSelection(conversation.id, modelId, null);
+                            }}
+                            onSelectReasoningEffort={(effort) => {
+                              session.applyConversationModelSelection(conversation.id, currentModel, effort);
+                            }}
+                          />
+                        </Popover.Dialog>
+                      </Popover.Content>
+                    </Popover>
+                    <Select
+                      className="composer-control"
+                      variant="secondary"
+                      selectedKey={currentPermission}
+                      isDisabled={thinking || executionUnknown || !canChoosePermission || (fixedPermission && currentPermission !== null)}
+                      onSelectionChange={(key) => {
+                        if (typeof key === 'string' && permissionModes.includes(key as PermissionMode)) {
+                          void session.applyConversationPermissionMode(conversation.id, key as PermissionMode);
+                        }
+                      }}
+                    >
+                      <Label className="hidden">选择权限</Label>
+                      <Select.Trigger className="composer-control__trigger">
+                        <Select.Value><RiShieldLine className="composer-control__icon" /><span className="composer-control__text" title={permissionHint}>{currentPermission ? PERMISSION_LABELS[currentPermission] : canChoosePermission ? '请选择权限' : '权限不可配置'}</span></Select.Value>
+                        {!fixedPermission ? <Select.Indicator className="composer-control__indicator" /> : null}
+                      </Select.Trigger>
+                      <Select.Popover>
+                        <ListBox>
+                          {permissionModes.map((mode) => (
+                            <ListBox.Item key={mode} id={mode} textValue={PERMISSION_LABELS[mode]}>
+                              {PERMISSION_LABELS[mode]}
+                              <ListBox.ItemIndicator />
+                            </ListBox.Item>
+                          ))}
+                        </ListBox>
+                      </Select.Popover>
+                    </Select>
+                    {permissionConfig?.supportsPlan ? <Select
+                      className="composer-control"
+                      variant="secondary"
+                      selectedKey={conversation.mode === 'plan' ? 'plan' : 'implement'}
+                      isDisabled={thinking || executionUnknown}
+                      onSelectionChange={(key) => {
+                        if (key === 'plan' || key === 'implement') {
+                          void session.applyConversationWorkMode(conversation.id, key);
+                        }
+                      }}
+                    >
+                      <Label className="hidden">选择工作模式</Label>
+                      <Select.Trigger className="composer-control__trigger">
+                        <Select.Value><RiListCheck2 className="composer-control__icon" /><span className="composer-control__text" title="工作模式将在下次发送时应用">{conversation.mode === 'plan' ? '计划' : '执行'}</span></Select.Value>
+                        <Select.Indicator className="composer-control__indicator" />
+                      </Select.Trigger>
+                      <Select.Popover>
+                        <ListBox>
+                          <ListBox.Item id="implement" textValue="执行">执行<ListBox.ItemIndicator /></ListBox.Item>
+                          <ListBox.Item id="plan" textValue="计划">计划<ListBox.ItemIndicator /></ListBox.Item>
+                        </ListBox>
+                      </Select.Popover>
+                    </Select> : null}
+                  </PromptInput.ToolbarStart>
+                  <PromptInput.ToolbarEnd className="gap-2">
+                    <ChatAttachmentInput.Trigger
+                      aria-label="添加附件"
+                      render={({ isDisabled, onPress }) => (
+                        <Tooltip>
+                          <Tooltip.Trigger>
+                            <Button isIconOnly variant="ghost" aria-label="添加附件" isDisabled={isDisabled} onPress={onPress}>
+                              <RiAttachment2 className="size-4" />
+                            </Button>
+                          </Tooltip.Trigger>
+                          <Tooltip.Content>
+                            {attachments.length >= MAX_COMPOSER_ATTACHMENTS
+                              ? `最多附加 ${MAX_COMPOSER_ATTACHMENTS} 个文件`
+                              : imageInputSupport.supported ? '添加图片或文本附件' : '添加文本附件'}
+                          </Tooltip.Content>
+                        </Tooltip>
+                      )}
+                    />
+                    <ContextUsageIndicator
+                      usedTokens={contextUsage?.usedTokens ?? 0}
+                      contextWindow={currentContextWindow}
+                      inputTokens={contextUsage?.inputTokens ?? 0}
+                      outputTokens={contextUsage?.outputTokens ?? 0}
+                      cachedInputTokens={contextUsage?.cachedInputTokens ?? 0}
+                      cacheWriteTokens={contextUsage?.cacheWriteTokens ?? 0}
+                    />
+                    {thinking ? (
+                      <Button variant="danger-soft" onPress={() => session.stopThinking(conversation.id)}>
+                        <RiStopCircleLine className="size-4" />
+                        停止
+                      </Button>
+                    ) : null}
+                  </PromptInput.ToolbarEnd>
+                </PromptInput.Toolbar>
+              </PromptInput.Shell>
+            </ConversationPromptInput>
+          </ChatAttachmentInput>
+          {currentProvider === 'pi' && runtime ? <PiExtensionPanel placement="belowEditor"
+            extensionUi={runtime.extensionUi} /> : null}
+        </div>
+      </div>
+    </div>
+  );
+}

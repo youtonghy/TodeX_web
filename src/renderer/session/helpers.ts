@@ -1,0 +1,2930 @@
+import { normalizeBackendLabelColor, type BackendConnectionProfile } from './backendColors';
+import { normalizeUsageRecords as normalizeSharedUsageRecords } from '@todex/protocol/mobileParity';
+import type {
+  CodexHooksListEntry,
+  CodexMcpServerStatus,
+  CodexMemorySettings,
+  CodexModelCatalogItem,
+  CodexNativeThread,
+  CodexPermissionProfileSummary,
+  CodexPluginListResult,
+  CodexReasoningEffortOption,
+  CodexServiceTierOption,
+  ConnectionSettings,
+  LocalAdapterState,
+  PendingRequest,
+  ServerEvent,
+  WorkspaceRecord,
+} from '@todex/protocol/todex';
+import type { ConversationEvent, ConversationManifest, ProviderDescriptor, ProviderKind, ProviderModelDescriptor } from '@todex/protocol/v2';
+
+export type ResolvedSessionConfig = {
+  model?: import('@todex/protocol/v2').ResolvedConfigValue<string>;
+  reasoningEffort?: import('@todex/protocol/v2').ResolvedConfigValue<string | null>;
+  approvalPolicy?: import('@todex/protocol/v2').ResolvedConfigValue<string>;
+  sandboxMode?: import('@todex/protocol/v2').ResolvedConfigValue<string>;
+};
+
+export function buildConversationControlMessage(
+  conversationId: string,
+  action: import('@todex/protocol/v2').ConversationControlAction,
+  payload: Record<string, unknown> = {},
+): { id: string; type: string; payload: Record<string, unknown> } {
+  return {
+    id: createRequestId(`conversation-${action}`),
+    type: action === 'cancel' ? 'conversation.cancel' : `conversation.${action}`,
+    payload: { conversationId, ...payload },
+  };
+}
+import { providerDisplayName } from '@todex/protocol/v2';
+import {
+  buildConversationRenderItems as sharedBuildConversationRenderItems,
+  classifyV2ConversationEvent as sharedClassifyV2ConversationEvent,
+  executionGroupId as sharedExecutionGroupId,
+  isCollapsibleProgressEntry as sharedIsCollapsibleProgressEntry,
+  isStepProgressEntry as sharedIsStepProgressEntry,
+  isThinkingProgressEntry as sharedIsThinkingProgressEntry,
+  shouldAppendV2ConversationEvent as sharedShouldAppendV2ConversationEvent,
+  reduceConversationEvents as sharedReduceConversationEvents,
+  type ConversationBlockCategory,
+  type ConversationBlockPhase,
+} from '@todex/protocol/mobileParity';
+import type { ConnectionFailureCode } from '@todex/protocol/connectionError';
+import {
+  buildHttpUrl,
+  createRequestId,
+  eventId,
+  eventPayloadData,
+  extractThreadIdFromEvent,
+  DEFAULT_REASONING_EFFORT_OPTIONS,
+  FAST_SERVICE_TIER,
+  FALLBACK_CODEX_MODELS,
+  mergeWorkspaceRecords,
+  normalizeReasoningEffort,
+  normalizeServerUrl,
+  parseMcpServerStatusListResponse,
+  parsePermissionProfileListResponse,
+  normalizeThreadId,
+  parseCodexNativeThread,
+  prepareWorkspaceSyncPayload,
+  shortJson,
+  type CodexThreadHistoryEntry,
+} from '@todex/protocol/todex';
+import type { TransportCryptoSession } from '@todex/protocol/transportCrypto';
+import type { PairingQrChunk } from '@todex/protocol/transportCrypto';
+import {
+  cursorFromEvent as transportCursorFromEvent,
+  sessionIdFromEvent as transportSessionIdFromEvent,
+} from '@todex/protocol/transport';
+
+async function readDesktopFile(uri: string): Promise<{ sizeBytes: number | null; text?: string; base64?: string }> {
+  if (uri.startsWith('data:')) {
+    return { sizeBytes: null };
+  }
+  return window.todexWeb.fs.readFile(uri);
+}
+
+async function readDesktopFileBase64(uri: string): Promise<string> {
+  const file = await window.todexWeb.fs.readFile(uri);
+  return file.base64;
+}
+
+export type ServerVersion = {
+  name: string;
+  version: string;
+  data_dir: string;
+  workspace_root: string;
+};
+
+export type WorkspaceDirectoryEntry = {
+  name: string;
+  path: string;
+  kind: 'directory';
+};
+
+export type WorkspaceDirectorySnapshot = {
+  root: string;
+  current: string;
+  parent: string | null;
+  entries: WorkspaceDirectoryEntry[];
+};
+
+export type ConversationRecord = {
+  id: string;
+  workspaceId: string;
+  backendConnectionId?: string | null;
+  title: string;
+  preview?: string;
+  nativeStatus?: string;
+  archived?: boolean;
+  sessionId: string;
+  threadId: string;
+  localAdapterState?: LocalAdapterState;
+  mode?: 'plan' | 'implement';
+  permissionMode?: 'ask' | 'auto' | 'full-access';
+  goalStatus?: string;
+  goalObjective?: string;
+  provider?: ProviderKind | string;
+  providerProfile?: string;
+  model?: string;
+  reasoningEffort?: string | null;
+  v2ConversationId?: string;
+  lastSequence?: number;
+  lastCompletedAt?: number;
+  createdAt: number;
+  updatedAt: number;
+};
+
+export type ProviderModelPreference = {
+  lastModel?: string;
+  reasoningByModel: Record<string, string>;
+  lastPermissionMode?: 'ask' | 'auto' | 'full-access';
+  lastWorkMode?: 'plan' | 'implement';
+};
+
+export type ProviderModelPreferences = Record<string, ProviderModelPreference>;
+
+export function providerModelPreferenceKey(backendConnectionId: string | null | undefined, provider: string): string {
+  return `${backendConnectionId?.trim() || 'default-backend'}::${provider.trim()}`;
+}
+
+export function normalizeProviderModelPreferences(value: unknown): ProviderModelPreferences {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return Object.fromEntries(Object.entries(value).flatMap(([key, raw]) => {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return [];
+    const record = raw as Record<string, unknown>;
+    const reasoning = record.reasoningByModel;
+    const reasoningByModel = reasoning && typeof reasoning === 'object' && !Array.isArray(reasoning)
+      ? Object.fromEntries(Object.entries(reasoning).filter(
+        (entry): entry is [string, string] => typeof entry[1] === 'string' && Boolean(entry[1].trim()),
+      ))
+      : {};
+    const lastModel = typeof record.lastModel === 'string' && record.lastModel.trim() ? record.lastModel.trim() : undefined;
+    const lastPermissionMode = ['ask', 'auto', 'full-access'].includes(record.lastPermissionMode as string)
+      ? record.lastPermissionMode as ProviderModelPreference['lastPermissionMode']
+      : undefined;
+    const lastWorkMode = record.lastWorkMode === 'plan' || record.lastWorkMode === 'implement'
+      ? record.lastWorkMode
+      : undefined;
+    return [[key, {
+      ...(lastModel ? { lastModel } : {}),
+      reasoningByModel,
+      ...(lastPermissionMode ? { lastPermissionMode } : {}),
+      ...(lastWorkMode ? { lastWorkMode } : {}),
+    }]];
+  }));
+}
+
+export function resolveProviderModel(
+  models: ProviderModelDescriptor[],
+  requestedModel?: string | null,
+  preferredModel?: string | null,
+): ProviderModelDescriptor | null {
+  return models.find((item) => item.id === requestedModel)
+    ?? models.find((item) => item.id === preferredModel)
+    ?? models.find((item) => item.isDefault)
+    ?? models[0]
+    ?? null;
+}
+
+export function resolveProviderReasoningEffort(
+  model: ProviderModelDescriptor | null,
+  candidates: Array<string | null | undefined>,
+): string | null {
+  if (!model || model.supportedReasoningEfforts.length === 0) return null;
+  return candidates.find((candidate): candidate is string => (
+    typeof candidate === 'string' && model.supportedReasoningEfforts.includes(candidate)
+  )) ?? (model.supportedReasoningEfforts.includes('medium') ? 'medium' : model.supportedReasoningEfforts[0] ?? null);
+}
+
+export type PendingThreadList = {
+  workspaceId: string;
+  sessionId: string;
+  requestId: string;
+  timeoutId: ReturnType<typeof setTimeout>;
+};
+
+export type PendingGitDiff = {
+  workspaceId: string;
+  conversationId: string;
+  requestId: string;
+  timeoutId: ReturnType<typeof setTimeout>;
+};
+
+export type ExperimentalFeatureId =
+  | 'gitDiffViewer'
+  | 'verboseRuntimeEvents'
+  | 'composerFileMentions';
+
+export type ExperimentalFeatureSettings = Record<ExperimentalFeatureId, boolean>;
+
+export type ExperimentalFeatureDefinition = {
+  id: ExperimentalFeatureId;
+  title: string;
+  description: string;
+  scope: string;
+};
+
+export type GitDiffState = {
+  status: 'idle' | 'loading' | 'ready' | 'error';
+  diff: string;
+  sha: string;
+  error: string;
+  updatedAt: number;
+};
+
+export type McpInventoryState = {
+  status: 'idle' | 'loading' | 'ready' | 'error';
+  detail: 'toolsAndAuthOnly' | 'full';
+  servers: CodexMcpServerStatus[];
+  raw: unknown;
+  error: string;
+  updatedAt: number;
+};
+
+export type PermissionProfilesState = {
+  status: 'idle' | 'loading' | 'ready' | 'error';
+  profiles: CodexPermissionProfileSummary[];
+  raw: unknown;
+  error: string;
+  updatedAt: number;
+};
+
+export type HooksCatalogState = {
+  status: 'idle' | 'loading' | 'ready' | 'error';
+  entries: CodexHooksListEntry[];
+  raw: unknown;
+  error: string;
+  updatedAt: number;
+};
+
+export type PluginsCatalogState = {
+  status: 'idle' | 'loading' | 'ready' | 'error';
+  catalog: CodexPluginListResult;
+  raw: unknown;
+  error: string;
+  updatedAt: number;
+};
+
+export type MemorySettingsState = {
+  status: 'idle' | 'loading' | 'ready' | 'saving' | 'error';
+  settings: CodexMemorySettings;
+  raw: unknown;
+  error: string;
+  updatedAt: number;
+};
+
+export type TerminalLifecycleState = 'idle' | 'starting' | 'running' | 'stopping' | 'exited' | 'error';
+
+export type TerminalOutputEntry = {
+  id: string;
+  kind: 'stdout' | 'stderr' | 'input' | 'system' | 'error';
+  text: string;
+  at: number;
+};
+
+export type TerminalClientState = {
+  terminalId: string;
+  workspaceId: string;
+  conversationId: string;
+  tenantId: string;
+  cwd: string;
+  shell: string;
+  rows: number;
+  cols: number;
+  status: TerminalLifecycleState;
+  output: TerminalOutputEntry[];
+  error: string;
+  pid?: number | null;
+  exitCode?: number | null;
+  updatedAt: number;
+};
+
+export type PendingThreadAction = {
+  workspaceId: string;
+  conversationId: string;
+  requestId: string;
+  action:
+    | 'start'
+    | 'resume'
+    | 'fork'
+    | 'archive'
+    | 'unarchive'
+    | 'rename'
+    | 'rollback'
+    | 'read'
+    | 'detail'
+    | 'turns'
+    | 'items'
+    | 'metadata'
+    | 'memory'
+    | 'memoryReset'
+    | 'unsubscribe'
+    | 'shell'
+    | 'guardian'
+    | 'clean'
+    | 'loaded'
+    | 'hooks'
+    | 'plugins'
+    | 'mcp'
+    | 'permission'
+    | 'permissionProfiles'
+    | 'memorySettings'
+    | 'inject';
+  timeoutId: ReturnType<typeof setTimeout>;
+  sourceConversationId?: string;
+  title?: string;
+  restoreHistory?: boolean;
+  showResult?: boolean;
+  resultTitle?: string;
+  resultDetail?: string;
+  memorySettings?: CodexMemorySettings;
+};
+
+export type ComposerSelection = { start: number; end: number };
+
+export const DEFAULT_COMPOSER_SELECTION: ComposerSelection = { start: 0, end: 0 };
+
+export type PairingChunkCollector = {
+  checksum: string;
+  total: number;
+  chunks: Map<number, PairingQrChunk>;
+};
+
+export type ComposerAttachmentDraft = {
+  id: string;
+  kind: 'image' | 'file' | 'reference';
+  name: string;
+  mimeType: string;
+  sizeBytes: number | null;
+  dataUrl: string;
+  textContent?: string;
+  source: 'clipboard' | 'library' | 'file' | 'preview' | 'message';
+  path?: string;
+  lineStart?: number;
+  lineEnd?: number;
+  messageId?: string;
+};
+
+export type QueuedChatSubmission = {
+  id: string;
+  text: string;
+  attachments: ComposerAttachmentDraft[];
+  skills: SelectedSkillAttachment[];
+};
+
+export type PendingLocalStart = {
+  workspaceId: string;
+  conversationId: string;
+  sessionId: string;
+  requestId: string;
+  promise: Promise<void>;
+  resolve: () => void;
+  reject: (reason: Error) => void;
+  timeoutId: ReturnType<typeof setTimeout>;
+};
+
+export type PendingThreadStart = {
+  conversationId: string;
+  requestId: string;
+  promise: Promise<string>;
+  resolve: (threadId: string) => void;
+  reject: (reason: Error) => void;
+  timeoutId: ReturnType<typeof setTimeout>;
+};
+
+export type PendingModelList = {
+  requestId: string;
+  timeoutId: ReturnType<typeof setTimeout>;
+};
+
+export type PendingSkillList = {
+  workspaceId: string;
+  conversationId: string;
+  requestId: string;
+  timeoutId: ReturnType<typeof setTimeout>;
+};
+
+export type PendingJsonSave = {
+  timeoutId: ReturnType<typeof setTimeout>;
+  value: unknown;
+};
+
+export type PendingSocketFrame = {
+  data: string;
+  generation: number;
+  crypto: TransportCryptoSession | null;
+};
+
+export type ConversationContext = {
+  workspace: WorkspaceRecord;
+  conversation: ConversationRecord;
+};
+
+export type ModelCommandPromptState = {
+  conversationId: string;
+  initialValue: string;
+  target?: 'workspace' | 'settings';
+};
+
+export type ModelPickerPromptState = {
+  target: 'workspace' | 'settings';
+  conversationId?: string;
+};
+
+export type ThreadInfoModalState = {
+  title: string;
+  detail: string;
+  raw?: unknown;
+};
+
+export type ThreadCommandPromptState = {
+  conversationId: string;
+  command: 'metadata' | 'memory' | 'shell' | 'items' | 'inject' | 'guardian';
+  title: string;
+  placeholder: string;
+  initialValue: string;
+  warning?: string;
+  multiline?: boolean;
+};
+
+export type SkillListStatus = 'idle' | 'loading' | 'ready' | 'error';
+
+export type SkillListItem = {
+  id: string;
+  name: string;
+  displayName: string;
+  description: string;
+  shortDescription: string;
+  scope: string;
+  path: string;
+  enabled: boolean;
+};
+
+export type SelectedSkillAttachment = {
+  name: string;
+  path: string;
+  displayName: string;
+  resourceId?: string;
+  provider?: ProviderKind | string;
+};
+
+export type ThreadMenuAction =
+  | 'resume'
+  | 'fork'
+  | 'archive'
+  | 'unarchive'
+  | 'rollback'
+  | 'compact'
+  | 'detail'
+  | 'history'
+  | 'turns'
+  | 'items'
+  | 'metadata'
+  | 'memory'
+  | 'shell'
+  | 'unsubscribe'
+  | 'loaded'
+  | 'clean'
+  | 'inject';
+
+export type TimelineTarget = {
+  workspaceId: string;
+  conversationId: string;
+};
+
+export type ConnectionState = 'idle' | 'connecting' | 'open' | 'closed' | 'error';
+
+export type RuntimeStatusState = {
+  socket: ConnectionState;
+  daemon: ConnectionHealth['status'];
+  codexAdapter: LocalAdapterState | 'unknown';
+  turn: 'idle' | 'running';
+};
+
+export type ConnectionHealth = {
+  status: 'unknown' | 'checking' | 'online' | 'offline';
+  latencyMs: number | null;
+  lastCheckedAt: number | null;
+  error: string;
+  code?: ConnectionFailureCode | '';
+};
+
+export const CONNECTION_HEALTH_INTERVAL_MS = 5000;
+export const CONNECTION_HEALTH_TIMEOUT_MS = 3500;
+export const SOCKET_WATCHDOG_INTERVAL_MS = 15_000;
+export const SOCKET_LIVENESS_TIMEOUT_MS = 15_000;
+export const SOCKET_LIVENESS_MAX_FAILURES = 3;
+
+/** requestAnimationFrame stops firing while the window is hidden or occluded,
+ * which freezes protocol frame processing even though the socket stays alive.
+ * MessageChannel tasks are not throttled in background pages and still yield
+ * to the event loop between batches. */
+const messageTaskChannel = new MessageChannel();
+const messageTaskQueue = new Map<number, () => void>();
+let nextMessageTaskId = 0;
+messageTaskChannel.port1.onmessage = () => {
+  const first = messageTaskQueue.keys().next();
+  if (first.done) return;
+  const id = first.value;
+  const run = messageTaskQueue.get(id);
+  messageTaskQueue.delete(id);
+  if (!run) return;
+  try {
+    run();
+  } catch (error) {
+    // Surface asynchronously so one failing task cannot wedge the queue.
+    setTimeout(() => { throw error; });
+  }
+};
+
+export function scheduleMessageTask(run: () => void): number {
+  const id = ++nextMessageTaskId;
+  messageTaskQueue.set(id, run);
+  messageTaskChannel.port2.postMessage(null);
+  return id;
+}
+
+export function cancelMessageTask(id: number): void {
+  messageTaskQueue.delete(id);
+}
+export const MAX_COMPOSER_ATTACHMENTS = 8;
+export const MAX_IMAGE_ATTACHMENT_BYTES = 8 * 1024 * 1024;
+export const MAX_FILE_ATTACHMENT_BYTES = 512 * 1024;
+
+export function localConversationStateOf(conversation: ConversationRecord | null): LocalAdapterState {
+  return conversation?.localAdapterState ?? 'idle';
+}
+
+export function isConversationHighlighted(conversation: ConversationRecord, _activeConversationId: string, activeTurns: Record<string, string>): boolean {
+  return Boolean(activeTurns[conversation.id]);
+}
+
+export function sessionIdForConversation(workspace: WorkspaceRecord, conversation: ConversationRecord): string {
+  return conversation.sessionId || workspace.sessionId || createSessionId(workspace.name);
+}
+
+export function commandWorkspaceForConversation(workspace: WorkspaceRecord, conversation: ConversationRecord): WorkspaceRecord {
+  return {
+    ...workspace,
+    sessionId: sessionIdForConversation(workspace, conversation),
+    threadId: normalizeThreadId(conversation.threadId),
+    localAdapterState: localConversationStateOf(conversation),
+  };
+}
+
+export function isLocalAdapterAlreadyRunning(text: string): boolean {
+  return /adapter already owns this session/i.test(text);
+}
+
+export function isLocalAdapterFailed(text: string): boolean {
+  return /local Codex adapter is not ready;\s*current state is Failed/i.test(text);
+}
+
+export function isThreadNotFound(text: string): boolean {
+  return /thread not found/i.test(text);
+}
+
+export function localTurnErrorMessage(text: string): string {
+  if (isThreadNotFound(text)) {
+    return '当前对话的 thread 已失效，下一次发送会为该对话自动创建新的 thread。';
+  }
+  if (isLocalAdapterFailed(text)) {
+    return '本地会话状态已失效，请重新发送消息以启动新的会话。';
+  }
+  if (isLocalAdapterAlreadyRunning(text)) {
+    return '本地会话已经在运行，不要重复启动。';
+  }
+  if (/unsupported_action/i.test(text) || /not running for this session/i.test(text)) {
+    return '本地会话还没启动，先执行 start 再发送消息。';
+  }
+  return text;
+}
+
+export function attachmentId(): string {
+  return createRequestId('att');
+}
+
+export function formatBytes(bytes: number | null | undefined): string {
+  if (!bytes || bytes <= 0) {
+    return 'unknown';
+  }
+  if (bytes < 1024) {
+    return `${bytes} B`;
+  }
+  if (bytes < 1024 * 1024) {
+    return `${Math.round(bytes / 102.4) / 10} KB`;
+  }
+  return `${Math.round(bytes / (1024 * 102.4)) / 10} MB`;
+}
+
+export function fileNameFromUri(uri: string, fallback: string): string {
+  const clean = uri.split('?')[0]?.split('#')[0] ?? uri;
+  const part = clean.split('/').filter(Boolean).pop();
+  return part ? decodeURIComponent(part) : fallback;
+}
+
+export type WorkspaceLinkTarget =
+  | { kind: 'browser-url'; url: string }
+  | { kind: 'browser-file'; filePath: string }
+  | { kind: 'file'; filePath: string }
+  | null;
+
+function normalizeWorkspacePath(path: string): string {
+  const prefix = path.startsWith('/') ? '/' : '';
+  const parts = path.split(/[\\/]+/).filter(Boolean);
+  const normalized: string[] = [];
+  for (const part of parts) {
+    if (part === '.') continue;
+    if (part === '..') {
+      normalized.pop();
+    } else {
+      normalized.push(part);
+    }
+  }
+  return `${prefix}${normalized.join('/')}` || prefix || '.';
+}
+
+export function workspaceLinkTarget(href: string | undefined, workspacePath: string | undefined): WorkspaceLinkTarget {
+  if (!href?.trim() || !workspacePath) return null;
+  const raw = href.trim();
+  try {
+    const parsed = new URL(raw);
+    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+      return { kind: 'browser-url', url: parsed.toString() };
+    }
+    return null;
+  } catch {
+    // Relative and absolute workspace paths are handled below.
+  }
+  const pathPart = raw.split(/[?#]/, 1)[0];
+  if (!pathPart) return null;
+  let decodedPath = pathPart;
+  try {
+    decodedPath = decodeURIComponent(pathPart);
+  } catch {
+    return null;
+  }
+  const root = normalizeWorkspacePath(workspacePath).replace(/\/$/, '');
+  const candidate = normalizeWorkspacePath(decodedPath.startsWith('/') ? decodedPath : `${root}/${decodedPath}`);
+  if (candidate !== root && !candidate.startsWith(`${root}/`)) return null;
+  const extension = candidate.split('/').pop()?.split('.').pop()?.toLowerCase() || '';
+  if (extension === 'html' || extension === 'htm' || extension === 'xhtml' || extension === 'svg') {
+    return { kind: 'browser-file', filePath: candidate };
+  }
+  return { kind: 'file', filePath: candidate };
+}
+
+export function inferMimeType(name: string, fallback = 'application/octet-stream'): string {
+  const extension = name.split('.').pop()?.toLowerCase() ?? '';
+  switch (extension) {
+    case 'png':
+      return 'image/png';
+    case 'jpg':
+    case 'jpeg':
+      return 'image/jpeg';
+    case 'gif':
+      return 'image/gif';
+    case 'webp':
+      return 'image/webp';
+    case 'svg':
+      return 'image/svg+xml';
+    case 'txt':
+      return 'text/plain';
+    case 'md':
+    case 'markdown':
+      return 'text/markdown';
+    case 'json':
+      return 'application/json';
+    case 'csv':
+      return 'text/csv';
+    case 'pdf':
+      return 'application/pdf';
+    default:
+      return fallback;
+  }
+}
+
+export function isImageMimeType(mimeType: string): boolean {
+  return mimeType.toLowerCase().startsWith('image/');
+}
+
+export function isTextAttachment(name: string, mimeType: string): boolean {
+  const lowerMime = mimeType.toLowerCase();
+  const lowerName = name.toLowerCase();
+  return (
+    lowerMime.startsWith('text/') ||
+    lowerMime === 'application/json' ||
+    lowerMime === 'application/xml' ||
+    lowerName.endsWith('.md') ||
+    lowerName.endsWith('.json') ||
+    lowerName.endsWith('.csv') ||
+    lowerName.endsWith('.xml') ||
+    lowerName.endsWith('.yaml') ||
+    lowerName.endsWith('.yml')
+  );
+}
+
+export function mimeTypeFromDataUrl(dataUrl: string): string | null {
+  const match = /^data:([^;,]+)[;,]/i.exec(dataUrl.trim());
+  return match?.[1] ?? null;
+}
+
+export function base64FromDataUrl(dataUrl: string): string {
+  const marker = ';base64,';
+  const index = dataUrl.indexOf(marker);
+  return index >= 0 ? dataUrl.slice(index + marker.length) : '';
+}
+
+export function dataUrlFromBase64(base64: string, mimeType: string): string {
+  const trimmed = base64.trim();
+  if (trimmed.startsWith('data:')) {
+    return trimmed;
+  }
+  return `data:${mimeType};base64,${trimmed}`;
+}
+
+export function estimatedBytesFromBase64(base64: string): number {
+  const normalized = base64.replace(/\s/g, '');
+  const padding = normalized.endsWith('==') ? 2 : normalized.endsWith('=') ? 1 : 0;
+  return Math.max(0, Math.floor((normalized.length * 3) / 4) - padding);
+}
+
+export async function readBase64DataUrl(uri: string, mimeType: string, base64?: string | null): Promise<{ dataUrl: string; sizeBytes: number | null }> {
+  if (base64) {
+    const dataUrl = dataUrlFromBase64(base64, mimeType);
+    return {
+      dataUrl,
+      sizeBytes: estimatedBytesFromBase64(base64FromDataUrl(dataUrl) || base64),
+    };
+  }
+  if (uri.startsWith('data:')) {
+    return {
+      dataUrl: uri,
+      sizeBytes: estimatedBytesFromBase64(base64FromDataUrl(uri)),
+    };
+  }
+  const encoded = await readDesktopFileBase64(uri);
+  return {
+    dataUrl: dataUrlFromBase64(encoded, mimeType),
+    sizeBytes: estimatedBytesFromBase64(encoded),
+  };
+}
+
+export async function resolveFileSizeBytes(uri: string, fallbackSizeBytes: number | null | undefined): Promise<number | null> {
+  if (typeof fallbackSizeBytes === 'number') {
+    return fallbackSizeBytes;
+  }
+  try {
+    const info = await readDesktopFile(uri);
+    return info.sizeBytes;
+  } catch {
+    return null;
+  }
+}
+
+export async function readTextAttachmentContent(uri: string, name: string, mimeType: string, sizeBytes: number | null): Promise<string | undefined> {
+  if (!isTextAttachment(name, mimeType) || (sizeBytes ?? 0) > MAX_FILE_ATTACHMENT_BYTES) {
+    return undefined;
+  }
+  if (uri.startsWith('data:')) {
+    return undefined;
+  }
+  try {
+    const info = await readDesktopFile(uri);
+    return info.text;
+  } catch {
+    return undefined;
+  }
+}
+
+export function attachmentPrompt(attachments: ComposerAttachmentDraft[]): string {
+  if (attachments.length === 0) {
+    return '';
+  }
+  const imageCount = attachments.filter((item) => item.kind === 'image').length;
+  const referenceCount = attachments.filter((item) => item.kind === 'reference').length;
+  const fileCount = attachments.length - imageCount - referenceCount;
+  if (imageCount === 0 && fileCount === 0) {
+    return referenceCount === 1 ? '请查看这条引用。' : `请查看这 ${referenceCount} 条引用。`;
+  }
+  if (imageCount > 0 && fileCount > 0) {
+    return `请查看这 ${attachments.length} 个附件。`;
+  }
+  if (imageCount > 0) {
+    return imageCount === 1 ? '请查看这张图片。' : `请查看这 ${imageCount} 张图片。`;
+  }
+  return fileCount === 1 ? '请查看这个文件。' : `请查看这 ${fileCount} 个文件。`;
+}
+
+export function attachmentTextBlock(attachment: ComposerAttachmentDraft): string {
+  if (attachment.kind === 'reference') {
+    const lines = attachment.lineStart
+      ? `:${attachment.lineStart}${attachment.lineEnd && attachment.lineEnd !== attachment.lineStart ? `-${attachment.lineEnd}` : ''}`
+      : '';
+    const location = attachment.path ? `${attachment.path}${lines}` : attachment.name;
+    const parts = [`[引用: ${location}]`];
+    if (attachment.textContent) parts.push(`Content:\n${attachment.textContent}`);
+    return parts.join('\n');
+  }
+  const header = [
+    `[附件: ${attachment.name}]`,
+    `MIME: ${attachment.mimeType}`,
+    `Size: ${formatBytes(attachment.sizeBytes)}`,
+  ].join('\n');
+  if (attachment.textContent) {
+    return `${header}\nContent:\n${attachment.textContent}`;
+  }
+  return `${header}\nData URL:\n${attachment.dataUrl}`;
+}
+
+export function codexInputFromComposer(
+  text: string,
+  attachments: ComposerAttachmentDraft[],
+  skills: SelectedSkillAttachment[] = [],
+): Record<string, unknown>[] {
+  const trimmed = text.trim();
+  const items: Record<string, unknown>[] = [
+    { type: 'text', text: trimmed || attachmentPrompt(attachments) || (skills.length ? '请使用已选择的 Skill。' : '') },
+  ];
+  skills.forEach((skill) => {
+    items.push({
+      type: 'skill',
+      name: skill.name,
+      path: skill.path,
+    });
+  });
+  attachments.forEach((attachment) => {
+    if (attachment.kind === 'image') {
+      items.push({
+        type: 'image',
+        url: attachment.dataUrl,
+        name: attachment.name,
+        mimeType: attachment.mimeType,
+        sizeBytes: attachment.sizeBytes ?? undefined,
+      });
+      return;
+    }
+    items.push({ type: 'text', text: attachmentTextBlock(attachment) });
+  });
+  return items;
+}
+
+export function referenceToken(name: string): string {
+  return `[引用:${name}]`;
+}
+
+/** Short excerpt preview used as the capsule label (first line, ≤ max chars). */
+export function referencePreview(excerpt: string | undefined, max = 10): string {
+  if (!excerpt) return '';
+  const line = excerpt.split('\n').find((part) => part.trim())?.replace(/\s+/g, ' ').trim() ?? '';
+  const chars = [...line];
+  return chars.length > max ? `${chars.slice(0, max).join('')}…` : line;
+}
+
+export function referenceNamesInText(text: string): string[] {
+  const names: string[] = [];
+  for (const match of text.matchAll(/\[引用:([^\]\n]+)\]/g)) {
+    names.push(match[1]);
+  }
+  return names;
+}
+
+export function uniqueReferenceName(
+  base: string,
+  attachments: readonly ComposerAttachmentDraft[],
+  draftText: string,
+): string {
+  const taken = new Set([
+    ...attachments.filter((item) => item.kind === 'reference').map((item) => item.name),
+    ...referenceNamesInText(draftText),
+  ]);
+  let name = base;
+  let index = 2;
+  while (taken.has(name)) {
+    name = `${base} ${index}`;
+    index += 1;
+  }
+  return name;
+}
+
+/** Reference attachments only count while their token still lives in the draft text. */
+export function liveComposerAttachments(
+  text: string,
+  attachments: readonly ComposerAttachmentDraft[],
+): ComposerAttachmentDraft[] {
+  return attachments.filter((item) => item.kind !== 'reference' || text.includes(referenceToken(item.name)));
+}
+
+export function attachmentSummary(attachments: ComposerAttachmentDraft[]): string {
+  return attachments
+    .map((item) => `${item.kind === 'image' ? '图片' : item.kind === 'reference' ? '引用' : '文件'} ${item.name} (${formatBytes(item.sizeBytes)})`)
+    .join('\n');
+}
+
+export function selectedSkillSummary(skills: SelectedSkillAttachment[]): string {
+  return skills.map((item) => `${item.displayName || item.name} (${item.name})`).join('\n');
+}
+
+export function skillIdFromPath(name: string, path: string): string {
+  return `${name}:${path}`;
+}
+
+export function parseSkillListItems(value: unknown): SkillListItem[] {
+  const root = value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+  const entries = Array.isArray(root.data)
+    ? root.data
+    : Array.isArray(root.skills)
+      ? [{ skills: root.skills }]
+      : Array.isArray(value)
+        ? [{ skills: value }]
+        : [];
+  const byId = new Map<string, SkillListItem>();
+
+  entries.forEach((entry) => {
+    const entryRecord = entry && typeof entry === 'object' && !Array.isArray(entry)
+      ? entry as Record<string, unknown>
+      : {};
+    const skills = Array.isArray(entryRecord.skills) ? entryRecord.skills : [];
+    skills.forEach((skill) => {
+      if (!skill || typeof skill !== 'object' || Array.isArray(skill)) {
+        return;
+      }
+      const record = skill as Record<string, unknown>;
+      const name = stringFromUnknown(record.name).trim();
+      const path = stringFromUnknown(record.path).trim();
+      if (!name || !path) {
+        return;
+      }
+      const interfaceRecord = record.interface && typeof record.interface === 'object' && !Array.isArray(record.interface)
+        ? record.interface as Record<string, unknown>
+        : {};
+      const displayName = stringFromUnknown(interfaceRecord.displayName ?? interfaceRecord.display_name).trim() || name;
+      const shortDescription = stringFromUnknown(interfaceRecord.shortDescription ?? interfaceRecord.short_description).trim()
+        || stringFromUnknown(record.shortDescription ?? record.short_description).trim();
+      const description = shortDescription || stringFromUnknown(record.description).trim();
+      byId.set(skillIdFromPath(name, path), {
+        id: skillIdFromPath(name, path),
+        name,
+        displayName,
+        description,
+        shortDescription,
+        scope: stringFromUnknown(record.scope).trim() || 'unknown',
+        path,
+        enabled: record.enabled !== false,
+      });
+    });
+  });
+
+  return [...byId.values()].sort((left, right) => {
+    if (left.enabled !== right.enabled) {
+      return left.enabled ? -1 : 1;
+    }
+    return left.displayName.localeCompare(right.displayName);
+  });
+}
+
+export function extractProtocolError(eventType: string, data: Record<string, unknown>): string {
+  const rawError = data.error;
+  if (typeof rawError === 'string' && rawError) {
+    return rawError;
+  }
+
+  if (rawError && typeof rawError === 'object') {
+    const errorData = rawError as Record<string, unknown>;
+    const nestedMessage = errorData.message ?? errorData.error_message ?? errorData.reason;
+    if (typeof nestedMessage === 'string' && nestedMessage) {
+      return nestedMessage;
+    }
+
+    const nestedCode = errorData.code ?? errorData.error_code;
+    if (typeof nestedCode === 'string' && nestedCode) {
+      return nestedCode;
+    }
+  }
+
+  const message = data.errorMessage ?? data.error_message ?? data.message;
+  const code = data.errorCode ?? data.error_code ?? data.code;
+
+  if (typeof message === 'string' && message) {
+    return typeof code === 'string' && code ? `${code}: ${message}` : message;
+  }
+
+  if (typeof code === 'string' && code) {
+    return code;
+  }
+
+  if (/error|failed/i.test(eventType)) {
+    return eventType;
+  }
+
+  return '';
+}
+
+export type TimelineEntry = {
+  sentAttachments?: import('./sentAttachments').SentAttachment[];
+  id: string;
+  kind: 'incoming' | 'outgoing' | 'system';
+  title: string;
+  subtitle: string;
+  raw: string;
+  at: number;
+  sequence?: number;
+  workspaceId?: string;
+  conversationId?: string;
+  requestId?: string;
+  category?: ConversationBlockCategory;
+  phase?: ConversationBlockPhase;
+  turnId?: string;
+  blockId?: string;
+  contentIndex?: number;
+};
+
+export function parseToolCallState(raw: string, fallbackId: string): import('@todex/protocol/v2').ToolCallState {
+  let value: Record<string, unknown> = {};
+  try { value = JSON.parse(raw) as Record<string, unknown>; } catch { /* legacy text event */ }
+  const args = value.arguments ?? value.args ?? value.input;
+  const result = value.result ?? value.output;
+  const status = String(value.status ?? value.phase ?? 'running');
+  const normalizedStatus = (status === 'awaiting_approval' ? 'awaitingApproval' : status) as import('@todex/protocol/v2').ToolCallStatus;
+  return {
+    callId: String(value.callId ?? value.toolCallId ?? fallbackId), name: String(value.toolName ?? value.name ?? value.tool ?? '工具调用'),
+    argumentsText: typeof args === 'string' ? args : args === undefined ? raw : JSON.stringify(args, null, 2), argumentsJson: typeof args === 'string' ? undefined : args,
+    resultText: typeof result === 'string' ? result : result === undefined ? undefined : JSON.stringify(result, null, 2), resultJson: typeof result === 'string' ? undefined : result,
+    stdout: typeof value.stdout === 'string' ? value.stdout : undefined, stderr: typeof value.stderr === 'string' ? value.stderr : undefined,
+    status: normalizedStatus, error: typeof value.error === 'string' ? value.error : undefined,
+    completionReason: typeof value.completionReason === 'string' ? value.completionReason as import('@todex/protocol/v2').AgentCompletionReason : undefined,
+  };
+}
+
+export function workspaceDisplayName(workspace: Pick<WorkspaceRecord, 'name' | 'path'>): string {
+  const name = workspace.name.trim();
+  if (name && !/[\\/]/.test(name)) {
+    return name;
+  }
+  const normalizedPath = workspace.path.replace(/[\\/]+$/, '');
+  return normalizedPath.split(/[\\/]/).pop() || name || workspace.path;
+}
+
+export function conversationDisplayTitle(
+  conversation: Pick<ConversationRecord, 'id' | 'title' | 'preview' | 'provider'>,
+  timeline: TimelineEntry[],
+  firstPromptOverride?: string,
+): string {
+  const title = conversation.title.trim();
+  const genericTitles = new Set([
+    '',
+    '默认对话',
+    '新对话',
+    'codex',
+    'codex cli',
+    'pi',
+    'claude',
+    'claude code',
+    'devin',
+    'opencode',
+    conversation.provider ? providerDisplayName(conversation.provider).toLowerCase() : '',
+  ]);
+  if (!genericTitles.has(title.toLowerCase())) {
+    return title;
+  }
+
+  const summarize = (value: string) => {
+    const compact = value.replace(/\s+/g, ' ').trim();
+    return compact.length > 32 ? `${compact.slice(0, 32)}…` : compact;
+  };
+  const preview = summarize(conversation.preview || '');
+  if (preview && preview !== '暂无预览' && preview !== '还没有消息') {
+    return preview;
+  }
+  const firstPrompt = firstPromptOverride !== undefined ? firstPromptOverride : [...timeline]
+    .filter((entry) => entry.conversationId === conversation.id && entry.kind === 'outgoing' && entry.subtitle.trim())
+    .sort((left, right) => left.at - right.at)[0]?.subtitle ?? '';
+  return summarize(firstPrompt) || title || '未命名对话';
+}
+
+export type ConversationContextUsage = {
+  usedTokens: number;
+  contextWindow?: number;
+  inputTokens: number;
+  outputTokens: number;
+  cachedInputTokens: number;
+  cacheWriteTokens: number;
+  model?: string;
+  updatedAt: number;
+};
+
+export type UsageRecord = import('@todex/protocol/mobileParity').UsageRecord;
+
+export function normalizeUsageRecords(value: unknown): UsageRecord[] {
+  return normalizeSharedUsageRecords(value, { limit: MAX_USAGE_RECORDS });
+}
+
+function usageNumber(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : 0;
+}
+
+export function contextUsageFromV2Event(event: ConversationEvent): ConversationContextUsage | null {
+  const payload = event.payload && typeof event.payload === 'object' && !Array.isArray(event.payload)
+    ? event.payload as Record<string, unknown>
+    : {};
+  const metadata = payload.metadata && typeof payload.metadata === 'object' && !Array.isArray(payload.metadata)
+    ? payload.metadata as Record<string, unknown>
+    : {};
+  const tokenUsage = metadata.tokenUsage && typeof metadata.tokenUsage === 'object' && !Array.isArray(metadata.tokenUsage)
+    ? metadata.tokenUsage as Record<string, unknown>
+    : null;
+  const last = tokenUsage?.last && typeof tokenUsage.last === 'object' && !Array.isArray(tokenUsage.last)
+    ? tokenUsage.last as Record<string, unknown>
+    : null;
+
+  const normalizedUsage = payload.usage && typeof payload.usage === 'object' && !Array.isArray(payload.usage)
+    ? payload.usage as Record<string, unknown>
+    : null;
+  const normalizedLast = normalizedUsage?.last && typeof normalizedUsage.last === 'object' && !Array.isArray(normalizedUsage.last)
+    ? normalizedUsage.last as Record<string, unknown>
+    : null;
+
+  if (event.type === 'usage.updated' && normalizedLast) {
+    const inputTokens = usageNumber(normalizedLast.input);
+    const outputTokens = usageNumber(normalizedLast.output);
+    const cachedInputTokens = usageNumber(normalizedLast.cacheRead);
+    const cacheWriteTokens = usageNumber(normalizedLast.cacheWrite);
+    const nativeTotal = usageNumber(normalizedLast.total);
+    return {
+      usedTokens: nativeTotal || inputTokens + outputTokens + cachedInputTokens + cacheWriteTokens,
+      contextWindow: usageNumber(payload.contextWindow) || undefined,
+      inputTokens,
+      outputTokens,
+      cachedInputTokens,
+      cacheWriteTokens,
+      model: typeof payload.model === 'string' ? payload.model : undefined,
+      updatedAt: Date.parse(event.time) || Date.now(),
+    };
+  }
+
+  if (payload.providerMethod === 'thread/tokenUsage/updated' && last) {
+    return {
+      usedTokens: usageNumber(last.totalTokens),
+      contextWindow: usageNumber(tokenUsage?.modelContextWindow) || undefined,
+      inputTokens: usageNumber(last.inputTokens),
+      outputTokens: usageNumber(last.outputTokens),
+      cachedInputTokens: usageNumber(last.cachedInputTokens),
+      cacheWriteTokens: usageNumber(last.cacheWriteInputTokens),
+      updatedAt: Date.parse(event.time) || Date.now(),
+    };
+  }
+
+  const message = payload.message && typeof payload.message === 'object' && !Array.isArray(payload.message)
+    ? payload.message as Record<string, unknown>
+    : null;
+  const usage = message?.usage && typeof message.usage === 'object' && !Array.isArray(message.usage)
+    ? message.usage as Record<string, unknown>
+    : null;
+  if (event.type !== 'message.completed' || message?.role !== 'assistant' || !usage) {
+    return null;
+  }
+  const inputTokens = usageNumber(usage.input);
+  const outputTokens = usageNumber(usage.output);
+  const cachedInputTokens = usageNumber(usage.cacheRead);
+  const cacheWriteTokens = usageNumber(usage.cacheWrite);
+  const nativeTotal = usageNumber(usage.totalTokens);
+  return {
+    usedTokens: nativeTotal || inputTokens + outputTokens + cachedInputTokens + cacheWriteTokens,
+    inputTokens,
+    outputTokens,
+    cachedInputTokens,
+    cacheWriteTokens,
+    model: typeof message.model === 'string' ? message.model : undefined,
+    updatedAt: Date.parse(event.time) || Date.now(),
+  };
+}
+
+export type ConversationRenderItem =
+  | { type: 'entry'; entry: TimelineEntry }
+  | { type: 'executionGroup'; id: string; entries: TimelineEntry[] };
+
+export type SlashCommand = {
+  command: string;
+  title: string;
+  description: string;
+  category: SlashCommandCategory;
+};
+
+export type SlashCommandCategory = 'core' | 'thread' | 'context' | 'runtime' | 'settings' | 'debug';
+
+export type WorkspaceEntry = {
+  name: string;
+  path: string;
+  kind: 'directory' | 'file';
+};
+
+export type MentionTrigger = {
+  start: number;
+  end: number;
+  query: string;
+};
+
+export type MentionSuggestion = {
+  id: string;
+  title: string;
+  description: string;
+  insertText: string;
+};
+
+export type PermissionPresetId = 'read-only' | 'default' | 'auto-review' | 'full-access';
+
+export type PermissionPreset = {
+  id: PermissionPresetId;
+  title: string;
+  description: string;
+  approvalPolicy: string;
+  approvalsReviewer?: string | null;
+  sandboxMode: string;
+  profileId: string;
+};
+
+export type MentionReference = {
+  kind: 'file' | 'workspace' | 'conversation' | 'request';
+  value: string;
+};
+
+export type WorkspaceMentionHistory = {
+  workspaceId: string;
+  files: string[];
+  updatedAt: number;
+};
+
+export const REASONING_EFFORT_LABELS: Record<string, string> = {
+  none: 'None',
+  minimal: 'Minimal',
+  low: 'Low',
+  medium: 'Medium',
+  high: 'High',
+  xhigh: 'Extra high',
+};
+
+export function reasoningEffortLabel(value: string | null | undefined): string {
+  const normalized = normalizeReasoningEffort(value);
+  return normalized ? REASONING_EFFORT_LABELS[normalized] ?? normalized : 'Default';
+}
+
+export function modelDisplayLabel(model: string | null | undefined, catalog: CodexModelCatalogItem[]): string {
+  const normalized = model?.trim() ?? '';
+  if (!normalized) {
+    return '未设置';
+  }
+  return catalog.find((item) => item.model === normalized)?.displayName || normalized;
+}
+
+export function reasoningOptionsForModel(
+  model: string | null | undefined,
+  catalog: CodexModelCatalogItem[],
+): CodexReasoningEffortOption[] {
+  const preset = catalog.find((item) => item.model === model);
+  return preset?.supportedReasoningEfforts.length ? preset.supportedReasoningEfforts : DEFAULT_REASONING_EFFORT_OPTIONS;
+}
+
+export function defaultReasoningForModel(model: string | null | undefined, catalog: CodexModelCatalogItem[]): string | null {
+  const preset = catalog.find((item) => item.model === model);
+  return preset?.defaultReasoningEffort ?? null;
+}
+
+export function serviceTiersForModel(model: string | null | undefined, catalog: CodexModelCatalogItem[]) {
+  const preset = catalog.find((item) => item.model === model);
+  return preset?.serviceTiers.length ? preset.serviceTiers : [FAST_SERVICE_TIER];
+}
+
+export function fastServiceTierForModel(model: string | null | undefined, catalog: CodexModelCatalogItem[]) {
+  return (
+    serviceTiersForModel(model, catalog).find((tier) => tier.name === 'fast' || tier.id === FAST_SERVICE_TIER.id) ??
+    FAST_SERVICE_TIER
+  );
+}
+
+export function serviceTierLabel(value: string | null | undefined): string {
+  if (!value || value === 'default') {
+    return 'Default';
+  }
+  if (value === FAST_SERVICE_TIER.id || value === 'fast') {
+    return 'Fast';
+  }
+  return value;
+}
+
+export function mergeModelCatalog(remoteModels: CodexModelCatalogItem[], currentModels: string[]): CodexModelCatalogItem[] {
+  const byModel = new Map<string, CodexModelCatalogItem>();
+  FALLBACK_CODEX_MODELS.forEach((item) => byModel.set(item.model, item));
+  remoteModels.forEach((item) => byModel.set(item.model, item));
+  currentModels
+    .map((model) => model.trim())
+    .filter(Boolean)
+    .forEach((model) => {
+      if (!byModel.has(model)) {
+        byModel.set(model, {
+          id: model,
+          model,
+          displayName: model,
+          description: 'Custom model',
+          hidden: false,
+          isDefault: false,
+          supportedReasoningEfforts: DEFAULT_REASONING_EFFORT_OPTIONS,
+          defaultReasoningEffort: 'medium',
+          serviceTiers: [FAST_SERVICE_TIER],
+        });
+      }
+    });
+  return [...byModel.values()].filter((item) => !item.hidden);
+}
+
+export function normalizeExperimentalFeatures(value: Partial<ExperimentalFeatureSettings> | null | undefined): ExperimentalFeatureSettings {
+  return {
+    ...EXPERIMENTAL_FEATURE_DEFAULTS,
+    ...(value && typeof value === 'object' ? value : {}),
+  };
+}
+
+export function itemTypeOf(item: Record<string, unknown>): string {
+  const rawType = item.type ?? item.itemType ?? item.item_type;
+  return typeof rawType === 'string' ? rawType : '';
+}
+
+export function itemIdOf(item: Record<string, unknown>, fallback: string): string {
+  const rawId = item.id ?? item.itemId ?? item.item_id;
+  return typeof rawId === 'string' && rawId ? rawId : fallback;
+}
+
+export function textFromContent(value: unknown): string {
+  if (typeof value === 'string') {
+    return value;
+  }
+
+  if (!Array.isArray(value)) {
+    return '';
+  }
+
+  return value
+    .map((part) => {
+      if (typeof part === 'string') {
+        return part;
+      }
+      if (part && typeof part === 'object') {
+        const record = part as Record<string, unknown>;
+        if (typeof record.text === 'string') {
+          return record.text;
+        }
+      }
+      return '';
+    })
+    .filter(Boolean)
+    .join('');
+}
+
+export function textFromItem(item: Record<string, unknown>): string {
+  const directText = item.text ?? item.message;
+  if (typeof directText === 'string') {
+    return directText;
+  }
+  return textFromContent(item.content);
+}
+
+export type PersistedSettings = Omit<ConnectionSettings, 'authToken'>;
+
+
+export const SETTINGS_STORAGE_KEY = 'todex.web.settings.v1';
+export const BACKEND_CONNECTIONS_STORAGE_KEY = 'todex.web.backendConnections.v1';
+export const WORKSPACES_STORAGE_KEY = 'todex.web.workspaces.v1';
+export const CONVERSATIONS_STORAGE_KEY = 'todex.web.conversations.v1';
+export const TIMELINE_STORAGE_KEY = 'todex.web.timeline.v1';
+export const ACTIVE_SELECTION_STORAGE_KEY = 'todex.web.activeSelection.v1';
+export const MENTION_HISTORY_STORAGE_KEY = 'todex.web.mentionHistory.v1';
+export const SESSION_CURSORS_STORAGE_KEY = 'todex.web.sessionCursors.v1';
+export const EXPERIMENTAL_FEATURES_STORAGE_KEY = 'todex.web.experimentalFeatures.v1';
+export const USAGE_RECORDS_STORAGE_KEY = 'todex.web.usageRecords.v1';
+export const PROVIDER_MODEL_PREFERENCES_STORAGE_KEY = 'todex.web.providerModelPreferences.v1';
+export const KANBAN_TASKS_STORAGE_KEY = 'todex.web.kanbanTasks.v1';
+export const TOKEN_STORAGE_KEY = 'todex.web.token.v1';
+export const TOKEN_ORIGIN_STORAGE_KEY = 'todex.web.tokenOrigin.v1';
+export const JSON_SAVE_DEBOUNCE_MS = 350;
+export const SESSION_CURSOR_SAVE_DEBOUNCE_MS = 800;
+export const WORKSPACE_SYNC_DEBOUNCE_MS = 900;
+export const SOCKET_EVENT_BATCH_SIZE = 24;
+export const SOCKET_FRAME_DECODE_BATCH_SIZE = 8;
+export const SOCKET_FRAME_DECODE_BUDGET_MS = 10;
+export const MAX_TRANSPORT_HELLO_SESSION_CURSORS = 12;
+export const MAX_TIMELINE_ITEMS = 260;
+export const MAX_USAGE_RECORDS = 2_000;
+export const MAX_EVENTS = 220;
+export const RECONNECT_DELAY_MS = 2000;
+export const RECONNECT_MAX_DELAY_MS = 30_000;
+export const CHAT_ATTACH_REPLAY_LIMIT = 200;
+export const CHAT_BOTTOM_FOLLOW_THRESHOLD = 72;
+export const TERMINAL_MAX_OUTPUT_ENTRIES = 420;
+export const DEFAULT_TERMINAL_ROWS = 24;
+export const DEFAULT_TERMINAL_COLS = 80;
+export const LOCAL_SESSION_IDLE_SUSPEND_MS = 30 * 60 * 1000;
+export const LOCAL_SESSION_IDLE_SWEEP_MS = 2 * 60 * 1000;
+
+export const SLASH_COMMANDS: SlashCommand[] = [
+  { command: '/model', title: 'Model', description: 'choose what model and reasoning effort to use', category: 'settings' },
+  { command: '/fast', title: 'Fast', description: 'toggle fastest inference with increased plan usage', category: 'core' },
+  { command: '/permissions', title: 'Permissions', description: 'choose what Codex is allowed to do', category: 'settings' },
+  { command: '/personality', title: 'Personality', description: 'choose a communication style for Codex', category: 'settings' },
+  { command: '/experimental', title: 'Experimental', description: 'toggle experimental features', category: 'settings' },
+  { command: '/approve', title: 'Approve', description: 'approve one retry of a recent auto-review denial', category: 'runtime' },
+  { command: '/memories', title: 'Memories', description: 'configure memory use and generation', category: 'settings' },
+  { command: '/skills', title: 'Skills', description: 'use skills to improve how Codex performs specific tasks', category: 'context' },
+  { command: '/hooks', title: 'Hooks', description: 'view and manage lifecycle hooks', category: 'context' },
+  { command: '/review', title: 'Review', description: 'review my current changes and find issues', category: 'context' },
+  { command: '/rename', title: 'Rename', description: 'rename the current thread', category: 'thread' },
+  { command: '/new', title: 'New', description: 'start a new chat during a conversation', category: 'thread' },
+  { command: '/archive', title: 'Archive', description: 'archive this session and exit', category: 'thread' },
+  { command: '/resume', title: 'Resume', description: 'resume a saved chat', category: 'thread' },
+  { command: '/fork', title: 'Fork', description: 'fork the current chat', category: 'thread' },
+  { command: '/init', title: 'Init', description: 'create an AGENTS.md file with instructions for Codex', category: 'context' },
+  { command: '/compact', title: 'Compact', description: 'summarize conversation to prevent hitting the context limit', category: 'thread' },
+  { command: '/plan', title: 'Plan', description: 'switch to Plan mode', category: 'core' },
+  { command: '/goal', title: 'Goal', description: 'set or view the goal for a long-running task', category: 'thread' },
+  { command: '/subagents', title: 'Subagents', description: 'manage and switch between sub-agent threads', category: 'thread' },
+  { command: '/side', title: 'Side', description: 'start a side conversation in an ephemeral fork', category: 'thread' },
+  { command: '/btw', title: 'BTW', description: 'alias for /side', category: 'thread' },
+  { command: '/copy', title: 'Copy', description: 'copy last response as markdown', category: 'context' },
+  { command: '/diff', title: 'Diff', description: 'show git diff including untracked files', category: 'context' },
+  { command: '/mention', title: 'Mention', description: 'mention a file', category: 'context' },
+  { command: '/status', title: 'Status', description: 'show current session configuration and token usage', category: 'core' },
+  { command: '/mcp', title: 'MCP', description: 'list configured MCP tools; use /mcp verbose for details', category: 'context' },
+  { command: '/apps', title: 'Apps', description: 'manage apps', category: 'context' },
+  { command: '/plugins', title: 'Plugins', description: 'browse plugins', category: 'context' },
+  { command: '/feedback', title: 'Feedback', description: 'send logs to maintainers', category: 'settings' },
+  { command: '/logout', title: 'Logout', description: 'log out of Codex', category: 'settings' },
+  { command: '/quit', title: 'Quit', description: 'exit Codex', category: 'runtime' },
+  { command: '/exit', title: 'Exit', description: 'exit Codex', category: 'runtime' },
+  { command: '/ps', title: 'PS', description: 'list background terminals', category: 'runtime' },
+  { command: '/stop', title: 'Stop', description: 'stop all background terminals', category: 'runtime' },
+  { command: '/clean', title: 'Clean', description: 'alias for /stop', category: 'runtime' },
+  { command: '/clear', title: 'Clear', description: 'clear the terminal and start a new chat', category: 'thread' },
+];
+
+export const EXPERIMENTAL_FEATURE_DEFAULTS: ExperimentalFeatureSettings = {
+  gitDiffViewer: false,
+  verboseRuntimeEvents: false,
+  composerFileMentions: false,
+};
+
+export const EXPERIMENTAL_FEATURES: ExperimentalFeatureDefinition[] = [
+  {
+    id: 'gitDiffViewer',
+    title: 'Git diff 独立视图',
+    description: '允许通过 /diff 打开单独的变更查看界面。',
+    scope: 'App UI',
+  },
+  {
+    id: 'verboseRuntimeEvents',
+    title: '详细运行事件',
+    description: '保留更多后端事件细节，便于排查连接和线程状态。',
+    scope: 'Diagnostics',
+  },
+  {
+    id: 'composerFileMentions',
+    title: '@ 文件提及增强',
+    description: '启用输入框内的文件提及辅助和最近文件记录。',
+    scope: 'Composer',
+  },
+];
+
+export const SLASH_COMMAND_CATEGORY_ORDER: SlashCommandCategory[] = ['core', 'thread', 'context', 'runtime', 'settings', 'debug'];
+
+export const SLASH_COMMAND_CATEGORY_LABELS: Record<SlashCommandCategory, string> = {
+  core: '核心',
+  thread: 'Thread',
+  context: '上下文',
+  runtime: '运行时',
+  settings: '设置',
+  debug: '调试',
+};
+
+export const DIRECT_SLASH_COMMANDS = new Set([
+  '/compact',
+  '/init',
+  '/mention',
+  '/copy',
+]);
+
+export function canonicalSlashCommand(command: string): string {
+  const normalized = command.trim().toLowerCase();
+  if (normalized === '/clean') {
+    return '/stop';
+  }
+  if (normalized === '/btw') {
+    return '/side';
+  }
+  if (normalized === '/hook') {
+    return '/hooks';
+  }
+  if (normalized === '/plugin') {
+    return '/plugins';
+  }
+  return normalized.startsWith('/') ? normalized : `/${normalized}`;
+}
+
+export function slashCommandDefinition(command: string): SlashCommand | null {
+  const canonical = canonicalSlashCommand(command);
+  return SLASH_COMMANDS.find((item) => canonicalSlashCommand(item.command) === canonical) ?? null;
+}
+
+export function slashCommandNeedsActionPage(command: string): boolean {
+  return !DIRECT_SLASH_COMMANDS.has(canonicalSlashCommand(command));
+}
+
+export function serviceTierCommandForModel(command: string, model: string | null | undefined, catalog: CodexModelCatalogItem[]): CodexServiceTierOption | null {
+  const normalized = command.replace(/^\//, '').trim().toLowerCase();
+  if (!normalized) {
+    return null;
+  }
+  return serviceTiersForModel(model, catalog).find(
+    (tier) => tier.name.toLowerCase() === normalized || tier.id.toLowerCase() === normalized,
+  ) ?? null;
+}
+
+export function serviceTierSlashCommandsForModel(model: string | null | undefined, catalog: CodexModelCatalogItem[]): SlashCommand[] {
+  const existingCommands = new Set(SLASH_COMMANDS.map((item) => canonicalSlashCommand(item.command)));
+  return serviceTiersForModel(model, catalog)
+    .filter((tier) => !existingCommands.has(canonicalSlashCommand(`/${tier.name}`)))
+    .map((tier) => ({
+      command: `/${tier.name}`,
+      title: tier.name === 'fast' ? 'Fast' : tier.name,
+      description: tier.description,
+      category: 'core',
+    }));
+}
+
+export const PERMISSION_PRESETS: PermissionPreset[] = [
+  {
+    id: 'default',
+    title: 'Ask for approval',
+    description: 'Codex can read and edit files in the current workspace. Approval is required for network or outside edits.',
+    approvalPolicy: 'on-request',
+    approvalsReviewer: 'user',
+    sandboxMode: 'workspace-write',
+    profileId: ':workspace',
+  },
+  {
+    id: 'auto-review',
+    title: 'Approve for me',
+    description: 'Route approval requests to Codex auto-review before asking you.',
+    approvalPolicy: 'on-request',
+    approvalsReviewer: 'auto_review',
+    sandboxMode: 'workspace-write',
+    profileId: ':workspace',
+  },
+  {
+    id: 'full-access',
+    title: 'Full Access',
+    description: 'Codex can edit files outside this workspace and access the internet without asking.',
+    approvalPolicy: 'never',
+    approvalsReviewer: 'user',
+    sandboxMode: 'danger-full-access',
+    profileId: ':danger-full-access',
+  },
+];
+
+export { conversationPermissionCapabilities, conversationPermissionMode, rememberedRunModes } from './permissions';
+
+export function permissionPresetForProfile(
+  profileId: string | null | undefined,
+  approvalsReviewer?: string | null,
+): PermissionPreset | null {
+  if (!profileId) {
+    return null;
+  }
+  const normalizedReviewer = approvalsReviewer || null;
+  return (
+    PERMISSION_PRESETS.find((preset) =>
+      (preset.profileId === profileId || preset.id === profileId) &&
+      (!normalizedReviewer || preset.approvalsReviewer === normalizedReviewer)
+    ) ??
+    PERMISSION_PRESETS.find((preset) =>
+      (preset.profileId === profileId || preset.id === profileId) &&
+      preset.approvalsReviewer !== 'auto_review'
+    ) ??
+    null
+  );
+}
+
+export function permissionProfileLabel(profileId: string | null | undefined, approvalsReviewer?: string | null): string {
+  const preset = permissionPresetForProfile(profileId, approvalsReviewer);
+  return preset?.title ?? profileId ?? 'Legacy approval/sandbox';
+}
+
+export function approvalsReviewerValue(
+  workspace: WorkspaceRecord | null | undefined,
+  settings: ConnectionSettings,
+): string | null {
+  return workspace?.approvalsReviewer ?? settings.approvalsReviewer ?? null;
+}
+
+export function permissionPresetSelected(
+  preset: PermissionPreset,
+  workspace: WorkspaceRecord | null | undefined,
+  settings: ConnectionSettings,
+): boolean {
+  return (
+    workspace?.permissionProfile === preset.profileId &&
+    (approvalsReviewerValue(workspace, settings) || 'user') === preset.approvalsReviewer
+  );
+}
+
+// Codex `Personality` enum serializes lowercase: "none" | "friendly" | "pragmatic".
+export const PERSONALITY_OPTIONS: { id: string; title: string; description: string }[] = [
+  { id: 'friendly', title: 'Friendly', description: 'Warmer, more conversational communication style.' },
+  { id: 'pragmatic', title: 'Pragmatic', description: 'Direct, concise, action-oriented communication style.' },
+  { id: 'none', title: 'Default', description: 'Use the model default communication style.' },
+];
+
+export function personalityLabel(personality: string | null | undefined): string {
+  const normalized = (personality || 'none').toLowerCase();
+  return PERSONALITY_OPTIONS.find((option) => option.id === normalized)?.title ?? 'Default';
+}
+
+// Codex `feedback/upload` classification accepts these exact snake_case strings.
+export const FEEDBACK_CATEGORIES: { id: string; title: string; description: string }[] = [
+  { id: 'bad_result', title: 'Bad result', description: 'Codex produced an incorrect or unhelpful result.' },
+  { id: 'good_result', title: 'Good result', description: 'Codex did well — share positive feedback.' },
+  { id: 'bug', title: 'Bug', description: 'Something is broken in the app or Codex.' },
+  { id: 'safety_check', title: 'Safety check', description: 'A safety/approval concern to report.' },
+  { id: 'other', title: 'Other', description: 'Anything else worth telling the maintainers.' },
+];
+
+export const defaultSettings: ConnectionSettings = {
+  serverUrl: 'http://127.0.0.1:7345',
+  authToken: '',
+  tenantId: 'local',
+  encryptionProtocol: 'none',
+  encryptionPublicKey: '',
+  defaultWorkspacePath: '/home/dev/projects',
+  defaultModel: 'gpt-5.5',
+  defaultReasoningEffort: 'medium',
+  approvalPolicy: 'on-request',
+  approvalsReviewer: 'user',
+  sandboxMode: 'workspace-write',
+};
+
+export const defaultConnectionHealth: ConnectionHealth = {
+  status: 'unknown',
+  latencyMs: null,
+  lastCheckedAt: null,
+  error: '',
+  code: '',
+};
+
+export function modelCommandInitialValue(workspace: WorkspaceRecord, settings: ConnectionSettings): string {
+  return [workspace.model || settings.defaultModel, normalizeReasoningEffort(workspace.reasoningEffort)]
+    .filter(Boolean)
+    .join(' ');
+}
+
+export function parseModelCommandArgs(args: string[]): {
+  model: string;
+  reasoningEffort: string | null;
+  invalidReasoningEffort: string;
+} {
+  let model = '';
+  let reasoningEffort: string | null = null;
+  let invalidReasoningEffort = '';
+  let expected: 'model' | 'effort' | null = null;
+
+  for (const rawArg of args) {
+    const arg = rawArg.trim();
+    if (!arg) {
+      continue;
+    }
+    const lower = arg.toLowerCase();
+
+    if (lower === '--model' || lower === '-m' || lower === 'model') {
+      expected = 'model';
+      continue;
+    }
+    if (
+      lower === '--effort' ||
+      lower === '--reasoning' ||
+      lower === '--thinking' ||
+      lower === '-e' ||
+      lower === 'effort' ||
+      lower === 'reasoning' ||
+      lower === 'thinking'
+    ) {
+      expected = 'effort';
+      continue;
+    }
+
+    if (expected === 'model') {
+      model = arg;
+      expected = null;
+      continue;
+    }
+
+    const normalizedEffort = normalizeReasoningEffort(arg);
+    if (expected === 'effort') {
+      if (normalizedEffort) {
+        reasoningEffort = normalizedEffort;
+      } else {
+        invalidReasoningEffort = arg;
+      }
+      expected = null;
+      continue;
+    }
+
+    if (normalizedEffort) {
+      reasoningEffort = normalizedEffort;
+      continue;
+    }
+
+    if (!model) {
+      model = arg;
+    }
+  }
+
+  if (expected === 'effort') {
+    invalidReasoningEffort = invalidReasoningEffort || 'missing';
+  }
+
+  return { model, reasoningEffort, invalidReasoningEffort };
+}
+
+export function toPersistedSettings(settings: ConnectionSettings): PersistedSettings {
+  const { authToken: _authToken, ...rest } = settings;
+  return rest;
+}
+
+export function fromPersistedSettings(raw: Partial<PersistedSettings> | null | undefined, authToken: string): ConnectionSettings {
+  const { defaultThreadId: _legacyDefaultThreadId, ...safeRaw } = (raw ?? {}) as Partial<PersistedSettings> & {
+    defaultThreadId?: string;
+  };
+  return {
+    ...defaultSettings,
+    ...safeRaw,
+    defaultReasoningEffort: normalizeReasoningEffort(safeRaw.defaultReasoningEffort) ?? defaultSettings.defaultReasoningEffort,
+    authToken,
+  };
+}
+
+export function profileFromSettings(settings: ConnectionSettings, name = '默认后端', id = 'default-backend'): BackendConnectionProfile {
+  const now = Date.now();
+  return { id, name, serverUrl: normalizeServerUrl(settings.serverUrl), authToken: settings.authToken, tenantId: settings.tenantId, encryptionProtocol: settings.encryptionProtocol, encryptionPublicKey: settings.encryptionPublicKey, createdAt: now, updatedAt: now };
+}
+
+export function settingsFromProfile(profile: BackendConnectionProfile, current: ConnectionSettings): ConnectionSettings {
+  return { ...current, serverUrl: normalizeServerUrl(profile.serverUrl), authToken: profile.authToken, tenantId: profile.tenantId, encryptionProtocol: profile.encryptionProtocol, encryptionPublicKey: profile.encryptionPublicKey };
+}
+
+export function normalizeBackendConnectionProfile(value: unknown): BackendConnectionProfile | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Record<string, unknown>;
+  const id = typeof raw.id === 'string' ? raw.id.trim() : '';
+  const serverUrl = typeof raw.serverUrl === 'string' ? raw.serverUrl.trim() : '';
+  if (!id || !serverUrl) return null;
+  const now = Date.now();
+  return { id, labelColor: normalizeBackendLabelColor(raw.labelColor), name: typeof raw.name === 'string' && raw.name.trim() ? raw.name.trim() : '后端', serverUrl: normalizeServerUrl(serverUrl), authToken: typeof raw.authToken === 'string' ? raw.authToken : '', tenantId: typeof raw.tenantId === 'string' && raw.tenantId.trim() ? raw.tenantId.trim() : 'local', encryptionProtocol: raw.encryptionProtocol === 'x25519' || raw.encryptionProtocol === 'ml-kem-768' ? raw.encryptionProtocol : 'none', encryptionPublicKey: typeof raw.encryptionPublicKey === 'string' ? raw.encryptionPublicKey : '', createdAt: typeof raw.createdAt === 'number' ? raw.createdAt : now, updatedAt: typeof raw.updatedAt === 'number' ? raw.updatedAt : now };
+}
+
+export function authHeaders(settings: ConnectionSettings, extra: Record<string, string> = {}): Record<string, string> {
+  return {
+    ...extra,
+    ...(settings.authToken ? { Authorization: `Bearer ${settings.authToken}` } : {}),
+  };
+}
+
+export function workspaceSyncPayloadEquals(left: WorkspaceRecord[], right: WorkspaceRecord[]): boolean {
+  return JSON.stringify(prepareWorkspaceSyncPayload(left)) === JSON.stringify(prepareWorkspaceSyncPayload(right));
+}
+
+export function sanitizeSlug(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 40);
+}
+
+export function createSessionId(name: string): string {
+  const slug = sanitizeSlug(name) || 'workspace';
+  return `cdxs_${slug}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+export function terminalIdForConversation(conversationId: string, suffix = ''): string {
+  const base = `term_${conversationId.replace(/[^a-zA-Z0-9_-]+/g, '_')}`;
+  const normalizedSuffix = suffix.replace(/[^a-zA-Z0-9_-]+/g, '_');
+  return normalizedSuffix ? `${base}_${normalizedSuffix}` : base;
+}
+
+export function terminalStatusLabel(status: TerminalLifecycleState): string {
+  switch (status) {
+    case 'starting':
+      return '启动中';
+    case 'running':
+      return '运行中';
+    case 'stopping':
+      return '停止中';
+    case 'exited':
+      return '已退出';
+    case 'error':
+      return '异常';
+    case 'idle':
+    default:
+      return '未启动';
+  }
+}
+
+export function terminalOutputLine(kind: TerminalOutputEntry['kind'], text: string): TerminalOutputEntry {
+  return {
+    id: createRequestId(`terminal-${kind}`),
+    kind,
+    text,
+    at: Date.now(),
+  };
+}
+
+export function nowLabel(timestamp: number): string {
+  return new Date(timestamp).toLocaleTimeString([], {
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+export function connectionStateLabel(state: ConnectionState): string {
+  switch (state) {
+    case 'open':
+      return '已连接';
+    case 'connecting':
+      return '连接中';
+    case 'closed':
+      return '已断开';
+    case 'error':
+      return '连接异常';
+    case 'idle':
+    default:
+      return '未连接';
+  }
+}
+
+export function latencyLabelOf(latencyMs: number | null): string {
+  return latencyMs === null ? '未检测' : `${latencyMs} ms`;
+}
+
+export function healthLabelOf(health: ConnectionHealth): string {
+  switch (health.status) {
+    case 'online':
+      return `后端在线 · ${latencyLabelOf(health.latencyMs)}`;
+    case 'checking':
+      return health.latencyMs === null ? '检测中' : `检测中 · ${latencyLabelOf(health.latencyMs)}`;
+    case 'offline':
+      if (health.error) {
+        return health.error;
+      }
+      return '后端不可达';
+    case 'unknown':
+    default:
+      return '等待检测';
+  }
+}
+
+export function isV2Conversation(conversation: ConversationRecord | null | undefined): boolean {
+  return Boolean(conversation?.v2ConversationId || (conversation?.provider && conversation.provider !== ''));
+}
+
+export function conversationImageInputSupport(
+  conversation: ConversationRecord | null | undefined,
+  providers: ProviderDescriptor[],
+  options: {
+    models?: ProviderModelDescriptor[];
+    profileCapability?: { status: 'loading' | 'ready' | 'error'; imageInput?: boolean; reason?: string };
+  } = {},
+): { supported: boolean; reason?: string } {
+  if (!conversation) {
+    return { supported: false, reason: '请先选择一个对话。' };
+  }
+  // Provider-less conversations use the legacy local Codex path.
+  if (!isV2Conversation(conversation)) {
+    return { supported: true };
+  }
+  const descriptor = providers.find((item) => item.id === conversation.provider);
+  const mode = descriptor?.capabilities.imageInputMode;
+  if (mode === 'model') {
+    const models = options.models?.length ? options.models : descriptor?.models ?? [];
+    const model = conversation.model
+      ? models.find((item) => item.id === conversation.model)
+      : models.find((item) => item.isDefault);
+    if (model?.imageInput === true) return { supported: true };
+    return {
+      supported: false,
+      reason: model
+        ? `当前模型 ${model.displayName || model.id} 不支持图片输入，请切换模型。`
+        : '尚未确认当前模型是否支持图片输入，请等待模型列表加载完成。',
+    };
+  }
+  if (mode === 'profile') {
+    if (options.profileCapability?.status === 'ready') {
+      return options.profileCapability.imageInput
+        ? { supported: true }
+        : { supported: false, reason: options.profileCapability.reason || '当前 ACP 配置不支持图片输入。' };
+    }
+    return {
+      supported: false,
+      reason: options.profileCapability?.status === 'error'
+        ? options.profileCapability.reason || '无法确认当前 ACP 配置的图片能力。'
+        : '正在确认当前 ACP 配置的图片能力…',
+    };
+  }
+  if (mode === 'none') {
+    return { supported: false, reason: '当前 Agent 不支持图片输入。' };
+  }
+  if (descriptor?.capabilities.imageInput === true) {
+    return { supported: true };
+  }
+  if (!descriptor || descriptor.capabilities.imageInput === undefined) {
+    return {
+      supported: false,
+      reason: '当前 Backend 版本未声明图片输入能力，请升级 Backend 后重试。',
+    };
+  }
+  return {
+    supported: false,
+    reason: `${providerDisplayName(descriptor.id, descriptor.displayName)} 当前不支持图片输入；可继续附加文本文件或切换 Agent。`,
+  };
+}
+
+export function resolveCreateConversationAgent(input: {
+  requestedProvider?: string;
+  requestedProfile?: string;
+  providers: ProviderDescriptor[];
+  conversations: ConversationRecord[];
+  activeConversationId: string;
+  workspaceId: string;
+}): { provider: ProviderKind; providerProfile?: string } | null {
+  const available = input.providers.filter((item) => item.available);
+  const match = (provider?: string, profile?: string) => {
+    if (!provider) {
+      return null;
+    }
+    const descriptor = available.find((item) => item.id === provider);
+    if (!descriptor) {
+      return null;
+    }
+    const nextProfile = profile && descriptor.profiles.includes(profile)
+      ? profile
+      : descriptor.profiles[0];
+    return { provider: descriptor.id, providerProfile: nextProfile };
+  };
+
+  if (input.requestedProvider) {
+    return match(input.requestedProvider, input.requestedProfile);
+  }
+
+  const candidates = [
+    input.conversations.find((item) => item.id === input.activeConversationId),
+    ...input.conversations
+      .filter((item) => item.workspaceId === input.workspaceId && !item.archived)
+      .sort((left, right) => right.updatedAt - left.updatedAt),
+    ...input.conversations
+      .filter((item) => !item.archived)
+      .sort((left, right) => right.updatedAt - left.updatedAt),
+  ];
+  for (const conversation of candidates) {
+    const found = match(conversation?.provider, conversation?.providerProfile);
+    if (found) {
+      return found;
+    }
+  }
+
+  const first = available[0];
+  return first ? match(first.id) : null;
+}
+
+export function canSwitchConversationAgent(
+  conversation: ConversationRecord | null | undefined,
+  options: {
+    timeline?: TimelineEntry[];
+    thinking?: boolean;
+  } = {},
+): boolean {
+  if (!conversation) {
+    return false;
+  }
+  if (options.thinking) {
+    return false;
+  }
+  // lastSequence also advances for subscribe/metadata events, so it cannot
+  // mean "the user has started this chat". Lock only after a real message.
+  return !(options.timeline ?? []).some(
+    (entry) =>
+      entry.conversationId === conversation.id
+      && (entry.kind === 'outgoing' || entry.kind === 'incoming'),
+  );
+}
+
+export function conversationFromManifest(
+  manifest: ConversationManifest,
+  workspaceId: string,
+): ConversationRecord {
+  const createdAt = Date.parse(manifest.createdAt) || Date.now();
+  const updatedAt = Date.parse(manifest.updatedAt) || createdAt;
+  return {
+    id: manifest.id,
+    workspaceId,
+    title: manifest.title || providerDisplayName(manifest.provider),
+    preview: '',
+    nativeStatus: manifest.status,
+    archived: Boolean(manifest.archivedAt),
+    sessionId: `v2_${manifest.id}`,
+    threadId: '',
+    localAdapterState: 'idle',
+    mode: 'implement',
+    goalStatus: '',
+    goalObjective: '',
+    provider: manifest.provider,
+    providerProfile: manifest.providerProfile,
+    v2ConversationId: manifest.id,
+    lastSequence: manifest.lastSequence,
+    createdAt,
+    updatedAt,
+  };
+}
+
+export function mergeManifestConversations(
+  current: ConversationRecord[],
+  manifests: ConversationManifest[],
+  workspaces: WorkspaceRecord[],
+): ConversationRecord[] {
+  // The backend is the source of truth for v2 conversations. Drop locally
+  // cached v2 records whose manifest no longer exists instead of leaving a
+  // dead row that will fail on the next prompt. Merge field-by-field and keep
+  // the previous array/object identity when nothing actually changed so the
+  // sidebar does not re-render or re-sort on every poll.
+  const manifestIds = new Set(manifests.map((manifest) => manifest.id));
+  let changed = false;
+  const next = current.filter((item) => !isV2Conversation(item) || manifestIds.has(item.v2ConversationId || item.id));
+  if (next.length !== current.length) {
+    changed = true;
+  }
+  for (const manifest of manifests) {
+    const workspace = (manifest.workspaceId
+      ? workspaces.find((item) => item.id === manifest.workspaceId)
+      : undefined)
+      ?? workspaces.find((item) => item.path === manifest.workspace);
+    if (!workspace) {
+      continue;
+    }
+    const existingIndex = next.findIndex((item) => item.v2ConversationId === manifest.id || item.id === manifest.id);
+    if (existingIndex >= 0) {
+      const existing = next[existingIndex];
+      const manifestUpdatedAt = Date.parse(manifest.updatedAt) || existing.updatedAt;
+      const updatedAt = Math.max(existing.updatedAt, manifestUpdatedAt);
+      const lastSequence = Math.max(existing.lastSequence ?? 0, manifest.lastSequence ?? 0);
+      const title = manifest.title || providerDisplayName(manifest.provider);
+      const archived = Boolean(manifest.archivedAt);
+      const same = existing.title === title
+        && existing.archived === archived
+        && existing.nativeStatus === manifest.status
+        && existing.provider === manifest.provider
+        && existing.providerProfile === manifest.providerProfile
+        && existing.v2ConversationId === manifest.id
+        && existing.workspaceId === workspace.id
+        && existing.lastSequence === lastSequence
+        && existing.updatedAt === updatedAt;
+      if (!same) {
+        changed = true;
+        next[existingIndex] = {
+          ...existing,
+          title,
+          archived,
+          nativeStatus: manifest.status,
+          provider: manifest.provider,
+          providerProfile: manifest.providerProfile,
+          v2ConversationId: manifest.id,
+          workspaceId: workspace.id,
+          lastSequence,
+          updatedAt,
+        };
+      }
+    } else {
+      next.unshift(conversationFromManifest(manifest, workspace.id));
+      changed = true;
+    }
+  }
+  if (!changed) {
+    return current;
+  }
+  return next.sort((left, right) => (right.updatedAt - left.updatedAt) || (left.id < right.id ? -1 : 1));
+}
+
+export function classifyV2ConversationEvent(
+  event: ConversationEvent,
+  workspaceId: string,
+  activeTurnId = '',
+): TimelineEntry | null {
+  const entry = sharedClassifyV2ConversationEvent(event, workspaceId, activeTurnId);
+  return entry ? { ...entry, raw: entry.category ? '' : shortJson(event), sequence: event.sequence } : null;
+}
+
+export function shouldAppendV2ConversationEvent(event: ConversationEvent): boolean {
+  return sharedShouldAppendV2ConversationEvent(event);
+}
+
+export type V2ConversationReplayState = {
+  timeline: TimelineEntry[];
+  activeTurnId: string;
+  lastSequence: number;
+  missingSequences: number[];
+};
+
+export function reduceV2ConversationEvents(
+  events: ConversationEvent[],
+  workspaceId: string,
+): V2ConversationReplayState {
+  return sharedReduceConversationEvents(events, workspaceId);
+}
+
+export function modeLabelOf(mode: ConversationRecord['mode']): string {
+  return mode === 'plan' ? 'Plan mode' : 'Implement mode';
+}
+
+export function compactGoalLabel(conversation: ConversationRecord): string {
+  if (!conversation.goalStatus && !conversation.goalObjective) {
+    return 'No goal';
+  }
+  if (conversation.goalObjective) {
+    return `Goal · ${conversation.goalObjective}`;
+  }
+  return `Goal · ${conversation.goalStatus}`;
+}
+
+export function conversationTitleFromNativeThread(thread: CodexNativeThread): string {
+  return thread.name || thread.preview || thread.title || thread.id;
+}
+
+export function conversationPatchFromNativeThread(thread: CodexNativeThread): Partial<ConversationRecord> {
+  return {
+    title: conversationTitleFromNativeThread(thread),
+    preview: thread.preview,
+    nativeStatus: thread.status,
+    archived: thread.archived,
+    threadId: thread.id,
+    updatedAt: thread.updatedAt || Date.now(),
+    createdAt: thread.createdAt || Date.now(),
+  };
+}
+
+export function threadDateLabel(timestamp: number): string {
+  if (!timestamp) {
+    return 'unknown';
+  }
+  return new Date(timestamp).toLocaleString();
+}
+
+export function formatThreadSummary(thread: CodexNativeThread): string {
+  const lines = [
+    `Thread: ${thread.id || 'unknown'}`,
+    `Title: ${conversationTitleFromNativeThread(thread)}`,
+    `Status: ${thread.status || 'unknown'}`,
+    `Archived: ${thread.archived ? 'yes' : 'no'}`,
+    `CWD: ${thread.cwd || 'unknown'}`,
+    `Model: ${thread.model || 'unknown'}`,
+    `Session: ${thread.sessionId || 'unknown'}`,
+    `Created: ${threadDateLabel(thread.createdAt)}`,
+    `Updated: ${threadDateLabel(thread.updatedAt)}`,
+  ];
+  if (thread.preview) {
+    lines.push('', thread.preview);
+  }
+  return lines.join('\n');
+}
+
+export function valueAtPath(value: unknown, path: string[]): unknown {
+  let current = value;
+  for (const part of path) {
+    if (!current || typeof current !== 'object' || Array.isArray(current)) {
+      return undefined;
+    }
+    current = (current as Record<string, unknown>)[part];
+  }
+  return current;
+}
+
+export function resultThreadFromValue(value: unknown): CodexNativeThread | null {
+  return (
+    parseCodexNativeThread(value) ||
+    parseCodexNativeThread(valueAtPath(value, ['thread'])) ||
+    parseCodexNativeThread(valueAtPath(value, ['result', 'thread'])) ||
+    null
+  );
+}
+
+export function formatThreadActionResult(action: PendingThreadAction, responseValue: unknown): string {
+  if (action.action === 'mcp') {
+    const servers = parseMcpServerStatusListResponse(responseValue);
+    if (!servers.length) {
+      return 'No MCP servers returned.';
+    }
+    return servers
+      .map((server) => `${server.name}: ${server.tools.length} tools, ${server.resources.length} resources, auth ${server.authStatus}`)
+      .join('\n');
+  }
+  if (action.action === 'permissionProfiles') {
+    const profiles = parsePermissionProfileListResponse(responseValue);
+    return profiles.length
+      ? profiles.map((profile) => `${profile.id}: ${profile.description}`).join('\n')
+      : 'No permission profiles returned.';
+  }
+  const thread = resultThreadFromValue(responseValue);
+  if (thread && (action.action === 'detail' || action.action === 'metadata' || action.action === 'rollback' || action.action === 'unarchive')) {
+    return formatThreadSummary(thread);
+  }
+  return shortJson(responseValue);
+}
+
+export function parseThreadMetadataArgs(args: string[]): { gitInfo: Record<string, string | null>; error?: string } {
+  const gitInfo: Record<string, string | null> = {};
+  let index = 0;
+  while (index < args.length) {
+    const rawKey = args[index]?.toLowerCase();
+    const key =
+      rawKey === 'origin' || rawKey === 'originurl' || rawKey === 'origin-url'
+        ? 'originUrl'
+        : rawKey === 'branch' || rawKey === 'sha'
+          ? rawKey
+          : '';
+    if (!key) {
+      return { gitInfo, error: `未知 metadata 字段: ${args[index]}` };
+    }
+    const next = args[index + 1];
+    if (!next) {
+      return { gitInfo, error: `${args[index]} 需要一个值，或使用 clear/null 清空。` };
+    }
+    gitInfo[key] = /^(clear|null|none|-)$/i.test(next) ? null : next;
+    index += 2;
+  }
+  if (Object.keys(gitInfo).length === 0) {
+    return { gitInfo, error: '请输入 branch、sha 或 origin。' };
+  }
+  return { gitInfo };
+}
+
+export function parseThreadMetadataPrompt(value: string): { gitInfo: Record<string, string | null>; error?: string } {
+  const args = value.trim().split(/\s+/).filter(Boolean);
+  return parseThreadMetadataArgs(args);
+}
+
+export function parseThreadMemoryMode(value: string): 'enabled' | 'disabled' | 'reset' | '' {
+  const normalized = value.trim().toLowerCase();
+  if (/^(on|enable|enabled|true|1)$/i.test(normalized)) {
+    return 'enabled';
+  }
+  if (/^(off|disable|disabled|false|0)$/i.test(normalized)) {
+    return 'disabled';
+  }
+  if (/^(reset|clear)$/i.test(normalized)) {
+    return 'reset';
+  }
+  return '';
+}
+
+export function parsePositiveLimit(value: string | undefined, fallback: number): number {
+  const parsed = Number.parseInt(value ?? '', 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return fallback;
+  }
+  return Math.min(parsed, 100);
+}
+
+export function parseJsonArrayPrompt(value: string): unknown[] | null {
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+export function nativeThreadPatchFromNotification(eventType: string, data: Record<string, unknown>): Partial<ConversationRecord> | null {
+  const threadId = threadIdFromEventData({ type: eventType, payload: data } as ServerEvent, data);
+  if (!threadId) {
+    return null;
+  }
+  if (eventType === 'codex.thread/archived' || eventType === 'codex.thread.archived' || data.method === 'thread/archived') {
+    return { archived: true, nativeStatus: 'archived', updatedAt: Date.now() };
+  }
+  if (eventType === 'codex.thread/unarchived' || eventType === 'codex.thread.unarchived' || data.method === 'thread/unarchived') {
+    return { archived: false, nativeStatus: '', updatedAt: Date.now() };
+  }
+  if (eventType === 'codex.thread/closed' || eventType === 'codex.thread.closed' || data.method === 'thread/closed') {
+    return { nativeStatus: 'closed', updatedAt: Date.now() };
+  }
+  if (eventType === 'codex.thread/status/changed' || eventType === 'codex.thread.status.changed' || data.method === 'thread/status/changed') {
+    const status = typeof data.status === 'string'
+      ? data.status
+      : data.status && typeof data.status === 'object' && !Array.isArray(data.status)
+        ? String((data.status as Record<string, unknown>).type ?? (data.status as Record<string, unknown>).state ?? '')
+        : '';
+    return { nativeStatus: status, updatedAt: Date.now() };
+  }
+  if (eventType === 'codex.thread/name/updated' || eventType === 'codex.thread.name.updated' || data.method === 'thread/name/updated') {
+    const title = typeof data.threadName === 'string'
+      ? data.threadName
+      : typeof data.thread_name === 'string'
+        ? data.thread_name
+        : '';
+    return title ? { title, updatedAt: Date.now() } : { title: '', updatedAt: Date.now() };
+  }
+  return null;
+}
+
+export function goalPatchFromEventData(data: Record<string, unknown>): Pick<ConversationRecord, 'goalStatus' | 'goalObjective'> | null {
+  const result = data.result;
+  const resultObject = result && typeof result === 'object' && !Array.isArray(result)
+    ? result as Record<string, unknown>
+    : null;
+  const goalValue = resultObject?.goal ?? data.goal;
+  const goal = goalValue && typeof goalValue === 'object' && !Array.isArray(goalValue)
+    ? goalValue as Record<string, unknown>
+    : null;
+
+  if (goal) {
+    return {
+      goalStatus: typeof goal.status === 'string' ? goal.status : 'active',
+      goalObjective: typeof goal.objective === 'string' ? goal.objective : '',
+    };
+  }
+
+  if (resultObject?.cleared === true || data.cleared === true) {
+    return {
+      goalStatus: '',
+      goalObjective: '',
+    };
+  }
+
+  return null;
+}
+
+export function turnObjectFromEventData(data: Record<string, unknown>): Record<string, unknown> | null {
+  const turn = data.turn;
+  return turn && typeof turn === 'object' && !Array.isArray(turn)
+    ? turn as Record<string, unknown>
+    : null;
+}
+
+export function turnIdFromEventData(data: Record<string, unknown>): string {
+  const turn = turnObjectFromEventData(data);
+  const value = data.turnId ?? data.turn_id ?? data.codexTurnId ?? data.codex_turn_id ?? turn?.id;
+  return typeof value === 'string' && value.trim() ? value.trim() : '';
+}
+
+export function turnStatusFromEventData(data: Record<string, unknown>): string {
+  const turn = turnObjectFromEventData(data);
+  const value = data.status ?? data.lifecycleState ?? data.lifecycle_state ?? turn?.status;
+  return typeof value === 'string' ? value : '';
+}
+
+export function textFromLocalTurnPayload(payload: Record<string, unknown>): string {
+  const input = payload.input;
+  if (!Array.isArray(input)) {
+    return shortJson(payload).slice(0, 240);
+  }
+
+  const text = input
+    .map((item) => {
+      if (!item || typeof item !== 'object') {
+        return '';
+      }
+      const record = item as Record<string, unknown>;
+      if (typeof record.text === 'string' && record.text) {
+        if (record.text.startsWith('[附件:')) {
+          return '';
+        }
+        return record.text;
+      }
+      if (record.type === 'image') {
+        const name = typeof record.name === 'string' && record.name ? record.name : 'image';
+        return `[图片附件: ${name}]`;
+      }
+      return '';
+    })
+    .filter(Boolean)
+    .join('\n');
+
+  return text || shortJson(payload).slice(0, 240);
+}
+
+export function findMentionTrigger(text: string, cursor: number): MentionTrigger | null {
+  const end = Math.max(0, Math.min(cursor, text.length));
+  const beforeCursor = text.slice(0, end);
+  const atIndex = beforeCursor.lastIndexOf('@');
+  if (atIndex < 0) {
+    return null;
+  }
+
+  const prefix = beforeCursor.slice(0, atIndex);
+  if (prefix && !/\s$/.test(prefix)) {
+    return null;
+  }
+
+  const query = beforeCursor.slice(atIndex + 1);
+  if (/[^\s@]*\s/.test(query) || query.includes('@')) {
+    return null;
+  }
+
+  return {
+    start: atIndex,
+    end,
+    query,
+  };
+}
+
+export function buildMentionSuggestions(
+  trigger: MentionTrigger | null,
+  entries: WorkspaceEntry[],
+): MentionSuggestion[] {
+  if (!trigger) {
+    return [];
+  }
+
+  return entries.slice(0, 8).map((entry) => ({
+    id: `${entry.kind}-${entry.path}`,
+    title: entry.kind === 'directory' ? `${entry.name}/` : entry.name,
+    description: entry.path,
+    insertText: entry.kind === 'directory' ? `@${entry.path}` : `@${entry.path} `,
+  }));
+}
+
+export function insertMention(text: string, trigger: MentionTrigger, insertText: string): string {
+  return `${text.slice(0, trigger.start)}${insertText}${text.slice(trigger.end)}`;
+}
+
+export function parseMentionReferences(text: string): MentionReference[] {
+  const references = new Map<string, MentionReference>();
+  const mentionPattern = /(?:^|\s)@([^\s@]+)/g;
+  let match: RegExpExecArray | null;
+
+  while ((match = mentionPattern.exec(text)) !== null) {
+    const raw = (match[1] ?? '').replace(/[.,;:!?，。；：！？]+$/g, '');
+    if (!raw) {
+      continue;
+    }
+
+    const [prefix, ...rest] = raw.split(':');
+    const value = rest.join(':').trim();
+    const kind =
+      prefix === 'workspace' || prefix === 'conversation' || prefix === 'request'
+        ? prefix
+        : 'file';
+    const resolvedValue = kind === 'file' ? raw : value;
+    if (!resolvedValue) {
+      continue;
+    }
+    references.set(`${kind}:${resolvedValue}`, { kind, value: resolvedValue });
+  }
+
+  return [...references.values()];
+}
+
+export function summarizeMentionReferences(references: MentionReference[]): string {
+  const files = references.filter((item) => item.kind === 'file');
+  if (!files.length) {
+    return '';
+  }
+  return files.map((item) => item.value).join(', ');
+}
+
+export function stringFromUnknown(value: unknown): string {
+  if (typeof value === 'string') {
+    return value;
+  }
+  if (value === null || value === undefined) {
+    return '';
+  }
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return String(value);
+  }
+  return '';
+}
+
+export function parseWorkspaceDirectorySnapshot(value: unknown): WorkspaceDirectorySnapshot {
+  const root = value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+  const entries = Array.isArray(root.entries)
+    ? root.entries
+        .map((entry): WorkspaceDirectoryEntry | null => {
+          if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+            return null;
+          }
+          const record = entry as Record<string, unknown>;
+          const name = stringFromUnknown(record.name).trim();
+          const path = stringFromUnknown(record.path).trim();
+          const kind = stringFromUnknown(record.kind);
+          if (!name || !path || kind !== 'directory') {
+            return null;
+          }
+          return { name, path, kind: 'directory' };
+        })
+        .filter((entry): entry is WorkspaceDirectoryEntry => Boolean(entry))
+    : [];
+  const parent = stringFromUnknown(root.parent).trim();
+  return {
+    root: stringFromUnknown(root.root).trim(),
+    current: stringFromUnknown(root.current).trim(),
+    parent: parent || null,
+    entries,
+  };
+}
+
+export async function fetchWorkspaceDirectorySnapshot(
+  settings: ConnectionSettings,
+  path?: string,
+): Promise<WorkspaceDirectorySnapshot> {
+  const url = new URL(buildHttpUrl(settings.serverUrl, '/v2/workspace/directories'));
+  if (path) {
+    url.searchParams.set('path', path);
+  }
+  const response = await fetch(url.toString(), {
+    headers: authHeaders(settings),
+  });
+  const body = await response.json().catch(() => null);
+  if (!response.ok) {
+    const message = body && typeof body === 'object' && !Array.isArray(body)
+      ? stringFromUnknown((body as Record<string, unknown>).message)
+      : '';
+    throw new Error(message || `目录读取失败: ${response.status}`);
+  }
+  const snapshot = parseWorkspaceDirectorySnapshot(body);
+  if (!snapshot.current) {
+    throw new Error('后端没有返回当前目录');
+  }
+  return snapshot;
+}
+
+export function progressTextFromData(data: Record<string, unknown>, item: Record<string, unknown> | null): string {
+  const direct = [
+    data.delta,
+    data.text,
+    data.message,
+    data.summary,
+    data.status,
+    data.reason,
+    data.operation,
+    data.command,
+    data.question,
+  ].map(stringFromUnknown).find(Boolean);
+  if (direct) {
+    return direct;
+  }
+
+  const questions = data.questions;
+  if (Array.isArray(questions)) {
+    const questionText = questions
+      .map((question) => question && typeof question === 'object' && !Array.isArray(question)
+        ? stringFromUnknown((question as Record<string, unknown>).question)
+        : '')
+      .find(Boolean);
+    if (questionText) {
+      return questionText;
+    }
+  }
+
+  if (item) {
+    const text = textFromItem(item);
+    if (text) {
+      return text;
+    }
+    const command = item.command ?? item.name ?? item.toolName ?? item.tool_name;
+    if (typeof command === 'string' && command) {
+      return command;
+    }
+  }
+
+  const result = data.result;
+  if (result && typeof result === 'object' && !Array.isArray(result)) {
+    const resultText = progressTextFromData(result as Record<string, unknown>, null);
+    if (resultText) {
+      return resultText;
+    }
+  }
+
+  return '';
+}
+
+export function isLifecycleProgressText(text: string): boolean {
+  return /^(starting|ready|started|completed|running|idle|busy)$/i.test(text.trim());
+}
+
+export function objectPayloadOf(event: ServerEvent): Record<string, unknown> {
+  return event.payload && typeof event.payload === 'object' && !Array.isArray(event.payload)
+    ? event.payload as Record<string, unknown>
+    : {};
+}
+
+export function sessionIdFromEvent(event: ServerEvent, data = eventPayloadData(event)): string {
+  const direct = transportSessionIdFromEvent(event);
+  if (direct) {
+    return direct;
+  }
+  const candidates = [
+    data.codexSessionId,
+    data.codex_session_id,
+    data.sessionId,
+    data.session_id,
+  ];
+  const value = candidates.find((candidate) => typeof candidate === 'string' && candidate.trim());
+  return typeof value === 'string' ? value : '';
+}
+
+export function cursorFromEvent(event: ServerEvent): number | null {
+  return transportCursorFromEvent(event);
+}
+
+export function threadIdFromEventData(event: ServerEvent, data = eventPayloadData(event)): string {
+  const threadId = extractThreadIdFromEvent(event);
+  if (threadId) {
+    return threadId;
+  }
+  const payload = objectPayloadOf(event);
+  const candidates = [
+    event.codex_thread_id,
+    payload.codexThreadId,
+    payload.codex_thread_id,
+    payload.threadId,
+    payload.thread_id,
+  ];
+  const value = candidates.find((candidate) => typeof candidate === 'string' && candidate.trim());
+  return typeof value === 'string' ? normalizeThreadId(value) : '';
+}
+
+export function classifyChatEvent(event: ServerEvent, workspaceId: string, conversationId: string): TimelineEntry | null {
+  const data = eventPayloadData(event);
+  const itemValue = data.item;
+  const item = itemValue && typeof itemValue === 'object' && !Array.isArray(itemValue)
+    ? itemValue as Record<string, unknown>
+    : null;
+
+  if (event.type === 'codex.item.agentMessage.delta') {
+    const itemId = typeof data.itemId === 'string'
+      ? data.itemId
+      : typeof data.item_id === 'string'
+        ? data.item_id
+        : eventId(event);
+    const delta = typeof data.delta === 'string' ? data.delta : '';
+    return {
+      id: itemId,
+      kind: 'incoming',
+      title: 'Codex',
+      subtitle: delta,
+      raw: shortJson(event),
+      at: Date.now(),
+      workspaceId,
+      conversationId,
+    };
+  }
+
+  if (!item || (event.type !== 'codex.item.started' && event.type !== 'codex.item.completed')) {
+    return null;
+  }
+
+  const itemType = itemTypeOf(item);
+  if (itemType !== 'agentMessage' && itemType !== 'agent_message') {
+    return null;
+  }
+
+  const text = textFromItem(item);
+  return {
+    id: itemIdOf(item, eventId(event)),
+    kind: 'incoming',
+    title: 'Codex',
+    subtitle: text || '正在回复...',
+    raw: shortJson(event),
+    at: Date.now(),
+    workspaceId,
+    conversationId,
+  };
+}
+
+export function classifyProgressEvent(event: ServerEvent, workspaceId: string, conversationId: string): TimelineEntry | null {
+  const data = eventPayloadData(event);
+  const itemValue = data.item;
+  const item = itemValue && typeof itemValue === 'object' && !Array.isArray(itemValue)
+    ? itemValue as Record<string, unknown>
+    : null;
+  const type = event.type;
+  const itemType = item ? itemTypeOf(item) : '';
+  const progressText = progressTextFromData(data, item);
+  const requestId = data.requestId ?? data.request_id;
+  const pendingRequestId = typeof requestId === 'string' && requestId ? requestId : undefined;
+
+  if (/reasoning|thinking|thought|analysis/i.test(type) || /reasoning|thinking|thought|analysis/i.test(itemType)) {
+    if (!progressText || isLifecycleProgressText(progressText)) {
+      return null;
+    }
+    return {
+      id: `progress-${eventId(event)}`,
+      kind: 'system',
+      title: '思考中',
+      subtitle: progressText,
+      raw: shortJson(event),
+      at: Date.now(),
+      workspaceId,
+      conversationId,
+    };
+  }
+
+  if (type === 'codex.control.request.accepted' || type === 'codex.control.ready' || type === 'codex.control.response') {
+    return null;
+  }
+
+  if (/tool|command|mcp|approval|requestUserInput/i.test(type) || /tool|command|mcp|approval/i.test(itemType)) {
+    if ((!progressText || isLifecycleProgressText(progressText)) && !type.endsWith('.request')) {
+      return null;
+    }
+    return {
+      id: `progress-${eventId(event)}`,
+      kind: 'system',
+      title: type.endsWith('.request')
+        ? '请求权限批准'
+        : type.endsWith('.completed') || /resolved|completed/i.test(type)
+          ? '步骤完成'
+          : '执行步骤',
+      subtitle: progressText || type,
+      raw: shortJson(event),
+      at: Date.now(),
+      workspaceId,
+      conversationId,
+      requestId: pendingRequestId,
+    };
+  }
+
+  if (/interrupted|failed|error/i.test(type)) {
+    return {
+      id: `progress-${eventId(event)}`,
+      kind: 'system',
+      title: /interrupted/i.test(type) ? '已停止' : '运行异常',
+      subtitle: progressText || extractProtocolError(type, data) || type,
+      raw: shortJson(event),
+      at: Date.now(),
+      workspaceId,
+      conversationId,
+    };
+  }
+
+  return null;
+}
+
+export function isTurnTerminalEvent(event: ServerEvent): boolean {
+  return (
+    event.type === 'codex.turn.completed' ||
+    event.type === 'codex.turn.interrupted' ||
+    event.type === 'codex.turn.failed' ||
+    event.type === 'codex.error' ||
+    event.type === 'codex.control.error'
+  );
+}
+
+export function makeSystemEntry(title: string, subtitle = '', workspaceId = '', conversationId = ''): TimelineEntry {
+  return {
+    id: createRequestId('sys'),
+    kind: 'system',
+    title,
+    subtitle,
+    raw: '',
+    at: Date.now(),
+    workspaceId,
+    conversationId,
+  };
+}
+
+export function makeOutgoingEntry(
+  message: { id: string; type: string; payload: Record<string, unknown> },
+  workspaceId: string,
+  conversationId: string,
+): TimelineEntry {
+  return {
+    id: message.id,
+    kind: message.type === 'codex.local.turn' ? 'outgoing' : 'system',
+    title: message.type === 'codex.local.turn' ? 'You' : `sent ${message.type}`,
+    subtitle:
+      message.type === 'codex.local.turn'
+        ? textFromLocalTurnPayload(message.payload)
+        : shortJson(message.payload).slice(0, 220),
+    raw: shortJson(message),
+    at: Date.now(),
+    workspaceId,
+    conversationId,
+  };
+}
+
+export function timelineEntryFromNativeHistoryEntry(
+  entry: CodexThreadHistoryEntry,
+  workspaceId: string,
+  conversationId: string,
+): TimelineEntry {
+  return {
+    ...entry,
+    workspaceId,
+    conversationId,
+  };
+}
+
+export function isVisibleConversationEntry(entry: TimelineEntry): boolean {
+  if (entry.kind === 'outgoing' || entry.kind === 'incoming') {
+    return true;
+  }
+
+  if (/^sent codex\./i.test(entry.title)) {
+    return false;
+  }
+
+  if (entry.title === '协议指令' || entry.title === '已开始思考') {
+    return false;
+  }
+
+  if (isLifecycleProgressText(entry.subtitle)) {
+    return false;
+  }
+
+  return true;
+}
+
+export function conversationPreviewText(latest: TimelineEntry | undefined): string {
+  const text = (latest?.subtitle || latest?.title || '').replace(/\s+/g, ' ').trim();
+  return text || '新的对话';
+}
+
+export function isStepProgressEntry(entry: TimelineEntry): boolean {
+  return sharedIsStepProgressEntry(entry);
+}
+
+export function isThinkingProgressEntry(entry: TimelineEntry): boolean {
+  return sharedIsThinkingProgressEntry(entry);
+}
+
+export function isCollapsibleProgressEntry(entry: TimelineEntry): boolean {
+  return sharedIsCollapsibleProgressEntry(entry);
+}
+
+export function executionGroupId(entries: TimelineEntry[]): string {
+  return sharedExecutionGroupId(entries);
+}
+
+export function buildConversationRenderItems(entries: TimelineEntry[]): ConversationRenderItem[] {
+  return sharedBuildConversationRenderItems(entries) as ConversationRenderItem[];
+}
+
+export function createDefaultConversation(workspace: WorkspaceRecord): ConversationRecord {
+  const createdAt = workspace.createdAt || Date.now();
+  return {
+    id: createRequestId('conversation'),
+    workspaceId: workspace.id,
+    title: '默认对话',
+    preview: '',
+    nativeStatus: '',
+    archived: false,
+    sessionId: createSessionId(`${workspace.name}_conversation`),
+    threadId: '',
+    localAdapterState: 'idle',
+    mode: 'implement',
+    goalStatus: '',
+    goalObjective: '',
+    createdAt,
+    updatedAt: workspace.updatedAt || createdAt,
+  };
+}
+
+export function conversationsForWorkspaceSnapshot(
+  workspaces: WorkspaceRecord[],
+  conversations: ConversationRecord[],
+): ConversationRecord[] {
+  const workspaceIds = new Set(workspaces.map((workspace) => workspace.id));
+  const next = conversations.filter((conversation) => workspaceIds.has(conversation.workspaceId));
+  const existingWorkspaceIds = new Set(next.map((conversation) => conversation.workspaceId));
+  for (const workspace of workspaces) {
+    if (!existingWorkspaceIds.has(workspace.id)) {
+      next.push(createDefaultConversation(workspace));
+    }
+  }
+  return next.sort((left, right) => right.updatedAt - left.updatedAt);
+}
+
+export function forkConversationRecord(conversation: ConversationRecord, title?: string): ConversationRecord {
+  return {
+    ...conversation,
+    id: createRequestId('conversation'),
+    title: title?.trim() || `${conversation.title || '新对话'} fork`,
+    preview: '',
+    nativeStatus: '',
+    archived: false,
+    sessionId: createSessionId(`${conversation.title || 'conversation'}_fork`),
+    threadId: '',
+    localAdapterState: 'idle',
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  };
+}
