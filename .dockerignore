@@ -1,0 +1,17 @@
+.git
+.github
+node_modules
+dist-client
+dist-server
+output
+test-results
+playwright-report
+.playwright-cli
+tests
+docs
+*.orig
+*.log
+.env
+.env.*
+Dockerfile
+.dockerignore

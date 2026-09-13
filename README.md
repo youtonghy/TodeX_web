@@ -68,6 +68,27 @@ CI should set `TODEX_BUILD_VERSION` to the release version while building. Local
 development builds display `DEV0.0.0`; `package.json` keeps the valid placeholder
 version `0.0.0`.
 
+### Docker image
+
+The `docker` GitHub Actions workflow is triggered manually (**Actions → docker →
+Run workflow**) with a release version such as `1.2.3`. It builds
+`ghcr.io/<owner>/todex_web:<version>` (plus `:latest` by default) and requires a
+`HEROUI_AUTH_TOKEN` repository secret for the licensed `@heroui-pro/react`
+install. The `protocol_ref` input pins which `youtonghy/TodeX` branch or tag the
+protocol sources are compiled from.
+
+To build the image locally, point the `todexapp` build context at a sibling
+`TodeX_app` checkout:
+
+```bash
+docker buildx build \
+  --build-context todexapp=/path/to/TodeX_app \
+  --secret id=HEROUI_AUTH_TOKEN,env=HEROUI_AUTH_TOKEN \
+  -t todex-web .
+```
+
+Run it with `docker run -p 4173:4173 todex-web`; `HOST` and `PORT` are supported.
+
 The Node server exposes the site and `GET /healthz`. It has no Backend proxy, user database, session store, or secret configuration.
 
 Terminate TLS at a trusted reverse proxy. An HTTPS page must use HTTPS/WSS for non-loopback Backends. Each Backend must allow the deployed site origin through CORS and, when relevant, browser Private Network Access.

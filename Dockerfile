@@ -1,0 +1,56 @@
+# syntax=docker/dockerfile:1
+
+# This build expects the sibling TodeX_app checkout (GitHub repo youtonghy/TodeX)
+# as a named build context, because the web bundle compiles protocol sources
+# from ../TodeX_app/src/lib:
+#
+#   docker buildx build --build-context todexapp=/path/to/TodeX_app -t todex-web .
+#
+# The @heroui-pro/react postinstall reads HEROUI_AUTH_TOKEN; pass it as a build
+# secret when the licensed token is required:
+#
+#   --secret id=HEROUI_AUTH_TOKEN,env=HEROUI_AUTH_TOKEN
+
+FROM node:22-alpine AS base
+ENV PNPM_HOME=/pnpm
+ENV PATH="$PNPM_HOME:$PATH"
+RUN corepack enable && corepack prepare pnpm@11.24.0 --activate
+WORKDIR /build/TodeX_web
+
+FROM base AS deps
+RUN apk add --no-cache python3 make g++
+COPY package.json pnpm-lock.yaml ./
+# Only the licensed HeroUI Pro download and the esbuild binary need install
+# scripts in CI; the keyring helper (@zowe) has no credential store here.
+RUN printf "allowBuilds:\n  '@heroui-pro/react': true\n  esbuild: true\n" > pnpm-workspace.yaml
+RUN --mount=type=secret,id=HEROUI_AUTH_TOKEN,env=HEROUI_AUTH_TOKEN \
+    pnpm install --frozen-lockfile
+# Protocol sources resolve their @noble/* imports through this node_modules.
+RUN mkdir -p /build/TodeX_app \
+    && ln -s /build/TodeX_web/node_modules /build/TodeX_app/node_modules
+COPY --from=todexapp src/lib /build/TodeX_app/src/lib
+
+FROM deps AS build
+COPY . .
+ARG TODEX_BUILD_VERSION=DEV0.0.0
+ENV TODEX_BUILD_VERSION=$TODEX_BUILD_VERSION
+RUN pnpm lint && pnpm typecheck && pnpm build
+
+FROM base AS prod-deps
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+RUN pnpm install --prod --frozen-lockfile --ignore-scripts
+
+FROM node:22-alpine AS runtime
+ENV NODE_ENV=production \
+    HOST=0.0.0.0 \
+    PORT=4173
+WORKDIR /app
+COPY --from=prod-deps /build/TodeX_web/node_modules ./node_modules
+COPY --from=build /build/TodeX_web/dist-server ./dist-server
+COPY --from=build /build/TodeX_web/dist-client ./dist-client
+COPY package.json ./
+USER node
+EXPOSE 4173
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \
+  CMD wget -q -O /dev/null "http://127.0.0.1:${PORT}/healthz" || exit 1
+CMD ["node", "dist-server/server/index.js"]

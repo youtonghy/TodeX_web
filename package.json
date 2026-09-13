@@ -21,6 +21,11 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
+    "compression": "^1.8.1",
+    "express": "^5.2.0",
+    "helmet": "^8.1.0"
+  },
+  "devDependencies": {
     "@gravity-ui/icons": "^2.22.0",
     "@heroui-pro/react": "^1.0.0-beta.8",
     "@heroui/react": "^3.2.4",
@@ -33,9 +38,6 @@
     "@noble/post-quantum": "^0.7.1",
     "@react-aria/utils": "^3.34.1",
     "@remixicon/react": "^4.9.0",
-    "compression": "^1.8.1",
-    "express": "^5.2.0",
-    "helmet": "^8.1.0",
     "jsqr": "^1.4.0",
     "marked": "^18.0.11",
     "motion": "^13.1.1",
@@ -50,9 +52,7 @@
     "streamdown": "^2.6.0",
     "tailwind-merge": "^3.6.0",
     "tailwind-variants": "^3.3.1",
-    "tailwindcss": "^4.3.3"
-  },
-  "devDependencies": {
+    "tailwindcss": "^4.3.3",
     "@eslint/js": "^9.39.3",
     "@playwright/test": "^1.61.0",
     "@tailwindcss/vite": "^4.3.3",
