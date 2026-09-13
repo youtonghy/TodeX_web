@@ -14,6 +14,7 @@ the mobile app is not available for download yet. Each workbench browser connect
 directly to its own user-managed `todex-agentd` over REST and WebSocket.
 
 The title menu includes CLI management for the active Backend, including installed/latest version status and managed one-click upgrades.
+The chat model picker includes a search field above the list, with case-insensitive model name matching, a clear button, and keyboard navigation.
 
 ## Requirements
 
