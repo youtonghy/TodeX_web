@@ -2,29 +2,37 @@ import { describe, expect, it } from 'vitest';
 import { QueuedFollowUps, restoreQueuedFollowUps } from '../../src/renderer/session/queuedFollowUps';
 
 describe('local follow-up delivery', () => {
-  it('only advances a live completed submission once, never historical replay', async () => {
+  it('advances on a completed turn once, never during historical replay', async () => {
     const queue = new QueuedFollowUps();
     const items = [{ id: 'a' }, { id: 'b' }];
     const sent: string[] = [];
     const send = async (item: { id: string }) => { sent.push(item.id); return true; };
     const remove = (id: string) => { items.splice(items.findIndex(item => item.id === id), 1); };
-    await queue.settle('c', 'old', 'turn.completed', false, false, () => items[0], send, remove);
-    await queue.settle('c', 't', 'turn.completed', true, true, () => items[0], send, remove);
+    await queue.settle('c', 't', 'turn.completed', true, () => items[0], send, remove);
     expect(sent).toEqual([]);
-    await queue.settle('c', 't', 'turn.completed', true, false, () => items[0], send, remove);
-    await queue.settle('c', 't', 'turn.completed', true, false, () => items[0], send, remove);
+    await queue.settle('c', 't', 'turn.completed', false, () => items[0], send, remove);
+    await queue.settle('c', 't', 'turn.completed', false, () => items[0], send, remove);
     expect(sent).toEqual(['a']);
     expect(items).toEqual([{ id: 'b' }]);
   });
-  it('pauses on failed turns and uncertain sends until explicit resume', async () => {
+  it('pauses only on abnormal turn end; failed sends stay queued and retryable', async () => {
     const queue = new QueuedFollowUps(); let attempts = 0;
-    const next = () => ({ id: 'same-stable-id' });
+    const items = [{ id: 'a' }];
+    const next = () => items[0];
     const send = async () => { attempts++; return false; };
-    await queue.settle('c', 't', 'turn.failed', true, false, next, send, () => {});
-    await queue.settle('c', 't2', 'turn.completed', true, false, next, send, () => {});
-    expect(attempts).toBe(0);
-    await queue.resume('c', next, send, () => { throw new Error('unknown send removed'); });
-    expect(attempts).toBe(1); expect(queue.isPaused('c')).toBe(true);
+    const remove = () => { items.splice(0, 1); };
+    // A failed send does not pause: the item stays queued for the next trigger.
+    await queue.settle('c', 't1', 'turn.completed', false, next, send, remove);
+    expect(attempts).toBe(1);
+    expect(queue.isPaused('c')).toBe(false);
+    // An abnormal terminal pauses until explicit resume.
+    await queue.settle('c', 't2', 'turn.failed', false, next, send, remove);
+    expect(queue.isPaused('c')).toBe(true);
+    await queue.settle('c', 't3', 'turn.completed', false, next, send, remove);
+    expect(attempts).toBe(1);
+    await queue.resume('c', next, send, remove);
+    expect(attempts).toBe(2);
+    expect(queue.isPaused('c')).toBe(false);
   });
   it('serializes concurrent resume calls', async () => {
     const queue = new QueuedFollowUps(); let attempts = 0; let finish!: (ok: boolean) => void;
@@ -46,9 +54,9 @@ it('advances after a queued turn finishes before its submission ACK', async () =
   const send = (item: {id: string}) => { sent.push(item.id); return item.id === 'b'
     ? new Promise<boolean>(resolve => { acknowledge = resolve; }) : Promise.resolve(true); };
   const remove = (id: string) => { const index = items.findIndex(item => item.id === id); if (index >= 0) items.splice(index, 1); };
-  const first = queue.settle('conversation', 'a', 'turn.completed', true, false, () => items[0], send, remove);
+  const first = queue.settle('conversation', 'a', 'turn.completed', false, () => items[0], send, remove);
   remove('b'); // Realtime terminal consumed B before its command waiter resolved.
-  await queue.settle('conversation', 'b', 'turn.completed', true, false, () => items[0], send, remove);
+  await queue.settle('conversation', 'b', 'turn.completed', false, () => items[0], send, remove);
   acknowledge(true); await first;
   expect(sent).toEqual(['b','c']); expect(items).toEqual([]);
 });
