@@ -39,9 +39,11 @@ import {
   referencePreview,
   referenceToken,
   uniqueReferenceName,
+  STREAMING_REPLY_PLACEHOLDER,
 } from '../session/helpers';
 import { selectionInside } from '../lib/selection';
 import { findCapabilityHashTrigger } from '@todex/protocol/todex';
+import { getLocale, t, useT } from '../i18n';
 
 type Props = {
   session: TodeXSession;
@@ -64,7 +66,7 @@ function isTextFile(file: File): boolean {
 function readFileAsDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onerror = () => reject(reader.error ?? new Error('无法读取图片'));
+    reader.onerror = () => reject(reader.error ?? new Error(t('chat.readImageFailed')));
     reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '');
     reader.readAsDataURL(file);
   });
@@ -95,22 +97,36 @@ function toolPresentation(raw: string) {
     const value = JSON.parse(raw) as Record<string, unknown>;
     const toolName = typeof value.toolName === 'string' ? value.toolName
       : typeof value.tool === 'string' ? value.tool
-        : typeof value.command === 'string' ? '命令执行' : '工具调用';
+        : typeof value.command === 'string' ? t('chat.toolCommand') : t('chat.toolCall');
     const args = value.arguments ?? value.input ?? (typeof value.command === 'string' ? { command: value.command } : {});
     return { toolName, argsText: typeof args === 'string' ? args : JSON.stringify(args, null, 2) };
   } catch {
-    return { toolName: '工具调用', argsText: raw };
+    return { toolName: t('chat.toolCall'), argsText: raw };
   }
 }
 
-const PERMISSION_LABELS: Record<PermissionMode, string> = {
-  ask: '请求审批',
-  auto: '自动审批',
-  'full-access': '完全访问',
-};
+const PERMISSION_MODES: readonly PermissionMode[] = ['ask', 'auto', 'full-access'];
+
+function permissionModeLabel(mode: PermissionMode): string {
+  switch (mode) {
+    case 'ask': return t('chat.permissionAsk');
+    case 'auto': return t('chat.permissionAuto');
+    default: return t('chat.permissionFullAccess');
+  }
+}
 
 function formatTokenCount(value: number): string {
-  return new Intl.NumberFormat('zh-CN', { notation: value >= 10_000 ? 'compact' : 'standard', maximumFractionDigits: 1 }).format(value);
+  return new Intl.NumberFormat(getLocale(), { notation: value >= 10_000 ? 'compact' : 'standard', maximumFractionDigits: 1 }).format(value);
+}
+
+// Localized equivalent of progressGroupLabel from @todex/protocol/mobileParity.
+function progressGroupLabel(entries: readonly { category?: string }[], active: boolean, pendingCount = 0): string {
+  if (pendingCount > 0) return t('chat.pendingApproval');
+  if (!active) return t('chat.workProcess');
+  const latestCategory = entries[entries.length - 1]?.category;
+  if (latestCategory === 'reasoning') return t('chat.thinking');
+  if (latestCategory === 'tool' || latestCategory === 'approval') return t('chat.executing');
+  return t('chat.working');
 }
 
 function isImeCompositionKey(event: KeyboardEvent): boolean {
@@ -139,6 +155,7 @@ function ContextUsageIndicator({
   cachedInputTokens: number;
   cacheWriteTokens: number;
 }) {
+  const t = useT();
   const percent = contextWindow ? Math.min(100, Math.max(0, usedTokens / contextWindow * 100)) : null;
   const progress = percent ?? 0;
   return (
@@ -148,7 +165,7 @@ function ContextUsageIndicator({
           isIconOnly
           variant="ghost"
           className="context-usage-ring min-w-0 p-0"
-          aria-label={percent === null ? '上下文用量等待 Provider 返回' : `上下文已使用 ${percent.toFixed(1)}%`}
+          aria-label={percent === null ? t('chat.contextPending') : t('chat.contextUsed', { percent: percent.toFixed(1) })}
           style={{ background: `conic-gradient(var(--accent) ${progress}%, var(--separator) ${progress}% 100%)` }}
         >
           <span />
@@ -156,12 +173,12 @@ function ContextUsageIndicator({
       </Tooltip.Trigger>
       <Tooltip.Content>
         <div className="min-w-48 space-y-1 p-1 text-xs">
-          <p className="font-medium">上下文使用情况</p>
-          {percent === null ? <p className="text-muted">等待 Provider 返回上下文窗口。</p> : (
+          <p className="font-medium">{t('chat.contextTitle')}</p>
+          {percent === null ? <p className="text-muted">{t('chat.contextWaiting')}</p> : (
             <>
               <p>{formatTokenCount(usedTokens)} / {formatTokenCount(contextWindow!)} tokens · {percent.toFixed(1)}%</p>
-              <p className="text-muted">输入 {formatTokenCount(inputTokens)} · 输出 {formatTokenCount(outputTokens)}</p>
-              <p className="text-muted">缓存读取 {formatTokenCount(cachedInputTokens)} · 缓存写入 {formatTokenCount(cacheWriteTokens)}</p>
+              <p className="text-muted">{t('chat.tokensInOut', { input: formatTokenCount(inputTokens), output: formatTokenCount(outputTokens) })}</p>
+              <p className="text-muted">{t('chat.tokensCache', { read: formatTokenCount(cachedInputTokens), write: formatTokenCount(cacheWriteTokens) })}</p>
             </>
           )}
         </div>
@@ -179,6 +196,7 @@ function AgentMessageActions({
   entry: { id: string; subtitle: string; at: number; turnId?: string };
   session: TodeXSession;
 }) {
+  const t = useT();
   const conversation = session.conversations.find(item => item.id === conversationId);
   const provider = session.v2Providers.find(item => item.id === conversation?.provider);
   const canFork = provider?.capabilities.controlActions?.includes('fork') === true;
@@ -189,11 +207,11 @@ function AgentMessageActions({
   return (
     <ChatMessageActions className="mt-1">
       <ChatMessageActions.Copy
-        aria-label="复制回复"
-        tooltip="复制回复"
+        aria-label={t('chat.copyReply')}
+        tooltip={t('chat.copyReply')}
         onPress={() => void navigator.clipboard.writeText(entry.subtitle)
-          .then(() => toast.success('已复制回复'))
-          .catch(() => toast.danger('复制失败，请重试'))}
+          .then(() => toast.success(t('chat.replyCopied')))
+          .catch(() => toast.danger(t('chat.copyFailed')))}
       >
         <RiClipboardLine aria-hidden="true" />
       </ChatMessageActions.Copy>
@@ -201,8 +219,8 @@ function AgentMessageActions({
         isIconOnly
         size="sm"
         variant="ghost"
-        aria-label="Fork 对话"
-        tooltip={canFork ? "Fork 对话" : "当前 Agent 未声明支持分叉"}
+        aria-label={t('chat.forkConversation')}
+        tooltip={canFork ? t('chat.forkConversation') : t('chat.forkUnsupported')}
         isDisabled={!canFork}
         onPress={() => session.forkConversation(conversationId)}
       >
@@ -210,7 +228,7 @@ function AgentMessageActions({
       </ChatMessage.Action>
       <HoverCard>
         <HoverCard.Trigger>
-          <ChatMessage.Action isIconOnly size="sm" variant="ghost" aria-label="查看回复统计">
+          <ChatMessage.Action isIconOnly size="sm" variant="ghost" aria-label={t('chat.replyStats')}>
             <RiBarChartBoxLine aria-hidden="true" />
           </ChatMessage.Action>
         </HoverCard.Trigger>
@@ -224,6 +242,7 @@ function AgentMessageActions({
 }
 
 export function ChatPanel({ session }: Props) {
+  const t = useT();
   const conversation = session.activeConversation;
   const workspace = session.activeWorkspace;
   const draft = conversation ? (session.chatDrafts[conversation.id] ?? '') : '';
@@ -319,8 +338,8 @@ export function ChatPanel({ session }: Props) {
   if (!conversation || !workspace) {
     return (
       <div className="flex h-full flex-col items-center justify-center px-8 text-center">
-        <p className="text-sm font-medium">选择一个对话</p>
-        <p className="text-muted mt-1 max-w-sm text-sm">从左侧打开工作区和对话，或新建后开始聊天。</p>
+        <p className="text-sm font-medium">{t('chat.pickConversation')}</p>
+        <p className="text-muted mt-1 max-w-sm text-sm">{t('chat.pickConversationHint')}</p>
       </div>
     );
   }
@@ -353,7 +372,7 @@ export function ChatPanel({ session }: Props) {
   const canCompact = !isV2Conversation(conversation)
     || session.v2Providers.find(item => item.id === currentProvider)?.capabilities.controlActions?.includes('compact') === true;
   const slashCatalog = currentProvider === 'pi' ? [...providerSlashCatalog, ...piTodexCommands] : [
-    ...(canCompact ? [{ command: '/compact', title: '压缩上下文', description: '压缩上下文，保留关键进展', category: 'thread' as const }] : []),
+    ...(canCompact ? [{ command: '/compact', title: t('chat.compactTitle'), description: t('chat.compactDescription'), category: 'thread' as const }] : []),
     ...providerSlashCatalog.filter(item => canonicalSlashCommand(item.command) !== '/compact'),
   ];
   const chooseSlashCommand = (command: string) => {
@@ -402,6 +421,7 @@ export function ChatPanel({ session }: Props) {
   const submissionStatus = session.submissionStatusByConversation[conversation.id];
   const executionUnknown = submissionStatus === 'unknown';
   const runtime = session.conversationRuntimeById[conversation.id];
+  const latestProcessGroupId = activeChatProcessId(items, runtime?.activeTurnId || session.turnIds[conversation.id]);
   const sessionPermissionIds = new Set((runtime?.pendingPermissions ?? []).filter(item => item.scope === 'session').map(item => item.id));
   const pendingPermissionIds = new Set((runtime?.pendingPermissions ?? []).map(item => item.id));
   const permissionRequests = session.pendingRequests.filter(item => item.requestId && pendingPermissionIds.has(item.requestId));
@@ -457,21 +477,21 @@ export function ChatPanel({ session }: Props) {
   const currentContextWindow = contextUsage?.contextWindow
     ?? providerModels.find((item) => item.id === contextModelId || item.id.endsWith(`/${contextModelId}`))?.contextWindow;
   const permissionConfig = conversationPermissionCapabilities(conversation, session.v2Providers);
-  const permissionModes = (permissionConfig?.modes ?? []).filter((mode) => Object.hasOwn(PERMISSION_LABELS, mode));
+  const permissionModes = (permissionConfig?.modes ?? []).filter((mode) => PERMISSION_MODES.includes(mode));
   const currentPermission = conversationPermissionMode(conversation, workspace, session.v2Providers);
   const fixedPermission = permissionModes.length === 1;
   const canChoosePermission = permissionModes.length > 0;
-  const permissionHint = agentProvider === 'pi' ? 'Pi 固定完全访问，无内建审批机制；访问范围由运行环境限制。'
-    : !canChoosePermission ? '当前后端尚未提供权限模式能力，请升级或检查 Agent 配置。'
-      : !currentPermission ? '当前权限配置需要重新选择后才能执行。'
-        : '权限和工作模式将在下次发送时应用。';
+  const permissionHint = agentProvider === 'pi' ? t('chat.permissionHintPi')
+    : !canChoosePermission ? t('chat.permissionHintUnavailable')
+      : !currentPermission ? t('chat.permissionHintReselect')
+        : t('chat.permissionHintApply');
 
   const isToolCallEntry = isChatToolEntry;
 
   const addBrowserFiles = async (files: File[], source: 'clipboard' | 'file' = 'file') => {
     const remaining = MAX_COMPOSER_ATTACHMENTS - attachments.length;
     if (remaining <= 0) {
-      toast.danger(`一次最多附加 ${MAX_COMPOSER_ATTACHMENTS} 个文件`);
+      toast.danger(t('chat.maxAttachments', { max: MAX_COMPOSER_ATTACHMENTS }));
       return;
     }
     const nextAttachments: (typeof attachments) = [];
@@ -485,14 +505,14 @@ export function ChatPanel({ session }: Props) {
         const mimeType = file.type || inferMimeType(file.name);
         const image = isSupportedComposerImage(mimeType);
         if (image && !imageInputSupport.supported) {
-          throw new Error(imageInputSupport.reason || '当前 Agent 不支持图片输入');
+          throw new Error(imageInputSupport.reason || t('chat.imageUnsupported'));
         }
         if (!image && isImageMimeType(mimeType) && !isTextFile(file)) {
-          throw new Error('仅支持 PNG、JPEG、GIF 或 WebP 图片');
+          throw new Error(t('chat.imageFormats'));
         }
-        if (image && file.size > MAX_WEB_IMAGE_BYTES) throw new Error('图片不能超过 2.5 MB');
+        if (image && file.size > MAX_WEB_IMAGE_BYTES) throw new Error(t('chat.imageTooLarge'));
         if (!image && (!isTextFile(file) || file.size > MAX_WEB_TEXT_BYTES)) {
-          throw new Error('仅支持 512 KB 以内的文本文件，其他文件请放入 Backend 工作区后用 @ 引用');
+          throw new Error(t('chat.textAttachmentLimit'));
         }
         nextAttachments.push({
           id: attachmentId(),
@@ -505,7 +525,7 @@ export function ChatPanel({ session }: Props) {
           source,
         });
       } catch (error) {
-        toast.danger(error instanceof Error ? error.message : '无法读取附件');
+        toast.danger(error instanceof Error ? error.message : t('chat.attachmentReadFailed'));
       }
     }
     if (nextAttachments.length > 0) {
@@ -515,14 +535,14 @@ export function ChatPanel({ session }: Props) {
       ].slice(0, MAX_COMPOSER_ATTACHMENTS));
     }
     if (reachedLimit) {
-      toast.danger(`一次最多附加 ${MAX_COMPOSER_ATTACHMENTS} 个文件`);
+      toast.danger(t('chat.maxAttachments', { max: MAX_COMPOSER_ATTACHMENTS }));
     }
   };
 
   const submitComposer = () => {
     if (executionUnknown || submissionStatus === 'sending') return;
     if (hasBlockedImageAttachment) {
-      toast.danger('当前无法发送图片', { description: imageInputSupport.reason });
+      toast.danger(t('chat.imageSendBlocked'), { description: imageInputSupport.reason });
       return;
     }
     if (currentProvider !== 'pi' && draft.trim().startsWith('/')) {
@@ -537,17 +557,18 @@ export function ChatPanel({ session }: Props) {
         <div ref={messagesRef} className="mx-auto flex max-w-2xl flex-col gap-3">
           {items.length === 0 ? (
             <p className="text-muted py-16 text-center text-sm" role="status">
-              {thinking ? '正在工作'
-                : session.recoveringConversations[conversation.id] ? '正在恢复对话记录…'
-                  : '还没有消息。输入内容后发送。'}
+              {thinking ? t('chat.working')
+                : session.recoveringConversations[conversation.id] ? t('chat.recovering')
+                  : t('chat.emptyHint')}
             </p>
           ) : null}
           {items.map((item) => {
             if (item.type === 'executionGroup') {
               const expanded = thinking && item.entries.some((entry) => entry.at >= (conversationTimeline.at(-1)?.at ?? 0));
+              const pendingCount = item.entries.filter((entry) => entry.requestId && session.pendingRequests.some((request) => request.requestId === entry.requestId)).length;
               return (
                 <ChainOfThought key={item.id} defaultExpanded={expanded} isStreaming={expanded} className="chat-process-trace min-w-0">
-                  <ChainOfThought.Trigger className="min-h-7 py-1 text-xs">执行步骤</ChainOfThought.Trigger>
+                  <ChainOfThought.Trigger className="min-h-7 py-1 text-xs">{progressGroupLabel(item.entries, thinking && item.id === latestProcessGroupId, pendingCount)}</ChainOfThought.Trigger>
                   <ChainOfThought.Content>
                     <ChainOfThought.Steps>
                       {item.entries.map((entry) => (
@@ -566,18 +587,18 @@ export function ChatPanel({ session }: Props) {
             const entry = item.entry;
             if (isToolCallEntry(entry)) {
               const { toolName, argsText } = toolPresentation(entry.subtitle);
-              return <ChatTool key={entry.id} defaultExpanded={thinking} state={thinking ? 'input-streaming' : 'output-available'} toolName={toolName} argsText={argsText} triggerPrefix={thinking ? '正在调用：' : '已调用：'} />;
+              return <ChatTool key={entry.id} defaultExpanded={thinking} state={thinking ? 'input-streaming' : 'output-available'} toolName={toolName} argsText={argsText} triggerPrefix={thinking ? t('chat.toolCalling') : t('chat.toolCalled')} />;
             }
             const request = session.pendingRequests.find((pendingItem) => !sessionPermissionIds.has(pendingItem.requestId) && pendingItem.requestId && (entry.requestId === pendingItem.requestId || entry.raw.includes(pendingItem.requestId)));
             const isUser = entry.kind === 'outgoing';
             return (
               <div key={entry.id} data-message-id={entry.id} className={`flex gap-3 py-1 ${isUser ? 'justify-end' : 'justify-start'}`}>
                 <div className={`min-w-0 max-w-[85%] ${isUser ? 'text-right' : ''}`}>
-                  {isUser ? <p className="text-muted text-xs font-medium">You</p> : entry.category === 'extension' ? <p className="text-muted text-xs font-medium">Pi 插件 · {entry.title}</p> : null}
+                  {isUser ? <p className="text-muted text-xs font-medium">You</p> : entry.category === 'extension' ? <p className="text-muted text-xs font-medium">{t('chat.piExtensionEntry', { title: entry.title })}</p> : null}
                   <div className={`${isUser ? 'mt-1' : ''} text-sm leading-6`}>
                     {isUser ? <div className="flex flex-col items-end gap-2">
                       {entry.sentAttachments?.length ? (
-                        <ChatAttachmentGroup aria-label="已发送的附件" className="justify-end text-left" role="list">
+                        <ChatAttachmentGroup aria-label={t('chat.sentAttachments')} className="justify-end text-left" role="list">
                           {entry.sentAttachments.map((attachment) => (
                             <ChatAttachment
                               key={attachment.id}
@@ -593,13 +614,13 @@ export function ChatPanel({ session }: Props) {
                           ))}
                         </ChatAttachmentGroup>
                       ) : null}
-                      {entry.subtitle ? <p className="whitespace-pre-wrap break-words">{entry.subtitle}</p> : null}
+                      {entry.subtitle ? <p className="whitespace-pre-wrap break-words">{entry.subtitle === STREAMING_REPLY_PLACEHOLDER ? t('chat.replying') : entry.subtitle}</p> : null}
                     </div> : (
                       <Markdown
                         id={entry.id}
                         components={markdownComponents}
                       >
-                        {entry.subtitle}
+                        {entry.subtitle === STREAMING_REPLY_PLACEHOLDER ? t('chat.replying') : entry.subtitle}
                       </Markdown>
                     )}
                   </div>
@@ -626,7 +647,7 @@ export function ChatPanel({ session }: Props) {
             onPress={() => scrollToLatest('smooth')}
           >
             <RiArrowDownDoubleLine className="size-4" />
-            前往最新
+            {t('chat.scrollToLatest')}
           </Button>
         )}
       </div>
@@ -634,7 +655,7 @@ export function ChatPanel({ session }: Props) {
         <div className="fixed z-50 -translate-x-1/2" style={{ left: quote.left, top: quote.top }}>
           <Button size="sm" variant="secondary" onPress={() => {
             const existing = session.composerAttachments[conversation.id] ?? [];
-            const name = uniqueReferenceName('对话摘录', existing, draft);
+            const name = uniqueReferenceName(t('chat.quoteName'), existing, draft);
             session.setConversationAttachments(conversation.id, (current) => [...current, {
               id: attachmentId(), kind: 'reference', name, mimeType: 'text/plain',
               sizeBytes: new TextEncoder().encode(quote.text).length, dataUrl: '',
@@ -649,8 +670,8 @@ export function ChatPanel({ session }: Props) {
             composerRef.current?.focus(cursor);
             window.getSelection()?.removeAllRanges();
             setQuote(null);
-            toast.success('已添加引用');
-          }}>添加到对话</Button>
+            toast.success(t('chat.quoteAdded'));
+          }}>{t('chat.quoteAdd')}</Button>
         </div>
       ) : null}
       <div className="border-separator border-t px-5 py-4">
@@ -664,20 +685,20 @@ export function ChatPanel({ session }: Props) {
             isStopping={session.stoppingProviderRuntimes[conversation.id]}
             isConnected={session.connectionState === 'open'} /> : null}
           {permissionRequests.map(request => <div key={request.requestId} className="mb-3 rounded-xl border border-separator p-3">
-            <p className="mb-2 text-xs font-medium">{sessionPermissionIds.has(request.requestId) ? 'Pi 插件请求' : request.title || '权限审批'}</p>
+            <p className="mb-2 text-xs font-medium">{sessionPermissionIds.has(request.requestId) ? t('chat.piPluginRequest') : request.title || t('chat.permissionApproval')}</p>
             <ConversationPermissionActions request={request} onSelect={(option, data) => { session.sendApprovalResponse(option, request, data); }} />
           </div>)}
           {currentProvider === 'pi' && slashTrigger ? <div className="mb-2 flex items-center gap-2 text-xs text-muted">
-            <span>{commandCatalog?.status === 'ready' ? `Pi 命令 · ${commandCatalog.source === 'session' ? '当前会话' : '工作区发现'}`
-              : commandCatalog?.status === 'error' ? '命令目录加载失败，草稿已保留' : '正在加载 Pi 命令…'}</span>
+            <span>{commandCatalog?.status === 'ready' ? (commandCatalog.source === 'session' ? t('chat.piCommandsSession') : t('chat.piCommandsWorkspace'))
+              : commandCatalog?.status === 'error' ? t('chat.commandCatalogFailed') : t('chat.piCommandsLoading')}</span>
             <Button size="sm" variant="ghost" isDisabled={commandCatalog?.status === 'loading'}
-              onPress={session.refreshProviderCommands}>刷新命令</Button>
+              onPress={session.refreshProviderCommands}>{t('chat.refreshCommands')}</Button>
           </div> : null}
           {(slashSuggestions.length > 0 || mentionSuggestions.length > 0 || (mention && mentionSuggestions.length === 0)) ? (
             <div className="composer-suggestions-popover">
               {slashSuggestions.length > 0 ? (
                 <ListBox
-                  aria-label="命令建议"
+                  aria-label={t('chat.commandSuggestions')}
                   onAction={(key) => {
                     const item = slashSuggestions.find((candidate) => candidate.command === String(key));
                     if (item) chooseSlashCommand(item.command);
@@ -692,7 +713,7 @@ export function ChatPanel({ session }: Props) {
                 </ListBox>
               ) : mentionSuggestions.length > 0 ? (
                 <ListBox
-                  aria-label="文件建议"
+                  aria-label={t('chat.fileSuggestions')}
                   onAction={(key) => {
                     const item = mentionSuggestions.find((candidate) => candidate.id === String(key));
                     if (!item || !mention) return;
@@ -709,10 +730,10 @@ export function ChatPanel({ session }: Props) {
                     </ListBox.Item>
                   ))}
                 </ListBox>
-              ) : mention ? <p className="text-muted px-2 py-1 text-xs">正在搜索工作区文件…</p> : null}
+              ) : mention ? <p className="text-muted px-2 py-1 text-xs">{t('chat.searchingFiles')}</p> : null}
             </div>
           ) : null}
-          {capability ? <p className="text-muted mb-2 text-xs">输入 # 可引用 Skill 或 MCP。</p> : null}
+          {capability ? <p className="text-muted mb-2 text-xs">{t('chat.capabilityHint')}</p> : null}
           {(session.selectedSkills[conversation.id] ?? []).length > 0 ? (
             <div className="mb-2 flex flex-wrap gap-2">
               {(session.selectedSkills[conversation.id] ?? []).map((skill) => (
@@ -745,15 +766,11 @@ export function ChatPanel({ session }: Props) {
             runtime={runtime}
             reportedError={session.lastError}
             running={thinking}
-            canSteer={providerDescriptor?.capabilities.steering === true}
             canUseNativeQueue={providerDescriptor?.capabilities.followUpQueue === true}
             piQueue={currentProvider === 'pi'}
             controlStatus={session.controlStatusByConversation[conversation.id]}
-            canSendText={Boolean(draft.trim()) && !attachments.length && !(session.selectedSkills[conversation.id]?.length)}
             localQueue={session.queuedChatDrafts[conversation.id] ?? []}
             localPaused={session.queuePausedByConversation[conversation.id] === true}
-            onSteer={() => { const text = draft.trim(); void session.controlConversation(conversation.id, { action: 'steer', text })
-              .then(ok => { if (ok) session.setConversationChatDraft(conversation.id, current => current.trim() === text ? '' : current); }); }}
             onRecover={() => { void session.recoverConversation(conversation.id); }}
             onRemoveNative={itemId => { void session.controlConversation(conversation.id, { action: 'queueRemove', itemId }); }}
             onClearNative={() => { void session.controlConversation(conversation.id, { action: 'queueClear' }); }}
@@ -761,7 +778,7 @@ export function ChatPanel({ session }: Props) {
             onResumeLocal={() => { void session.resumeQueuedFollowUps(conversation.id); }}
             onRevealPath={filePath => session.openPanel('Files', { filePath })}
           /> : null}
-          <NoticeToast message={hasBlockedImageAttachment ? '当前无法发送图片' : null}
+          <NoticeToast message={hasBlockedImageAttachment ? t('chat.imageSendBlocked') : null}
             description={imageInputSupport.reason} scope={conversation.id} />
           <ChatAttachmentInput
             accept={attachmentAccept}
@@ -833,7 +850,7 @@ export function ChatPanel({ session }: Props) {
                 >
                   {fileAttachments.length > 0 ? (
                     <PromptInput.Attachments>
-                      <ChatAttachmentGroup aria-label="待发送附件" role="list">
+                      <ChatAttachmentGroup aria-label={t('chat.pendingAttachments')} role="list">
                         {fileAttachments.map((attachment) => (
                           <ChatAttachment
                             key={attachment.id}
@@ -846,7 +863,7 @@ export function ChatPanel({ session }: Props) {
                             <ChatAttachment.Preview />
                             <ChatAttachment.Info />
                             <ChatAttachment.Remove
-                              aria-label={`移除附件 ${attachment.name}`}
+                              aria-label={t('chat.removeAttachment', { name: attachment.name })}
                               onPress={() => session.setConversationAttachments(conversation.id, (current) =>
                                 current.filter((item) => item.id !== attachment.id))}
                             />
@@ -860,8 +877,8 @@ export function ChatPanel({ session }: Props) {
                     value={draft}
                     isDisabled={executionUnknown}
                     placeholder={imageInputSupport.supported
-                      ? '发送消息，或粘贴 / 拖入图片和文件'
-                      : '发送消息，或粘贴 / 拖入文本文件'}
+                      ? t('chat.placeholderFull')
+                      : t('chat.placeholderText')}
                     onChange={(value) => { setSuggestionIndex(0); session.setConversationChatDraft(conversation.id, value); }}
                     onSubmit={submitComposer}
                     onKeyDown={currentProvider === 'pi' ? undefined : handleSuggestionKeyDown}
@@ -892,7 +909,7 @@ export function ChatPanel({ session }: Props) {
                     <Select
                       className="composer-control"
                       variant="secondary"
-                      placeholder="选择 Agent"
+                      placeholder={t('chat.selectAgent')}
                       selectedKey={currentProvider || agentProvider || null}
                       isDisabled={!canSwitchAgent}
                       onSelectionChange={(key) => {
@@ -902,7 +919,7 @@ export function ChatPanel({ session }: Props) {
                         session.switchConversationAgent(conversation.id, key as ProviderKind);
                       }}
                     >
-                      <Label className="hidden">选择 Agent</Label>
+                      <Label className="hidden">{t('chat.selectAgent')}</Label>
                       <Select.Trigger className="composer-control__trigger">
                         <Select.Value><ProviderIcon className="composer-control__icon" provider={agentProvider} /><span className="composer-control__text">{agentLabel}</span></Select.Value>
                         <Select.Indicator className="composer-control__indicator" />
@@ -929,7 +946,7 @@ export function ChatPanel({ session }: Props) {
                         size="sm"
                         variant="secondary"
                         isDisabled={providerModels.length === 0}
-                        aria-label="选择模型和思考强度"
+                        aria-label={t('chat.selectModel')}
                       >
                         <RiCpuLine className={`composer-control__icon ${displayedReasoningEffort ? 'text-accent' : ''}`} />
                         <span className="composer-control__text">{modelDisplayLabel(currentModel, session.modelCatalog)}</span>
@@ -940,7 +957,7 @@ export function ChatPanel({ session }: Props) {
                         ) : null}
                       </Button>
                       <Popover.Content className="composer-model-popover" placement="top start" offset={8}>
-                        <Popover.Dialog className="composer-model-popover__dialog" aria-label="模型和思考强度">
+                        <Popover.Dialog className="composer-model-popover__dialog" aria-label={t('chat.modelPopover')}>
                           <ModelReasoningCard
                             currentModel={currentModel}
                             currentModelDescriptor={currentModelDescriptor}
@@ -973,16 +990,16 @@ export function ChatPanel({ session }: Props) {
                         }
                       }}
                     >
-                      <Label className="hidden">选择权限</Label>
+                      <Label className="hidden">{t('chat.selectPermission')}</Label>
                       <Select.Trigger className="composer-control__trigger">
-                        <Select.Value><RiShieldLine className="composer-control__icon" /><span className="composer-control__text" title={permissionHint}>{currentPermission ? PERMISSION_LABELS[currentPermission] : canChoosePermission ? '请选择权限' : '权限不可配置'}</span></Select.Value>
+                        <Select.Value><RiShieldLine className="composer-control__icon" /><span className="composer-control__text" title={permissionHint}>{currentPermission ? permissionModeLabel(currentPermission) : canChoosePermission ? t('chat.permissionSelect') : t('chat.permissionUnavailable')}</span></Select.Value>
                         {!fixedPermission ? <Select.Indicator className="composer-control__indicator" /> : null}
                       </Select.Trigger>
                       <Select.Popover>
                         <ListBox>
                           {permissionModes.map((mode) => (
-                            <ListBox.Item key={mode} id={mode} textValue={PERMISSION_LABELS[mode]}>
-                              {PERMISSION_LABELS[mode]}
+                            <ListBox.Item key={mode} id={mode} textValue={permissionModeLabel(mode)}>
+                              {permissionModeLabel(mode)}
                               <ListBox.ItemIndicator />
                             </ListBox.Item>
                           ))}
@@ -1000,33 +1017,33 @@ export function ChatPanel({ session }: Props) {
                         }
                       }}
                     >
-                      <Label className="hidden">选择工作模式</Label>
+                      <Label className="hidden">{t('chat.selectWorkMode')}</Label>
                       <Select.Trigger className="composer-control__trigger">
-                        <Select.Value><RiListCheck2 className="composer-control__icon" /><span className="composer-control__text" title="工作模式将在下次发送时应用">{conversation.mode === 'plan' ? '计划' : '执行'}</span></Select.Value>
+                        <Select.Value><RiListCheck2 className="composer-control__icon" /><span className="composer-control__text" title={t('chat.workModeApply')}>{conversation.mode === 'plan' ? t('chat.modePlan') : t('chat.modeImplement')}</span></Select.Value>
                         <Select.Indicator className="composer-control__indicator" />
                       </Select.Trigger>
                       <Select.Popover>
                         <ListBox>
-                          <ListBox.Item id="implement" textValue="执行">执行<ListBox.ItemIndicator /></ListBox.Item>
-                          <ListBox.Item id="plan" textValue="计划">计划<ListBox.ItemIndicator /></ListBox.Item>
+                          <ListBox.Item id="implement" textValue={t('chat.modeImplement')}>{t('chat.modeImplement')}<ListBox.ItemIndicator /></ListBox.Item>
+                          <ListBox.Item id="plan" textValue={t('chat.modePlan')}>{t('chat.modePlan')}<ListBox.ItemIndicator /></ListBox.Item>
                         </ListBox>
                       </Select.Popover>
                     </Select> : null}
                   </PromptInput.ToolbarStart>
                   <PromptInput.ToolbarEnd className="gap-2">
                     <ChatAttachmentInput.Trigger
-                      aria-label="添加附件"
+                      aria-label={t('chat.addAttachment')}
                       render={({ isDisabled, onPress }) => (
                         <Tooltip>
                           <Tooltip.Trigger>
-                            <Button isIconOnly variant="ghost" aria-label="添加附件" isDisabled={isDisabled} onPress={onPress}>
+                            <Button isIconOnly variant="ghost" aria-label={t('chat.addAttachment')} isDisabled={isDisabled} onPress={onPress}>
                               <RiAttachment2 className="size-4" />
                             </Button>
                           </Tooltip.Trigger>
                           <Tooltip.Content>
                             {attachments.length >= MAX_COMPOSER_ATTACHMENTS
-                              ? `最多附加 ${MAX_COMPOSER_ATTACHMENTS} 个文件`
-                              : imageInputSupport.supported ? '添加图片或文本附件' : '添加文本附件'}
+                              ? t('chat.maxAttachmentsTooltip', { max: MAX_COMPOSER_ATTACHMENTS })
+                              : imageInputSupport.supported ? t('chat.addImageOrText') : t('chat.addTextAttachment')}
                           </Tooltip.Content>
                         </Tooltip>
                       )}
@@ -1042,7 +1059,7 @@ export function ChatPanel({ session }: Props) {
                     {thinking ? (
                       <Button variant="danger-soft" onPress={() => session.stopThinking(conversation.id)}>
                         <RiStopCircleLine className="size-4" />
-                        停止
+                        {t('chat.stop')}
                       </Button>
                     ) : null}
                   </PromptInput.ToolbarEnd>

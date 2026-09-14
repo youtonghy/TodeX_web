@@ -1,4 +1,6 @@
 /* eslint-disable no-control-regex -- These expressions deliberately remove terminal control sequences. */
+import { t, type MessageKey } from '../i18n';
+
 /** Terminal decoration is presentation only; keep the original event and editor text intact. */
 export function piExtensionPlainText(value: string): string {
   return value
@@ -11,21 +13,22 @@ export function piExtensionPlainText(value: string): string {
     .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/g, '');
 }
 
-const runtimeStopReasons: Record<string, string> = {
-  user_closed: '你已停止 Pi 后台运行。',
-  maintenance_compact: '上下文压缩需要重启 Pi 插件；下次发送消息时会重新启动。',
-  maintenance_clone: '会话复制需要重启 Pi 插件；下次发送消息时会重新启动。',
-  daemon_shutdown: '后端已关闭，Pi 插件运行已结束。',
-  daemon_restarted: '后端已重新启动，之前的 Pi 插件运行已结束。',
-  workspace_access_revoked: '工作区执行权限已撤销，Pi 插件运行已结束。',
-  conversation_deleted: '会话已删除，Pi 插件运行已结束。',
-  conversation_expired: '会话已过期，Pi 插件运行已结束。',
-  expired: 'Pi 插件会话已过期。',
-  session_closed: 'Pi 会话已关闭。',
-  native_session_closed: 'Pi 进程已退出。',
-  protocol_error: 'Pi 连接异常，后台运行已停止。',
+const runtimeStopReasonKeys: Record<string, MessageKey> = {
+  user_closed: 'pi.reasonUserClosed',
+  maintenance_compact: 'pi.reasonMaintenanceCompact',
+  maintenance_clone: 'pi.reasonMaintenanceClone',
+  daemon_shutdown: 'pi.reasonDaemonShutdown',
+  daemon_restarted: 'pi.reasonDaemonRestarted',
+  workspace_access_revoked: 'pi.reasonWorkspaceAccessRevoked',
+  conversation_deleted: 'pi.reasonConversationDeleted',
+  conversation_expired: 'pi.reasonConversationExpired',
+  expired: 'pi.reasonExpired',
+  session_closed: 'pi.reasonSessionClosed',
+  native_session_closed: 'pi.reasonNativeSessionClosed',
+  protocol_error: 'pi.reasonProtocolError',
 };
 
 export function piRuntimeStopReason(reason: string): string {
-  return Object.hasOwn(runtimeStopReasons, reason) ? runtimeStopReasons[reason] : piExtensionPlainText(reason);
+  const key = runtimeStopReasonKeys[reason];
+  return key ? t(key) : piExtensionPlainText(reason);
 }

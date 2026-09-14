@@ -7,5 +7,5 @@ const entry = /^\/app(?:\/|$)/.test(window.location.pathname)
 void entry.catch((error: unknown) => {
   console.error('Unable to load TodeX', error);
   const root = document.getElementById('root');
-  if (root) root.textContent = '页面加载失败，请刷新重试。';
+  if (root) root.textContent = '页面加载失败，请刷新重试。 / Failed to load TodeX, please refresh.';
 });

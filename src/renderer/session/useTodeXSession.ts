@@ -14,6 +14,7 @@ import {
 import { bindSentAttachmentEvents, prepareSentAttachments, projectSentAttachments, pruneSentAttachmentRecords, type SentAttachmentRecord } from './sentAttachments';
 import { configureKanbanSync, syncKanbanTasksFromBackend } from './kanbanTasks';
 import { ENCRYPTION_VERIFICATION_ERROR, TransportVerificationError, validateTransportEncryption, verifyEncryptedSocket } from './transportVerification';
+import { t } from '../i18n';
 import { QueuedFollowUps, restoreQueuedFollowUps } from './queuedFollowUps';
 import { LegacyEventRecovery } from './legacyEventRecovery';
 import { ConversationRecovery } from './conversationRecovery';
@@ -311,6 +312,8 @@ import {
   createDefaultConversation,
   conversationsForWorkspaceSnapshot,
   forkConversationRecord,
+  isDefaultConversationTitle,
+  STREAMING_REPLY_PLACEHOLDER,
   formatThreadSummary,
   formatThreadActionResult,
   resultThreadFromValue,
@@ -722,13 +725,13 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       setQueuedChatDrafts(queuedChatDraftsRef.current);
       setQueueHydrated(true);
     }).catch(() => {
-      if (!disposed) setLastError('无法恢复候选消息，请检查本地存储。');
+      if (!disposed) setLastError(t('sess.candidateRestoreFailed'));
     });
     return () => { disposed = true; };
   }, []);
   useEffect(() => {
     if (queueHydrated) void saveJson('todex.queued-follow-ups.v1', queuedChatDrafts)
-      .catch(() => setLastError('候选消息未能保存。关闭页面前请保留输入内容。'));
+      .catch(() => setLastError(t('sess.candidateSaveFailed')));
   }, [queueHydrated, queuedChatDrafts]);
 
   const removeQueuedFollowUp = useCallback((conversationId: string, itemId: string) => {
@@ -1154,7 +1157,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         }
         return true;
       } catch (error) {
-        setLastError(error instanceof Error ? error.message : '工作区同步失败');
+        setLastError(error instanceof Error ? error.message : t('sess.workspaceSyncFailed'));
         return false;
       }
     },
@@ -1244,7 +1247,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         setV2Conversations(conversationResponse.conversations);
         setConversations((current) => mergeManifestConversations(current, conversationResponse.conversations, nextWorkspaces));
       } catch (error) {
-        setLastError(error instanceof Error ? error.message : '对话目录同步失败');
+        setLastError(error instanceof Error ? error.message : t('sess.conversationDirSyncFailed'));
       }
       if (!workspaceSyncPayloadEquals(taggedRemoteWorkspaces, nextActiveWorkspaces)) {
         void syncWorkspacesToBackend(nextActiveWorkspaces);
@@ -1252,7 +1255,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       return true;
     } catch (error) {
       workspaceBackendReadyRef.current = true;
-      setLastError(error instanceof Error ? error.message : '工作区同步失败');
+      setLastError(error instanceof Error ? error.message : t('sess.workspaceSyncFailed'));
       return false;
     }
   }, [activeBackendConnectionId, settings, syncWorkspacesToBackend]);
@@ -1352,7 +1355,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     } catch (error) {
       setCapabilityCatalogs((current) => ({
         ...current,
-        [provider]: { ...(current[provider] ?? {}), status: 'error', error: error instanceof Error ? error.message : '能力目录读取失败' },
+        [provider]: { ...(current[provider] ?? {}), status: 'error', error: error instanceof Error ? error.message : t('sess.catalogReadFailed') },
       }));
     }
   }, [activeWorkspace?.path, settings.authToken, settings.defaultWorkspacePath, settings.serverUrl]);
@@ -1450,7 +1453,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     }).catch((error: unknown) => {
       if (!cancelled) setProviderCommandCatalogs(current => ({ ...current,
         [activeCommandKey]: { contextKey: activeCommandKey, status: 'error', commands: [],
-          error: error instanceof Error ? error.message : '命令目录加载失败' } }));
+          error: error instanceof Error ? error.message : t('sess.commandCatalogFailed') } }));
     });
     return () => { cancelled = true; };
   }, [hydrated, activeCommandKey, commandCatalogRevision, settings.serverUrl, settings.authToken]);
@@ -1480,7 +1483,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         ...current,
         [conversationId]: {
           status: 'error',
-          reason: error instanceof Error ? error.message : '无法确认当前 ACP 配置的图片能力。',
+          reason: error instanceof Error ? error.message : t('image.profileUnconfirmed'),
         },
       }));
     });
@@ -1508,7 +1511,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     for (const event of appliedEvents) {
       const effect = extensionEffectsRef.current.consume(event, state);
       if (effect?.kind === 'notice') {
-        const title = `${conversation.title || 'Pi 会话'} · 插件${effect.notice.level === 'error' ? '错误' : effect.notice.level === 'warning' ? '提醒' : '通知'}`;
+        const title = t('sess.piNoticeTitle', { conversation: conversation.title || t('sess.piConversation'), level: effect.notice.level === 'error' ? t('pi.noticeError') : effect.notice.level === 'warning' ? t('pi.noticeWarning') : t('pi.noticeInfo') });
         const options = { description: piExtensionPlainText(effect.notice.message).slice(0, 300), timeout: 6000 };
         if (effect.notice.level === 'error') toast.danger(title, options);
         else if (effect.notice.level === 'warning') toast.warning(title, options);
@@ -1573,7 +1576,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         && data.requestId === controlRequestsRef.current.get(localId)) {
         controlRequestsRef.current.delete(localId);
         setControlStatusByConversation(current => ({ ...current, [localId]: undefined }));
-        if (type === 'control.rejected') setLastError(typeof data.message === 'string' ? data.message : 'Agent 未应用控制请求');
+        if (type === 'control.rejected') setLastError(typeof data.message === 'string' ? data.message : t('sess.agentControlRejected'));
       }
       if (['turn.completed', 'turn.cancelled', 'turn.failed', 'turn.interrupted'].includes(type)) {
         completedAt = Math.max(completedAt, Date.parse(event.time) || Date.now());
@@ -1593,7 +1596,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           if (type === 'turn.completed') removeQueuedFollowUp(localId, submission.requestId);
           if (type === 'turn.failed') {
             restorePendingSubmission(localId);
-            setLastError(typeof data.message === 'string' ? data.message : '当前任务执行失败，请核对记录后重试。');
+            setLastError(typeof data.message === 'string' ? data.message : t('sess.taskExecFailed'));
           }
           pendingV2SubmissionsRef.current.delete(localId);
           setSubmissionStatusByConversation((current) => ({ ...current, [localId]: undefined }));
@@ -1872,7 +1875,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           ? previous.sequence
           : entry.sequence,
         at: previous.at || entry.at,
-        subtitle: appendSubtitle ? `${previous.subtitle === '正在回复...' ? '' : previous.subtitle}${entry.subtitle}` : entry.subtitle,
+        subtitle: appendSubtitle ? `${previous.subtitle === STREAMING_REPLY_PLACEHOLDER ? '' : previous.subtitle}${entry.subtitle}` : entry.subtitle,
       };
       return next;
     });
@@ -1884,7 +1887,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       pendingThreadStartsRef.current.delete(pending.conversationId);
 
       if (errorMessage || !threadId) {
-        const error = new Error(errorMessage || '创建 thread 失败');
+        const error = new Error(errorMessage || t('sess.threadCreateFailed'));
         pending.reject(error);
         setLastError(error.message);
         return;
@@ -2088,7 +2091,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         const error = new Error(localTurnErrorMessage(errorMessage));
         pending.reject(error);
         setLastError(error.message);
-        appendTimeline(makeSystemEntry('本地会话启动失败', error.message, activeWorkspaceRef.current, activeConversationRef.current));
+        appendTimeline({ ...makeSystemEntry(t('sess.localStartFailed'), error.message, activeWorkspaceRef.current, activeConversationRef.current), marker: 'error' });
         return;
       }
 
@@ -2332,13 +2335,13 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
             setModelCatalogError('');
           } else {
             setModelCatalogStatus('error');
-            setModelCatalogError('model/list 没有返回可用模型');
+            setModelCatalogError(t('sess.modelListEmpty'));
           }
           clearTimeout(pendingModelList.timeoutId);
           pendingModelListRef.current = null;
         } else if (protocolError || event.type === 'codex.control.error') {
           setModelCatalogStatus('error');
-          setModelCatalogError(localTurnErrorMessage(protocolError || 'model/list 请求失败'));
+          setModelCatalogError(localTurnErrorMessage(protocolError || t('sess.modelListFailed')));
           clearTimeout(pendingModelList.timeoutId);
           pendingModelListRef.current = null;
         }
@@ -2366,7 +2369,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           appendTimeline(makeSystemEntry('Git diff loaded', diff ? `${diff.length} characters` : 'No diff', pendingGitDiff.workspaceId, pendingGitDiff.conversationId));
           finishPendingGitDiff(pendingGitDiff);
         } else if (protocolError || event.type === 'codex.control.error') {
-          finishPendingGitDiff(pendingGitDiff, localTurnErrorMessage(protocolError || 'gitDiffToRemote 请求失败'));
+          finishPendingGitDiff(pendingGitDiff, localTurnErrorMessage(protocolError || t('sess.gitDiffFailed')));
         }
       }
       const pendingSkillList = maybeThreadRequestId ? pendingSkillListsRef.current.get(maybeThreadRequestId) ?? null : null;
@@ -2384,7 +2387,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           ));
           finishPendingSkillList(pendingSkillList);
         } else if (protocolError || event.type === 'codex.control.error') {
-          finishPendingSkillList(pendingSkillList, localTurnErrorMessage(protocolError || 'skills/list 请求失败'));
+          finishPendingSkillList(pendingSkillList, localTurnErrorMessage(protocolError || t('sess.skillsListFailed')));
         }
       }
       const pendingThreadList = maybeThreadRequestId
@@ -2396,7 +2399,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           upsertNativeThreads(pendingThreadList.workspaceId, pendingThreadList.sessionId, threads);
           finishPendingThreadList(pendingThreadList);
         } else if (protocolError || event.type === 'codex.control.error') {
-          finishPendingThreadList(pendingThreadList, localTurnErrorMessage(protocolError || 'thread/list 请求失败'));
+          finishPendingThreadList(pendingThreadList, localTurnErrorMessage(protocolError || t('sess.threadListFailed')));
         }
       }
       const pendingThreadAction = maybeThreadRequestId
@@ -2570,7 +2573,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           if (pendingThreadAction.restoreHistory && protocolError && isThreadNotMaterializedHistoryError(protocolError)) {
             finishPendingThreadAction(pendingThreadAction);
           } else {
-            finishPendingThreadAction(pendingThreadAction, localTurnErrorMessage(protocolError || `${pendingThreadAction.action} 请求失败`));
+            finishPendingThreadAction(pendingThreadAction, localTurnErrorMessage(protocolError || t('sess.requestFailed', { method: pendingThreadAction.action })));
           }
         }
       }
@@ -2643,7 +2646,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       } else if (event.type === 'codex.control.error') {
         const pending = pendingLocalStartForError ?? findPendingLocalStart(event, data);
         if (pending) {
-          settlePendingLocalStart(pending, protocolError || '本地会话启动失败');
+          settlePendingLocalStart(pending, protocolError || t('sess.localStartFailed'));
         }
       } else if (event.type === 'codex.serverRequest.resolved' && protocolError) {
         const pending = findPendingLocalStart(event, data);
@@ -2657,7 +2660,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         if (pendingThread) {
           const threadId = extractThreadIdFromEvent(event);
           if (protocolError || event.type === 'codex.control.request.rejected') {
-            settlePendingThreadStart(pendingThread, '', localTurnErrorMessage(protocolError || '创建 thread 失败'));
+            settlePendingThreadStart(pendingThread, '', localTurnErrorMessage(protocolError || t('sess.threadCreateFailed')));
           } else if (threadId) {
             settlePendingThreadStart(pendingThread, threadId);
           }
@@ -2697,7 +2700,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         if (conversation) {
           updateConversation(conversation.id, { threadId: '' });
           appendTimeline(makeSystemEntry(
-            '已重置失效 Thread',
+            t('sess.invalidatedThreadTitle'),
             localTurnErrorMessage(protocolError),
             conversation.workspaceId,
             conversation.id,
@@ -2776,7 +2779,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       if (messageType === 'server.error' && parsed.id !== undefined) {
         const payload = parsed.payload as { code?: unknown; message?: unknown } | undefined;
         const code = typeof payload?.code === 'string' ? payload.code : '';
-        const detail = typeof payload?.message === 'string' ? payload.message : 'v2 命令失败';
+        const detail = typeof payload?.message === 'string' ? payload.message : t('sess.v2CommandFailed');
         const message = code ? `[${code}] ${detail}` : detail;
         protocolCommandsRef.current?.reject(typeof parsed.id === 'string' ? parsed.id : '', message, code);
         setLastError(message);
@@ -2784,7 +2787,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       }
       if (messageType === 'conversation.event') {
         const event = normalizeConversationEvent(parsed.payload ?? parsed);
-        if (!event) throw new Error('收到无效的对话事件，未推进恢复位置。');
+        if (!event) throw new Error(t('sess.invalidConversationEvent'));
         const conversation = conversationsRef.current.find((item) => item.v2ConversationId === event.conversationId || item.id === event.conversationId);
         if (conversation) {
           if (parsed.delivery === 'live') extensionEffectsRef.current.markLive(event);
@@ -2846,7 +2849,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     try {
       frame = JSON.stringify(message);
     } catch (error) {
-      setLastError(error instanceof Error ? error.message : '消息序列化失败。');
+      setLastError(error instanceof Error ? error.message : t('sess.serializeFailed'));
       return null;
     }
     frame = socketCryptoRef.current?.encryptClientText(frame) ?? frame;
@@ -2881,7 +2884,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         payload: { conversationId: conversation.v2ConversationId } });
       await recoverConversation(conversationId);
     } catch (error) {
-      setLastError(error instanceof Error ? error.message : '无法停止 Pi 后台运行');
+      setLastError(error instanceof Error ? error.message : t('sess.piStopFailed'));
     } finally { setStoppingProviderRuntimes(current => ({ ...current, [conversationId]: false })); }
   }, [sendProtocolCommand, recoverConversation, setLastError]);
 
@@ -2889,7 +2892,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     const conversation = conversationsRef.current.find(item => item.id === conversationId);
     const turnId = turnIdsRef.current[conversationId];
     if (!conversation?.v2ConversationId || !turnId || controlRequestsRef.current.has(conversationId)) {
-      setLastError('当前回合已结束或上一条控制尚未确认，请核对记录后继续。');
+      setLastError(t('sess.turnEndedUnconfirmed'));
       return false;
     }
     const requestId = createRequestId('control');
@@ -2903,7 +2906,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       const result = await sendProtocolCommand({ id: requestId, type: 'conversation.control', payload: {
         conversationId: conversation.v2ConversationId, expectedTurnId: turnId, control,
       } }, 35_000);
-      if (result.status === 'targetUnavailable') throw new Error('回合已结束，配置未应用；下轮仍使用你的选择。');
+      if (result.status === 'targetUnavailable') throw new Error(t('sess.turnEndedNotApplied'));
       if (controlRequestsRef.current.get(conversationId) === requestId) {
         controlRequestsRef.current.delete(conversationId);
         setControlStatusByConversation(current => ({ ...current, [conversationId]: undefined }));
@@ -2915,7 +2918,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         if (!unknown) controlRequestsRef.current.delete(conversationId);
         setControlStatusByConversation(current => ({ ...current, [conversationId]: unknown ? 'unknown' : undefined }));
       }
-      setLastError(error instanceof Error ? error.message : 'Agent 控制失败');
+      setLastError(error instanceof Error ? error.message : t('sess.agentControlFailed'));
       if (unknown) await recoverConversation(conversationId);
       return false;
     }
@@ -2931,7 +2934,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         payload: { sessionCursors },
       });
     } catch (error: unknown) {
-      setLastError(error instanceof ConnectionError ? error.userMessage : '会话恢复失败，请稍后重试。');
+      setLastError(error instanceof ConnectionError ? error.userMessage : t('sess.resumeFailed'));
     }
   }, [sendRawProtocolFrame]);
 
@@ -3012,7 +3015,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         status: 'offline',
         latencyMs: null,
         lastCheckedAt: Date.now(),
-        error: isAbort ? '健康检查超时' : error instanceof Error ? error.message : '健康检查失败',
+        error: isAbort ? t('sess.healthCheckTimeout') : error instanceof Error ? error.message : t('sess.healthCheckFailed'),
       });
     } finally {
       clearTimeout(timeoutId);
@@ -3324,7 +3327,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       if (!isAttemptCurrent()) return;
       lastFailureRetryableRef.current = true;
       setConnectionState('error');
-      const message = error instanceof Error ? error.message : '连接后端失败，请重试。';
+      const message = error instanceof Error ? error.message : t('sess.backendConnectFailed');
       setLastError(message);
       setConnectionHealth({ status: 'offline', latencyMs: null, lastCheckedAt: Date.now(), error: message, code: 'backend_unreachable' });
     });
@@ -3415,10 +3418,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       const socket = socketRef.current;
       if (!socket || socket.readyState !== WebSocket.OPEN || !socketVerifiedRef.current) {
         if (autoConnectEnabled && !manualDisconnectRef.current) {
-          setLastError('后端连接已断开，正在重连；请稍后重试。');
+          setLastError(t('sess.reconnecting'));
           connect();
         } else {
-          setLastError('请先在设置里连接后端。');
+          setLastError(t('sess.connectBackendFirst'));
         }
         return false;
       }
@@ -3428,12 +3431,12 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         message = sendRawProtocolFrame({ id: requestId, type, payload });
       } catch (error: unknown) {
         setLastError(
-          error instanceof ConnectionError ? error.userMessage : '消息发送失败，请稍后重试。',
+          error instanceof ConnectionError ? error.userMessage : t('sess.sendFailed'),
         );
         return false;
       }
       if (!message) {
-        setLastError('请先在设置里连接后端。');
+        setLastError(t('sess.connectBackendFirst'));
         return false;
       }
       if (type === 'codex.local.turn') {
@@ -3518,10 +3521,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           [terminalId]: {
             ...existing,
             status: 'error',
-            error: '请先在设置里连接后端。',
+            error: t('sess.connectBackendFirst'),
             output: [
               ...existing.output,
-              terminalOutputLine('error', '请先在设置里连接后端。'),
+              terminalOutputLine('error', t('sess.connectBackendFirst')),
             ].slice(-TERMINAL_MAX_OUTPUT_ENTRIES),
             updatedAt: Date.now(),
           },
@@ -3544,7 +3547,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       return true;
     }
     if (terminal) {
-      appendTerminalOutput(terminalId, terminalOutputLine('error', '请先在设置里连接后端。'));
+      appendTerminalOutput(terminalId, terminalOutputLine('error', t('sess.connectBackendFirst')));
     }
     return false;
   }, [appendTerminalOutput, sendProtocolMessage, terminalById]);
@@ -3646,7 +3649,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       }
       pendingModelListRef.current = null;
       setModelCatalogStatus('error');
-      setModelCatalogError('model/list 请求超时，已保留内置模型列表');
+      setModelCatalogError(t('sess.modelListTimeout'));
     }, 8000);
     pendingModelListRef.current = { requestId, timeoutId };
     setModelCatalogStatus('loading');
@@ -3664,7 +3667,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       clearTimeout(timeoutId);
       pendingModelListRef.current = null;
       setModelCatalogStatus('error');
-      setModelCatalogError('请先连接后端后再刷新模型列表');
+      setModelCatalogError(t('sess.modelListNeedBackend'));
       return false;
     }
     return true;
@@ -3674,7 +3677,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     (nameDraft: string, pathDraft: string) => {
       const path = pathDraft.trim();
       if (!path) {
-        desktopAlert('缺少目录', '请输入要管理的目录路径。');
+        desktopAlert(t('alert.missingDirectory'), t('alert.missingDirectoryBody'));
         return null;
       }
 
@@ -3709,7 +3712,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       setConversations((current) => [nextConversation, ...current]);
       setActiveWorkspaceId(id);
       setActiveConversationId(nextConversation.id);
-      pushSystem('已添加目录', nextWorkspace.path);
+      pushSystem(t('sess.addedDirectoryTitle'), nextWorkspace.path);
       return { workspace: nextWorkspace, conversation: nextConversation };
     },
     [
@@ -3739,7 +3742,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
 
   const addBackendConnection = useCallback((profile?: Partial<BackendConnectionProfile>) => {
     const id = createRequestId('backend');
-    const next: BackendConnectionProfile = { ...profileFromSettings(settings, '新后端', id), ...profile, id, createdAt: Date.now(), updatedAt: Date.now() };
+    const next: BackendConnectionProfile = { ...profileFromSettings(settings, t('session.newBackend'), id), ...profile, id, createdAt: Date.now(), updatedAt: Date.now() };
     setBackendConnections((current) => [...current, next]);
     setActiveBackendConnectionId(id);
     setSettings((current) => settingsFromProfile(next, current));
@@ -3749,7 +3752,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const removeBackendConnection = useCallback((id: string) => {
     if (backendConnections.length <= 1) return;
     void saveSecret(`${TOKEN_STORAGE_KEY}.${id}`, '').catch((error) => {
-      setLastError(error instanceof Error ? error.message : '无法清除已删除后端的凭据');
+      setLastError(error instanceof Error ? error.message : t('sess.credentialClearFailed'));
     });
     const next = backendConnections.filter((profile) => profile.id !== id);
     setBackendConnections(next);
@@ -3827,7 +3830,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           headers: authHeaders(settings),
         }).then((response) => {
           if (!response.ok) throw new Error(`workspace delete returned ${response.status}`);
-        }).catch((error) => setLastError(error instanceof Error ? error.message : '工作区删除同步失败'));
+        }).catch((error) => setLastError(error instanceof Error ? error.message : t('sess.workspaceDeleteSyncFailed')));
       }
       const removedConversationIds = conversations
         .filter((conversation) => conversation.workspaceId === workspaceId)
@@ -3870,7 +3873,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const renameWorkspace = useCallback((workspaceId: string, name: string) => {
     const nextName = name.trim();
     if (!nextName) {
-      desktopAlert('名称不能为空', '请输入新的工作区名称。');
+      desktopAlert(t('alert.nameRequired'), t('alert.workspaceNameBody'));
       return;
     }
     updateWorkspace(workspaceId, { name: nextName });
@@ -3879,7 +3882,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const forkWorkspace = useCallback((workspaceId: string) => {
     const workspace = workspaces.find((item) => item.id === workspaceId);
     if (!workspace) {
-      desktopAlert('未找到工作区', '请返回后重新选择工作区。');
+      desktopAlert(t('alert.workspaceNotFound'), t('alert.workspaceNotFoundBody'));
       return null;
     }
 
@@ -3975,7 +3978,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         const timeoutId = setTimeout(() => {
           pendingLocalStartsRef.current.delete(conversation.id);
           updateConversation(conversation.id, { localAdapterState: 'error' });
-          const error = new Error('本地会话启动超时，请先确认 Codex 本地 adapter 可用。');
+          const error = new Error(t('chat.localStartTimeoutDetail'));
           setLastError(error.message);
           pushSystem('本地会话启动超时', error.message);
           settleReject(error);
@@ -4018,7 +4021,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           clearTimeout(timeoutId);
           pendingLocalStartsRef.current.delete(conversation.id);
           updateConversation(conversation.id, { localAdapterState: 'error' });
-          const error = new Error('请先在设置里连接后端。');
+          const error = new Error(t('sess.connectBackendFirst'));
           reject(error);
         }
       });
@@ -4056,7 +4059,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         });
         const timeoutId = setTimeout(() => {
           pendingThreadStartsRef.current.delete(conversation.id);
-          const error = new Error('创建 thread 超时，请稍后重试。');
+          const error = new Error(t('sess.threadCreateTimeout'));
           setLastError(error.message);
           settleReject(error);
           reject(error);
@@ -4096,7 +4099,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         if (!sent) {
           clearTimeout(timeoutId);
           pendingThreadStartsRef.current.delete(conversation.id);
-          const error = new Error('请先在设置里连接后端。');
+          const error = new Error(t('sess.connectBackendFirst'));
           settleReject(error);
           reject(error);
         }
@@ -4111,13 +4114,13 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       conversationsRef.current.find((item) => item.workspaceId === workspaceId) ??
       (workspace ? createDefaultConversation(workspace) : null);
     if (!workspace || !conversation) {
-      setLastError('未找到工作区，无法刷新 Codex threads。');
+      setLastError(t('sess.workspaceNotFoundRefresh'));
       return false;
     }
     try {
       await startLocalAdapter(workspace, conversation);
     } catch (error) {
-      setLastError(error instanceof Error ? localTurnErrorMessage(error.message) : '本地会话未启动');
+      setLastError(error instanceof Error ? localTurnErrorMessage(error.message) : t('sess.localNotStarted'));
       return false;
     }
     const existing = pendingThreadListsRef.current.get(workspaceId);
@@ -4131,7 +4134,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       if (pending?.requestId !== requestId) {
         return;
       }
-      finishPendingThreadList(pending, 'thread/list 请求超时');
+      finishPendingThreadList(pending, t('sess.requestTimeout', { method: 'thread/list' }));
     }, 10000);
     pendingThreadListsRef.current.set(workspaceId, {
       workspaceId,
@@ -4150,7 +4153,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       sourceKinds: ['cli', 'vscode', 'appServer'],
     }, requestId);
     if (!sent) {
-      finishPendingThreadList(pendingThreadListsRef.current.get(workspaceId)!, '请先在设置里连接后端。');
+      finishPendingThreadList(pendingThreadListsRef.current.get(workspaceId)!, t('sess.connectBackendFirst'));
       return false;
     }
     return true;
@@ -4173,14 +4176,14 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   ) => {
     const context = getConversationContext(conversationId);
     if (!context) {
-      desktopAlert('未选择对话', '请先选择一个 Codex thread。');
+      desktopAlert(t('alert.noConversation'), t('alert.pickThread'));
       return false;
     }
     const { workspace, conversation } = context;
     try {
       await startLocalAdapter(workspace, conversation);
     } catch (error) {
-      setLastError(error instanceof Error ? localTurnErrorMessage(error.message) : '本地会话未启动');
+      setLastError(error instanceof Error ? localTurnErrorMessage(error.message) : t('sess.localNotStarted'));
       return false;
     }
     let threadId = normalizeThreadId(conversation.threadId);
@@ -4196,12 +4199,12 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       try {
         threadId = await ensureThreadId(workspace, conversation, true);
       } catch (error) {
-        setLastError(error instanceof Error ? localTurnErrorMessage(error.message) : '创建 thread 失败');
+        setLastError(error instanceof Error ? localTurnErrorMessage(error.message) : t('sess.threadCreateFailed'));
         return false;
       }
     }
     if (!threadId) {
-      setLastError('当前记录还没有原生 thread id。');
+      setLastError(t('sess.noNativeThreadId'));
       return false;
     }
     const requestId = createRequestId(`thread-${action}`);
@@ -4210,7 +4213,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       if (!pending) {
         return;
       }
-      finishPendingThreadAction(pending, `${method} 请求超时`);
+      finishPendingThreadAction(pending, t('sess.requestTimeout', { method }));
     }, 10000);
     pendingThreadActionsRef.current.set(requestId, {
       workspaceId: workspace.id,
@@ -4229,7 +4232,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     if (!sent) {
       const pending = pendingThreadActionsRef.current.get(requestId);
       if (pending) {
-        finishPendingThreadAction(pending, '请先在设置里连接后端。');
+        finishPendingThreadAction(pending, t('sess.connectBackendFirst'));
       }
       return false;
     }
@@ -4246,14 +4249,14 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   ) => {
     const context = getConversationContext(conversationId);
     if (!context) {
-      desktopAlert('未选择对话', '请先选择一个 Codex thread。');
+      desktopAlert(t('alert.noConversation'), t('alert.pickThread'));
       return false;
     }
     const { workspace, conversation } = context;
     try {
       await startLocalAdapter(workspace, conversation);
     } catch (error) {
-      setLastError(error instanceof Error ? localTurnErrorMessage(error.message) : '本地会话未启动');
+      setLastError(error instanceof Error ? localTurnErrorMessage(error.message) : t('sess.localNotStarted'));
       return false;
     }
     const requestId = createRequestId(`thread-${action}`);
@@ -4262,7 +4265,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       if (!pending) {
         return;
       }
-      finishPendingThreadAction(pending, `${method} 请求超时`);
+      finishPendingThreadAction(pending, t('sess.requestTimeout', { method }));
     }, 10000);
     pendingThreadActionsRef.current.set(requestId, {
       workspaceId: workspace.id,
@@ -4279,7 +4282,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     if (!sent) {
       const pending = pendingThreadActionsRef.current.get(requestId);
       if (pending) {
-        finishPendingThreadAction(pending, '请先在设置里连接后端。');
+        finishPendingThreadAction(pending, t('sess.connectBackendFirst'));
       }
       return false;
     }
@@ -4292,7 +4295,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   ) => {
     const context = getConversationContext(conversationId);
     if (!context) {
-      desktopAlert('未选择对话', '请先选择一个 Codex 对话。');
+      desktopAlert(t('alert.noConversation'), t('alert.pickCodexConversation'));
       return false;
     }
     const { workspace, conversation } = context;
@@ -4319,7 +4322,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       const timeoutId = setTimeout(() => {
         const pending = pendingThreadActionsRef.current.get(requestId);
         if (pending) {
-          finishPendingThreadAction(pending, 'mcpServerStatus/list 请求超时');
+          finishPendingThreadAction(pending, t('sess.requestTimeout', { method: 'mcpServerStatus/list' }));
         }
       }, 15000);
       pendingThreadActionsRef.current.set(requestId, {
@@ -4341,13 +4344,13 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       if (!sent) {
         const pending = pendingThreadActionsRef.current.get(requestId);
         if (pending) {
-          finishPendingThreadAction(pending, '请先在设置里连接后端。');
+          finishPendingThreadAction(pending, t('sess.connectBackendFirst'));
         }
         return false;
       }
       return true;
     } catch (error) {
-      const message = error instanceof Error ? localTurnErrorMessage(error.message) : 'MCP 状态读取失败';
+      const message = error instanceof Error ? localTurnErrorMessage(error.message) : t('sess.mcpStatusFailed');
       setMcpInventoryByConversation((current) => ({
         ...current,
         [conversation.id]: {
@@ -4373,7 +4376,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const requestPermissionProfiles = useCallback(async (conversationId = activeConversationRef.current) => {
     const context = getConversationContext(conversationId);
     if (!context) {
-      desktopAlert('未选择对话', '请先选择一个 Codex 对话。');
+      desktopAlert(t('alert.noConversation'), t('alert.pickCodexConversation'));
       return false;
     }
     const { workspace, conversation } = context;
@@ -4394,7 +4397,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     try {
       await startLocalAdapter(workspace, conversation);
     } catch (error) {
-      const message = error instanceof Error ? localTurnErrorMessage(error.message) : '本地会话未启动';
+      const message = error instanceof Error ? localTurnErrorMessage(error.message) : t('sess.localNotStarted');
       setPermissionProfilesByConversation((current) => ({
         ...current,
         [conversation.id]: {
@@ -4417,7 +4420,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     const timeoutId = setTimeout(() => {
       const pending = pendingThreadActionsRef.current.get(requestId);
       if (pending) {
-        finishPendingThreadAction(pending, 'permissionProfile/list 请求超时');
+        finishPendingThreadAction(pending, t('sess.requestTimeout', { method: 'permissionProfile/list' }));
       }
     }, 15000);
     pendingThreadActionsRef.current.set(requestId, {
@@ -4437,7 +4440,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     if (!sent) {
       const pending = pendingThreadActionsRef.current.get(requestId);
       if (pending) {
-        finishPendingThreadAction(pending, '请先在设置里连接后端。');
+        finishPendingThreadAction(pending, t('sess.connectBackendFirst'));
       }
       return false;
     }
@@ -4447,7 +4450,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const requestHooksCatalog = useCallback(async (conversationId = activeConversationRef.current) => {
     const context = getConversationContext(conversationId);
     if (!context) {
-      desktopAlert('未选择对话', '请先选择一个 Codex 对话。');
+      desktopAlert(t('alert.noConversation'), t('alert.pickCodexConversation'));
       return false;
     }
     const { workspace, conversation } = context;
@@ -4468,7 +4471,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     try {
       await startLocalAdapter(workspace, conversation);
     } catch (error) {
-      const message = error instanceof Error ? localTurnErrorMessage(error.message) : '本地会话未启动';
+      const message = error instanceof Error ? localTurnErrorMessage(error.message) : t('sess.localNotStarted');
       setHooksCatalogByConversation((current) => ({
         ...current,
         [conversation.id]: {
@@ -4491,7 +4494,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     const timeoutId = setTimeout(() => {
       const pending = pendingThreadActionsRef.current.get(requestId);
       if (pending) {
-        finishPendingThreadAction(pending, 'hooks/list 请求超时');
+        finishPendingThreadAction(pending, t('sess.requestTimeout', { method: 'hooks/list' }));
       }
     }, 15000);
     pendingThreadActionsRef.current.set(requestId, {
@@ -4509,7 +4512,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     if (!sent) {
       const pending = pendingThreadActionsRef.current.get(requestId);
       if (pending) {
-        finishPendingThreadAction(pending, '请先在设置里连接后端。');
+        finishPendingThreadAction(pending, t('sess.connectBackendFirst'));
       }
       return false;
     }
@@ -4519,7 +4522,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const requestPluginsCatalog = useCallback(async (conversationId = activeConversationRef.current) => {
     const context = getConversationContext(conversationId);
     if (!context) {
-      desktopAlert('未选择对话', '请先选择一个 Codex 对话。');
+      desktopAlert(t('alert.noConversation'), t('alert.pickCodexConversation'));
       return false;
     }
     const { workspace, conversation } = context;
@@ -4540,7 +4543,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     try {
       await startLocalAdapter(workspace, conversation);
     } catch (error) {
-      const message = error instanceof Error ? localTurnErrorMessage(error.message) : '本地会话未启动';
+      const message = error instanceof Error ? localTurnErrorMessage(error.message) : t('sess.localNotStarted');
       setPluginsCatalogByConversation((current) => ({
         ...current,
         [conversation.id]: {
@@ -4563,7 +4566,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     const timeoutId = setTimeout(() => {
       const pending = pendingThreadActionsRef.current.get(requestId);
       if (pending) {
-        finishPendingThreadAction(pending, 'plugin/list 请求超时');
+        finishPendingThreadAction(pending, t('sess.requestTimeout', { method: 'plugin/list' }));
       }
     }, 15000);
     pendingThreadActionsRef.current.set(requestId, {
@@ -4582,7 +4585,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     if (!sent) {
       const pending = pendingThreadActionsRef.current.get(requestId);
       if (pending) {
-        finishPendingThreadAction(pending, '请先在设置里连接后端。');
+        finishPendingThreadAction(pending, t('sess.connectBackendFirst'));
       }
       return false;
     }
@@ -4592,7 +4595,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const requestMemorySettings = useCallback(async (conversationId = activeConversationRef.current) => {
     const context = getConversationContext(conversationId);
     if (!context) {
-      desktopAlert('未选择对话', '请先选择一个 Codex 对话。');
+      desktopAlert(t('alert.noConversation'), t('alert.pickCodexConversation'));
       return false;
     }
     const { workspace, conversation } = context;
@@ -4613,7 +4616,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     try {
       await startLocalAdapter(workspace, conversation);
     } catch (error) {
-      const message = error instanceof Error ? localTurnErrorMessage(error.message) : '本地会话未启动';
+      const message = error instanceof Error ? localTurnErrorMessage(error.message) : t('sess.localNotStarted');
       setMemorySettingsByConversation((current) => ({
         ...current,
         [conversation.id]: {
@@ -4636,7 +4639,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     const timeoutId = setTimeout(() => {
       const pending = pendingThreadActionsRef.current.get(requestId);
       if (pending) {
-        finishPendingThreadAction(pending, 'config/read 请求超时');
+        finishPendingThreadAction(pending, t('sess.requestTimeout', { method: 'config/read' }));
       }
     }, 15000);
     pendingThreadActionsRef.current.set(requestId, {
@@ -4654,7 +4657,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     if (!sent) {
       const pending = pendingThreadActionsRef.current.get(requestId);
       if (pending) {
-        finishPendingThreadAction(pending, '请先在设置里连接后端。');
+        finishPendingThreadAction(pending, t('sess.connectBackendFirst'));
       }
       return false;
     }
@@ -4667,7 +4670,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   ) => {
     const context = getConversationContext(conversationId);
     if (!context) {
-      desktopAlert('未选择对话', '请先选择一个 Codex 对话。');
+      desktopAlert(t('alert.noConversation'), t('alert.pickCodexConversation'));
       return false;
     }
     const { workspace, conversation } = context;
@@ -4717,7 +4720,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         }, createRequestId('memory-mode'));
       }
     } catch (error) {
-      const message = error instanceof Error ? localTurnErrorMessage(error.message) : 'Memory 设置失败';
+      const message = error instanceof Error ? localTurnErrorMessage(error.message) : t('sess.memorySetFailed');
       setMemorySettingsByConversation((current) => ({
         ...current,
         [conversation.id]: {
@@ -4739,7 +4742,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     const timeoutId = setTimeout(() => {
       const pending = pendingThreadActionsRef.current.get(requestId);
       if (pending) {
-        finishPendingThreadAction(pending, 'config/batchWrite 请求超时');
+        finishPendingThreadAction(pending, t('sess.requestTimeout', { method: 'config/batchWrite' }));
       }
     }, 15000);
     pendingThreadActionsRef.current.set(requestId, {
@@ -4759,7 +4762,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     if (!sent) {
       const pending = pendingThreadActionsRef.current.get(requestId);
       if (pending) {
-        finishPendingThreadAction(pending, '请先在设置里连接后端。');
+        finishPendingThreadAction(pending, t('sess.connectBackendFirst'));
       }
       return false;
     }
@@ -4769,14 +4772,14 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const resetMemories = useCallback(async (conversationId: string) => {
     const context = getConversationContext(conversationId);
     if (!context) {
-      desktopAlert('未选择对话', '请先选择一个 Codex 对话。');
+      desktopAlert(t('alert.noConversation'), t('alert.pickCodexConversation'));
       return false;
     }
     const { workspace, conversation } = context;
     try {
       await startLocalAdapter(workspace, conversation);
     } catch (error) {
-      const message = error instanceof Error ? localTurnErrorMessage(error.message) : '本地会话未启动';
+      const message = error instanceof Error ? localTurnErrorMessage(error.message) : t('sess.localNotStarted');
       setLastError(message);
       return false;
     }
@@ -4784,7 +4787,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     const timeoutId = setTimeout(() => {
       const pending = pendingThreadActionsRef.current.get(requestId);
       if (pending) {
-        finishPendingThreadAction(pending, 'memory/reset 请求超时');
+        finishPendingThreadAction(pending, t('sess.requestTimeout', { method: 'memory/reset' }));
       }
     }, 15000);
     pendingThreadActionsRef.current.set(requestId, {
@@ -4800,11 +4803,11 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     if (!sent) {
       const pending = pendingThreadActionsRef.current.get(requestId);
       if (pending) {
-        finishPendingThreadAction(pending, '请先在设置里连接后端。');
+        finishPendingThreadAction(pending, t('sess.connectBackendFirst'));
       }
       return false;
     }
-    appendTimeline(makeSystemEntry('Memory reset requested', '已请求重置本地 memories。', workspace.id, conversation.id));
+    appendTimeline(makeSystemEntry('Memory reset requested', t('sess.memoryResetRequested'), workspace.id, conversation.id));
     return true;
   }, [appendTimeline, finishPendingThreadAction, getConversationContext, sendLocalMethodRequest, startLocalAdapter]);
 
@@ -4816,11 +4819,11 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     if (!context) return false;
     const config = conversationPermissionCapabilities(context.conversation, v2ProvidersRef.current);
     if (!config?.modes?.includes(mode)) {
-      setLastError('当前 Agent 不支持此权限模式。');
+      setLastError(t('sess.permissionModeUnsupported'));
       return false;
     }
     if (pendingV2SubmissionsRef.current.has(conversationId) || thinkingConversationsRef.current[conversationId] === true) {
-      setLastError('请等待当前请求完成后再更改权限。');
+      setLastError(t('sess.permissionWait'));
       return false;
     }
     conversationsRef.current = conversationsRef.current.map((item) => item.id === conversationId ? { ...item, permissionMode: mode } : item);
@@ -4841,11 +4844,11 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     if (!context) return false;
     const config = conversationPermissionCapabilities(context.conversation, v2ProvidersRef.current);
     if (mode === 'plan' && !config?.supportsPlan) {
-      setLastError('当前 Agent 不支持此工作模式。');
+      setLastError(t('sess.workModeUnsupported'));
       return false;
     }
     if (pendingV2SubmissionsRef.current.has(conversationId) || thinkingConversationsRef.current[conversationId] === true) {
-      setLastError('请等待当前请求完成后再更改工作模式。');
+      setLastError(t('sess.workModeWait'));
       return false;
     }
     conversationsRef.current = conversationsRef.current.map((item) => item.id === conversationId ? { ...item, mode } : item);
@@ -4865,7 +4868,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     approvalsReviewer?: string | null,
   ) => {
     const preset = permissionPresetForProfile(profileId, approvalsReviewer);
-    if (!preset) { setLastError('请选择请求审批、自动审批或完全访问。'); return false; }
+    if (!preset) { setLastError(t('sess.permissionPresetRequired')); return false; }
     return applyConversationPermissionMode(conversationId,
       preset.id === 'full-access' ? 'full-access' : preset.id === 'auto-review' ? 'auto' : 'ask');
   }, [applyConversationPermissionMode]);
@@ -4873,7 +4876,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const setWorkspaceServiceTier = useCallback((conversationId: string, nextTier: string, title: string) => {
     const context = getConversationContext(conversationId);
     if (!context) {
-      desktopAlert('未选择对话', '请先选择一个 Codex 对话。');
+      desktopAlert(t('alert.noConversation'), t('alert.pickCodexConversation'));
       return false;
     }
     const { workspace, conversation } = context;
@@ -4902,7 +4905,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const toggleFastServiceTier = useCallback((conversationId: string) => {
     const context = getConversationContext(conversationId);
     if (!context) {
-      desktopAlert('未选择对话', '请先选择一个 Codex 对话。');
+      desktopAlert(t('alert.noConversation'), t('alert.pickCodexConversation'));
       return false;
     }
     const { workspace } = context;
@@ -4921,7 +4924,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const applyPersonality = useCallback((conversationId: string, personality: string) => {
     const context = getConversationContext(conversationId);
     if (!context) {
-      desktopAlert('未选择对话', '请先选择一个 Codex 对话。');
+      desktopAlert(t('alert.noConversation'), t('alert.pickCodexConversation'));
       return false;
     }
     const { workspace, conversation } = context;
@@ -4951,7 +4954,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   ) => {
     const context = getConversationContext(conversationId);
     if (!context) {
-      desktopAlert('未选择对话', '请先选择一个 Codex 对话。');
+      desktopAlert(t('alert.noConversation'), t('alert.pickCodexConversation'));
       return false;
     }
     const { workspace, conversation } = context;
@@ -4964,7 +4967,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       includeLogs,
     }, createRequestId('feedback'));
     if (!sent) {
-      setLastError('请先在设置里连接后端。');
+      setLastError(t('sess.connectBackendFirst'));
       return false;
     }
     appendTimeline(makeSystemEntry(
@@ -4979,7 +4982,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const requestGitDiff = useCallback(async (conversationId = activeConversationRef.current) => {
     const context = getConversationContext(conversationId);
     if (!context) {
-      desktopAlert('未选择对话', '请先选择一个 Codex 对话。');
+      desktopAlert(t('alert.noConversation'), t('alert.pickCodexConversation'));
       return false;
     }
     const { workspace, conversation } = context;
@@ -5000,7 +5003,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     try {
       await startLocalAdapter(workspace, conversation);
     } catch (error) {
-      const message = error instanceof Error ? localTurnErrorMessage(error.message) : '本地会话未启动';
+      const message = error instanceof Error ? localTurnErrorMessage(error.message) : t('sess.localNotStarted');
       setGitDiffByConversation((current) => ({
         ...current,
         [conversation.id]: {
@@ -5023,7 +5026,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     const timeoutId = setTimeout(() => {
       const pending = pendingGitDiffsRef.current.get(requestId);
       if (pending) {
-        finishPendingGitDiff(pending, 'gitDiffToRemote 请求超时');
+        finishPendingGitDiff(pending, t('sess.requestTimeout', { method: 'gitDiffToRemote' }));
       }
     }, 15000);
     pendingGitDiffsRef.current.set(requestId, {
@@ -5036,7 +5039,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     if (!sent) {
       const pending = pendingGitDiffsRef.current.get(requestId);
       if (pending) {
-        finishPendingGitDiff(pending, '请先在设置里连接后端。');
+        finishPendingGitDiff(pending, t('sess.connectBackendFirst'));
       }
       return false;
     }
@@ -5046,7 +5049,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const openGitDiff = useCallback((conversationId = activeConversationRef.current) => {
     const context = getConversationContext(conversationId);
     if (!context) {
-      desktopAlert('未选择对话', '请先选择一个 Codex 对话。');
+      desktopAlert(t('alert.noConversation'), t('alert.pickCodexConversation'));
       return;
     }
     openPanel('GitDiff', {
@@ -5059,7 +5062,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const openTerminal = useCallback((conversationId = activeConversationRef.current) => {
     const context = getConversationContext(conversationId);
     if (!context) {
-      desktopAlert('未选择对话', '请先选择一个 Codex 对话。');
+      desktopAlert(t('alert.noConversation'), t('alert.pickCodexConversation'));
       return;
     }
     seedTerminalState(context.workspace, context.conversation);
@@ -5075,7 +5078,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const requestSkillList = useCallback(async (conversationId = activeConversationRef.current, forceReload = false) => {
     const context = getConversationContext(conversationId);
     if (!context) {
-      desktopAlert('未选择对话', '请先选择一个 Codex 对话。');
+      desktopAlert(t('alert.noConversation'), t('alert.pickCodexConversation'));
       return false;
     }
     const { workspace, conversation } = context;
@@ -5086,7 +5089,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     try {
       await startLocalAdapter(workspace, conversation);
     } catch (error) {
-      const message = error instanceof Error ? localTurnErrorMessage(error.message) : '本地会话未启动';
+      const message = error instanceof Error ? localTurnErrorMessage(error.message) : t('sess.localNotStarted');
       setSkillListStatus('error');
       setSkillListError(message);
       setLastError(message);
@@ -5096,7 +5099,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     const timeoutId = setTimeout(() => {
       const pending = pendingSkillListsRef.current.get(requestId);
       if (pending) {
-        finishPendingSkillList(pending, 'skills/list 请求超时');
+        finishPendingSkillList(pending, t('sess.requestTimeout', { method: 'skills/list' }));
       }
     }, 15000);
     pendingSkillListsRef.current.set(requestId, {
@@ -5112,7 +5115,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     if (!sent) {
       const pending = pendingSkillListsRef.current.get(requestId);
       if (pending) {
-        finishPendingSkillList(pending, '请先在设置里连接后端。');
+        finishPendingSkillList(pending, t('sess.connectBackendFirst'));
       }
       return false;
     }
@@ -5122,7 +5125,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const openExperimentalFeatures = useCallback((conversationId = activeConversationRef.current) => {
     const context = getConversationContext(conversationId);
     if (!context) {
-      desktopAlert('未选择对话', '请先选择一个 Codex 对话。');
+      desktopAlert(t('alert.noConversation'), t('alert.pickCodexConversation'));
       return;
     }
     openPanel('Experimental', {
@@ -5214,7 +5217,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   ) => {
     const workspace = workspacesRef.current.find((item) => item.id === workspaceId);
     if (!workspace) {
-      desktopAlert('未找到工作区', '请返回后重新选择工作区。');
+      desktopAlert(t('alert.workspaceNotFound'), t('alert.workspaceNotFoundBody'));
       return null;
     }
     const agent = resolveCreateConversationAgent({
@@ -5227,8 +5230,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     });
     if (!agent) {
       desktopAlert(
-        options?.provider ? '该 Agent 当前不可用' : '没有可用的 Agent',
-        options?.provider ? '请选择其他可用的 Agent。' : '请先连接后端，并确认至少有一个 Agent 可用。',
+        options?.provider ? t('alert.agentUnavailable') : t('alert.noAgent'),
+        options?.provider ? t('alert.agentUnavailableBody') : t('alert.noAgentHint'),
       );
       return null;
     }
@@ -5257,7 +5260,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     const now = Date.now();
     const placeholder = {
       ...(existing ?? createDefaultConversation(workspace)),
-      title: options?.title?.trim() || '新对话',
+      title: options?.title?.trim() || t('chat.newConversation'),
       provider: agent.provider,
       providerProfile: agent.providerProfile,
       permissionMode: runModes.permissionMode,
@@ -5284,7 +5287,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     const targetPath = path.trim();
     if (!source || !sourceWorkspace || !targetPath || targetPath.includes('\0')
       || !(/^(?:\/|[A-Za-z]:[\\/]|\\\\)/.test(targetPath))) {
-      setLastError('无法打开 worktree：源对话或目录路径无效。');
+      setLastError(t('sess.worktreeInvalid'));
       return null;
     }
     const backendId = source.backendConnectionId ?? sourceWorkspace.backendConnectionId
@@ -5292,7 +5295,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     if (backendId !== activeBackendConnectionIdRef.current
       || (source.backendConnectionId && sourceWorkspace.backendConnectionId
         && source.backendConnectionId !== sourceWorkspace.backendConnectionId)) {
-      setLastError('后端已切换，请在源对话的后端重新读取 worktree 列表。');
+      setLastError(t('sess.worktreeBackendSwitched'));
       return null;
     }
     const pathKey = (value: string) => value.replace(/[\\/]+$/, '') || '/';
@@ -5339,7 +5342,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const switchConversationAgent = useCallback((conversationId: string, provider: ProviderKind) => {
     const context = getConversationContext(conversationId);
     if (!context) {
-      desktopAlert('未选择对话', '请先选择工作区和对话。');
+      desktopAlert(t('alert.noConversation'), t('alert.pickWorkspaceAndConversation'));
       return;
     }
     const { workspace, conversation } = context;
@@ -5350,12 +5353,12 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       timeline: timelineRef.current.filter((entry) => entry.conversationId === conversation.id),
       thinking: thinkingConversationsRef.current[conversation.id] === true,
     })) {
-      desktopAlert('无法切换 Agent', '任务开始后不能再切换 Agent。请新建对话。');
+      desktopAlert(t('alert.cannotSwitchAgent'), t('alert.cannotSwitchAgentBody'));
       return;
     }
     const descriptor = v2Providers.find((item) => item.id === provider);
     if (!descriptor?.available) {
-      desktopAlert('该 Agent 当前不可用', descriptor?.unavailableReason || '请选择其他可用的 Agent。');
+      desktopAlert(t('alert.agentUnavailable'), descriptor?.unavailableReason || t('alert.agentUnavailableBody'));
       return;
     }
     const created = createConversation(workspace.id, {
@@ -5378,12 +5381,12 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const renameConversation = useCallback((conversationId: string, title: string) => {
     const nextTitle = title.trim();
     if (!nextTitle) {
-      desktopAlert('名称不能为空', '请输入新的对话标题。');
+      desktopAlert(t('alert.nameRequired'), t('alert.conversationTitleBody'));
       return;
     }
     const context = getConversationContext(conversationId);
     if (!context) {
-      desktopAlert('未选择对话', '请先选择一个 Codex thread。');
+      desktopAlert(t('alert.noConversation'), t('alert.pickThread'));
       return;
     }
     updateConversation(conversationId, { title: nextTitle });
@@ -5399,26 +5402,26 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const forkConversation = useCallback((conversationId: string) => {
     const context = getConversationContext(conversationId);
     if (!context) {
-      desktopAlert('未选择对话', '请先选择一个 Codex thread。');
+      desktopAlert(t('alert.noConversation'), t('alert.pickThread'));
       return null;
     }
     const { workspace, conversation } = context;
     if (conversation.v2ConversationId) {
       const provider = v2ProvidersRef.current.find((item) => item.id === conversation.provider);
       if (!provider?.capabilities.controlActions?.includes('fork')) {
-        setLastError('当前 Agent 未提供已验证的原生分叉能力。');
+        setLastError(t('sess.forkUnsupported'));
         return null;
       }
       if (thinkingConversationsRef.current[conversation.id]) {
-        setLastError('请先结束当前任务再分叉对话。');
+        setLastError(t('sess.forkBusy'));
         return null;
       }
       void (async () => {
         try {
           const result = await sendProtocolCommand({ id: createRequestId('fork'), type: 'conversation.fork', payload: {
-            conversationId: conversation.v2ConversationId, title: `${conversation.title || '对话'} · 分叉`,
+            conversationId: conversation.v2ConversationId, title: t('sess.forkTitle', { title: conversation.title || t('sess.conversation') }),
           } }, 45_000);
-          if (typeof result.conversationId !== 'string') throw new Error('分叉已响应，但未返回新对话标识，请刷新对话列表核对。');
+          if (typeof result.conversationId !== 'string') throw new Error(t('sess.forkNoId'));
           const api = new V2ApiClient({ serverUrl: settings.serverUrl, authToken: settings.authToken });
           const created = await api.getConversation(result.conversationId);
           const record = { ...conversationFromManifest(created, workspace.id), backendConnectionId: conversation.backendConnectionId,
@@ -5432,13 +5435,13 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           await sendProtocolCommand({ id: createRequestId('sub'), type: 'conversation.subscribe', payload: {
             conversationId: created.id, afterSequence: conversationRecoveryRef.current?.get(created.id)?.appliedSequence ?? 0, limit: 500,
           } });
-        } catch (error) { setLastError(error instanceof Error ? error.message : '分叉失败'); }
+        } catch (error) { setLastError(error instanceof Error ? error.message : t('sess.forkFailed')); }
       })();
       return null;
     }
     const threadId = normalizeThreadId(conversation.threadId);
     if (!threadId) {
-      setLastError('当前记录还没有可 fork 的原生 thread。');
+      setLastError(t('sess.noForkableThread'));
       return null;
     }
 
@@ -5558,7 +5561,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     const pending = (async () => {
       const context = getConversationContext(conversationId);
       if (!context) {
-        desktopAlert('未选择对话', '请先选择工作区和对话。');
+        desktopAlert(t('alert.noConversation'), t('alert.pickWorkspaceAndConversation'));
         return null;
       }
       const { workspace, conversation } = context;
@@ -5570,7 +5573,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       );
       if (!provider) {
         const descriptor = v2ProvidersRef.current.find((item) => item.id === conversation.provider);
-        desktopAlert('该 Agent 当前不可用', descriptor?.unavailableReason || '请选择其他可用的 Agent。');
+        desktopAlert(t('alert.agentUnavailable'), descriptor?.unavailableReason || t('alert.agentUnavailableBody'));
         return null;
       }
 
@@ -5578,7 +5581,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         ?? backendConnections.find((item) => item.id === workspace.backendConnectionId);
       const backendConnectionId = backendProfile?.id ?? workspace.backendConnectionId ?? null;
       const title = conversation.title.trim();
-      const isDefaultTitle = title === '新对话' || title === '默认对话';
+      const isDefaultTitle = isDefaultConversationTitle(title);
       const firstMessageTitle = firstMessageText.trim().slice(0, 18);
 
       try {
@@ -5631,9 +5634,9 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       } catch (error) {
         const message = error instanceof ConnectionError
           ? `${error.userMessage}（${error.technicalDetails}）`
-          : error instanceof Error ? error.message : '创建对话失败';
+          : error instanceof Error ? error.message : t('alert.createConversationFailed');
         setLastError(message);
-        desktopAlert('创建对话失败', message);
+        desktopAlert(t('alert.createConversationFailed'), message);
         return null;
       }
     })();
@@ -5658,30 +5661,30 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     ): Promise<boolean> => {
       const context = getConversationContext(conversationId);
       if (!context) {
-        desktopAlert('未选择对话', '请先选择工作区和对话。');
+        desktopAlert(t('alert.noConversation'), t('alert.pickWorkspaceAndConversation'));
         return false;
       }
       const { workspace, conversation } = context;
       // Reference attachments only send while their [引用:name] token is in the text.
       const attachments = liveComposerAttachments(text, rawAttachments);
       if (!isV2Conversation(conversation) || !conversation.provider) {
-        desktopAlert('当前不是 v2 对话', '请新建对话后再发送。');
+        desktopAlert(t('alert.notV2'), t('alert.notV2Body'));
         return false;
       }
 
       const permissionMode = conversationPermissionMode(conversation, workspace, v2ProvidersRef.current);
       if (!permissionMode) {
-        setLastError('请先为当前对话选择权限模式；旧版只读配置不会自动扩大权限。');
+        setLastError(t('sess.permissionSelectRequired'));
         return false;
       }
       const permissionConfig = conversationPermissionCapabilities(conversation, v2ProvidersRef.current);
       if (conversation.mode === 'plan' && !permissionConfig?.supportsPlan) {
-        setLastError('当前 Agent 不支持计划模式，请切换到执行模式。');
+        setLastError(t('sess.planModeUnsupported'));
         return false;
       }
 
       if (pendingV2SubmissionsRef.current.has(conversation.id)) {
-        setLastError('上一条请求尚未结束或确认，请先核对记录。');
+        setLastError(t('sess.previousPending'));
         return false;
       }
       const isFirstPrompt = !conversation.v2ConversationId;
@@ -5700,10 +5703,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       const socket = socketRef.current;
       if (!socket || socket.readyState !== WebSocket.OPEN || !socketVerifiedRef.current) {
         if (autoConnectEnabled && !manualDisconnectRef.current) {
-          setLastError('后端连接已断开，正在重连；请稍后重试。');
+          setLastError(t('sess.reconnecting'));
           connect();
         } else {
-          setLastError('请先在设置里连接后端。');
+          setLastError(t('sess.connectBackendFirst'));
         }
         restoreSubmission();
         return false;
@@ -5716,7 +5719,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           profileCapability: providerImageInputRef.current[conversation.id],
         });
         if (!imageSupport.supported) {
-          setLastError(imageSupport.reason || '当前 Agent 不支持图片输入');
+          setLastError(imageSupport.reason || t('image.agentUnsupportedShort'));
           restoreSubmission();
           return false;
         }
@@ -5786,7 +5789,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           submission.phase = 'running';
           setSubmissionStatusByConversation((current) => ({ ...current, [conversation.id]: 'running' }));
         }
-        if (!isFirstPrompt && conversation.title === '新对话' && text.trim()) {
+        if (!isFirstPrompt && isDefaultConversationTitle(conversation.title) && text.trim()) {
           updateConversation(conversation.id, { title: text.slice(0, 18), updatedAt: Date.now() });
         }
         return true;
@@ -5813,7 +5816,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         setConversationThinking(conversation.id, false);
         const message = error instanceof ConnectionError
           ? error.userMessage
-          : error instanceof Error ? error.message : '消息发送失败';
+          : error instanceof Error ? error.message : t('sess.sendFailedShort');
         setLastError(message);
         pendingV2SubmissionsRef.current.delete(conversation.id);
         setSubmissionStatusByConversation((current) => ({ ...current, [conversation.id]: undefined }));
@@ -5838,7 +5841,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     ) => {
       const context = getConversationContext(conversationId);
       if (!context) {
-        desktopAlert('未选择对话', '请先选择工作区和对话。');
+        desktopAlert(t('alert.noConversation'), t('alert.pickWorkspaceAndConversation'));
         return false;
       }
       // Reference attachments only send while their [引用:name] token is in the text.
@@ -5848,12 +5851,12 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       const permissionMode = conversationPermissionMode(conversation, workspace, v2ProvidersRef.current);
       const preset = PERMISSION_PRESETS.find((item) => item.id === (permissionMode === 'ask' ? 'default' : permissionMode === 'auto' ? 'auto-review' : permissionMode));
       if (!preset) {
-        setLastError('请先为当前对话明确选择支持的权限模式。');
+        setLastError(t('sess.permissionSelectSupported'));
         return false;
       }
       const workMode = conversation.mode ?? mode;
       if (workMode === 'plan' && !conversationPermissionCapabilities(conversation, v2ProvidersRef.current)?.supportsPlan) {
-        setLastError('当前 Agent 不支持计划模式，请切换到执行模式。');
+        setLastError(t('sess.planModeUnsupported'));
         return false;
       }
       const sessionId = sessionIdForConversation(workspace, conversation);
@@ -5862,7 +5865,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       try {
         await startLocalAdapter(workspace, conversation);
       } catch (error) {
-        const message = error instanceof Error ? error.message : '本地会话未启动';
+        const message = error instanceof Error ? error.message : t('sess.localNotStarted');
         setLastError(localTurnErrorMessage(message));
         return false;
       }
@@ -5871,13 +5874,13 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       try {
         threadId = await ensureThreadId(workspace, conversation, !conversationThreadId);
       } catch (error) {
-        const message = error instanceof Error ? error.message : '创建 thread 失败';
+        const message = error instanceof Error ? error.message : t('sess.threadCreateFailed');
         setLastError(message);
         return false;
       }
 
       setConversationThinking(conversation.id, true);
-      appendTimeline(makeSystemEntry('正在思考', '请求已发出，等待 Codex 返回中间步骤...', workspace.id, conversation.id));
+      appendTimeline(makeSystemEntry(t('sess.thinkingStart'), t('sess.thinkingStartHint'), workspace.id, conversation.id));
 
       const payload = {
         codexSessionId: sessionId,
@@ -5920,7 +5923,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
                   threadId,
                   mode: workMode,
                   permissionMode: permissionMode ?? undefined,
-                  title: conversation.title === '默认对话' ? text.slice(0, 18) || attachmentPrompt(attachments).slice(0, 18) || selectedSkillSummary(skills).slice(0, 18) || conversation.title : conversation.title,
+                  title: isDefaultConversationTitle(conversation.title) ? text.slice(0, 18) || attachmentPrompt(attachments).slice(0, 18) || selectedSkillSummary(skills).slice(0, 18) || conversation.title : conversation.title,
                   updatedAt: Date.now(),
                 }
               : conversation,
@@ -5953,17 +5956,17 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     if (!context || !text.trim()) return false;
     const pending = pendingV2SubmissionsRef.current.get(conversationId);
     if (pending?.phase === 'unknown') {
-      setLastError('请先核对当前对话的发送状态。');
+      setLastError(t('sess.checkSendState'));
       return false;
     }
     if (thinkingConversationsRef.current[conversationId] || pending) {
       if (!queueHydrated) {
-        setLastError('候选消息正在恢复，请稍后再发送。');
+        setLastError(t('sess.candidateRestoring'));
         return false;
       }
       const items = queuedChatDraftsRef.current[conversationId] ?? [];
       if (items.length >= 32) {
-        setLastError('候选队列最多保存 32 条消息。');
+        setLastError(t('sess.candidateQueueFull'));
         return false;
       }
       queuedChatDraftsRef.current = { ...queuedChatDraftsRef.current,
@@ -5979,7 +5982,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
 
   const toggleSelectedSkill = useCallback((conversationId: string, skill: SkillListItem) => {
     if (!skill.enabled) {
-      desktopAlert('Skill 已禁用', '该 Skill 当前未启用，不能添加到下一条消息。');
+      desktopAlert(t('alert.skillDisabled'), t('alert.skillDisabledBody'));
       return;
     }
     const nextSkill: SelectedSkillAttachment = {
@@ -5998,7 +6001,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
 
   const toggleCatalogSkill = useCallback((conversationId: string, skill: SkillCatalogDescriptor, provider: ProviderKind) => {
     if (!skill.valid) {
-      desktopAlert('Skill 无效', skill.error || '该 Skill 当前不能添加到下一条消息。');
+      desktopAlert(t('alert.skillInvalid'), skill.error || t('alert.skillInvalidBody'));
       return;
     }
     const nextSkill: SelectedSkillAttachment = {
@@ -6020,7 +6023,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const previewSkillResource = useCallback(async (provider: ProviderKind, resourceId: string) => {
     const workspacePath = activeWorkspace?.path || settings.defaultWorkspacePath;
     if (!workspacePath) {
-      throw new Error('请先选择工作区');
+      throw new Error(t('sess.pickWorkspaceFirst'));
     }
     const api = new V2ApiClient({ serverUrl: settings.serverUrl, authToken: settings.authToken });
     const result = await api.getSkillResource(provider, workspacePath, resourceId);
@@ -6031,7 +6034,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     const conversation = conversationsRef.current.find((item) => item.id === conversationId) ?? null;
     const v2Id = conversation?.v2ConversationId || conversation?.id;
     if (!conversation || !isV2Conversation(conversation) || !v2Id) {
-      desktopAlert('需要 v2 对话', '请先新建对话后再刷新 MCP。');
+      desktopAlert(t('alert.needV2'), t('alert.needV2RefreshMcp'));
       return false;
     }
     return Boolean(sendRawProtocolFrame({
@@ -6048,10 +6051,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       : null;
     const v2Id = conversation?.v2ConversationId || conversation?.id;
     if (!conversation || !workspace || !isV2Conversation(conversation) || !v2Id) {
-      desktopAlert('需要 v2 对话', '请先新建对话后再调用 MCP。');
+      desktopAlert(t('alert.needV2'), t('alert.needV2CallMcp'));
       return false;
     }
-    appendTimeline(makeSystemEntry('正在调用 MCP', `${toolName}`, workspace.id, conversation.id));
+    appendTimeline(makeSystemEntry(t('sess.mcpCalling'), `${toolName}`, workspace.id, conversation.id));
     return Boolean(sendRawProtocolFrame({
       id: createRequestId('mcp'),
       type: 'mcp.call',
@@ -6073,7 +6076,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         const v2Id = conversation?.v2ConversationId || conversation?.id || conversationId;
         const permissionId = typeof data.permissionId === 'string' ? data.permissionId : request.requestId;
         if (!v2Id || !permissionId) {
-          desktopAlert('权限请求无效', '找不到对应的对话。');
+          desktopAlert(t('alert.invalidPermissionRequest'), t('alert.invalidPermissionRequestBody'));
           return false;
         }
         void sendProtocolCommand({
@@ -6085,7 +6088,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
             decision: permissionDecision(selection, answerData),
           },
         }).then(() => recoverConversation(conversation?.id || conversationId)).catch((error: unknown) => {
-          setLastError(error instanceof Error ? error.message : '审批结果尚未确认。');
+          setLastError(error instanceof Error ? error.message : t('sess.approvalUnconfirmed'));
           void recoverConversation(conversation?.id || conversationId);
         });
         return true;
@@ -6099,7 +6102,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         : null;
 
       if (!requestSessionId || !workspace || !conversation) {
-        desktopAlert('未选择工作区', '请先选择一个工作区。');
+        desktopAlert(t('alert.noWorkspace'), t('alert.pickWorkspace'));
         return false;
       }
       return sendProtocolMessage('codex.local.approval.respond', {
@@ -6124,7 +6127,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const applyPermissionPreset = useCallback(
     (preset: PermissionPreset) => {
       if (!activeConversation) {
-        desktopAlert('未选择工作区', '请先选择一个工作区。');
+        desktopAlert(t('alert.noWorkspace'), t('alert.pickWorkspace'));
         return;
       }
       void applyPermissionProfile(activeConversation.id, preset.profileId, preset.description, preset.approvalsReviewer);
@@ -6137,10 +6140,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     if (!context) return;
     const config = conversationPermissionCapabilities(context.conversation, v2ProvidersRef.current);
     const selected = conversationPermissionMode(context.conversation, context.workspace, v2ProvidersRef.current);
-    const labels = { ask: '请求审批', auto: '自动审批', 'full-access': '完全访问' };
+    const labels = { ask: t('chat.permissionAsk'), auto: t('chat.permissionAuto'), 'full-access': t('chat.permissionFullAccess') };
     desktopAlert(
-      '权限设置',
-      config?.modes?.length ? '所选权限将在下次发送时应用。' : '当前 Agent 尚未提供权限设置能力。',
+      t('sess.permissionSettings'),
+      config?.modes?.length ? t('sess.permissionApplyNext') : t('sess.permissionNotProvided'),
       (config?.modes ?? []).map((mode) => ({
         text: `${selected === mode ? '✓ ' : ''}${labels[mode]}`,
         onPress: () => { void applyConversationPermissionMode(conversationId, mode); },
@@ -6162,7 +6165,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     (conversationId: string, args: string[], promptWhenEmpty = true) => {
       const context = getConversationContext(conversationId);
       if (!context) {
-        desktopAlert('未选择工作区', '请先选择一个工作区。');
+        desktopAlert(t('alert.noWorkspace'), t('alert.pickWorkspace'));
         return;
       }
 
@@ -6170,8 +6173,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       const { model, reasoningEffort, invalidReasoningEffort } = parseModelCommandArgs(args);
       if (invalidReasoningEffort) {
         desktopAlert(
-          '无效思考强度',
-          '支持 none、minimal、low、medium、high、xhigh，也支持 max 作为 xhigh 的别名。',
+          t('alert.invalidEffort'),
+          t('alert.invalidEffortBody'),
         );
         return;
       }
@@ -6183,7 +6186,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
             initialValue: modelCommandInitialValue(workspace, settings),
           });
         } else {
-          desktopAlert('Model', '请输入模型名或思考强度，例如 gpt-5.5 high。');
+          desktopAlert('Model', t('alert.modelInputHint'));
         }
         return;
       }
@@ -6196,12 +6199,12 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       });
 
       const detail = [
-        `Model: ${nextModel || '未设置'}`,
-        `Reasoning: ${nextReasoningEffort || '默认'}`,
+        `Model: ${nextModel || t('session.modelUnset')}`,
+        `Reasoning: ${nextReasoningEffort || t('sess.defaultValue')}`,
       ].join('\n');
       appendTimeline(makeSystemEntry(
         'Model settings updated',
-        `${detail}\n后续新 thread 和 turn 会把这些参数发送给 Codex app-server。`,
+        t('sess.modelAppliedDetail', { detail }),
         workspace.id,
         conversation.id,
       ));
@@ -6213,12 +6216,12 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     (conversationId: string, model: string, reasoningEffort: string | null) => {
       const context = getConversationContext(conversationId);
       if (!context) {
-        desktopAlert('未选择工作区', '请先选择一个工作区。');
+        desktopAlert(t('alert.noWorkspace'), t('alert.pickWorkspace'));
         return;
       }
       const nextModel = model.trim();
       if (!nextModel) {
-        desktopAlert('缺少模型', '请选择或输入模型名。');
+        desktopAlert(t('alert.missingModel'), t('alert.missingModelBody'));
         return;
       }
       const nextReasoningEffort = normalizeReasoningEffort(reasoningEffort) ?? defaultReasoningForModel(nextModel, modelCatalog);
@@ -6231,7 +6234,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         [
           `Model: ${nextModel}`,
           `Reasoning: ${reasoningEffortLabel(nextReasoningEffort)}`,
-          '后续新 thread 和 turn 会把这些参数发送给 Codex app-server。',
+          t('sess.modelAppliedFooter'),
         ].join('\n'),
         context.workspace.id,
         context.conversation.id,
@@ -6310,7 +6313,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         title: 'Thread memory',
         placeholder: 'on / off / reset',
         initialValue: '',
-        warning: 'reset 会清空 Codex 本地 memory，作用域不是单个 thread。',
+        warning: t('sess.memoryResetWarning'),
       });
       return;
     }
@@ -6321,7 +6324,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         title: 'Thread shell command',
         placeholder: 'pwd && git status --short',
         initialValue: '',
-        warning: '该命令会按 Codex app-server 语义以 unsandboxed full access 运行。',
+        warning: t('sess.unsandboxedWarning'),
         multiline: true,
       });
       return;
@@ -6343,7 +6346,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         title: 'Inject raw items',
         placeholder: '[{"type":"message","role":"user","content":[{"type":"input_text","text":"note"}]}]',
         initialValue: '[]',
-        warning: '会直接追加 Responses API items 到 thread 历史。请只粘贴可信 JSON 数组。',
+        warning: t('sess.injectWarning'),
         multiline: true,
       });
       return;
@@ -6354,7 +6357,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       title: 'Approve denied action',
       placeholder: '{"event":{...}}',
       initialValue: '',
-      warning: '需要粘贴 guardian denied action 的原始事件 JSON。',
+      warning: t('sess.guardianWarning'),
       multiline: true,
     });
   }, [turnIds]);
@@ -6370,18 +6373,18 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const copyLastAgentMessage = useCallback(async (conversationId: string) => {
     const context = getConversationContext(conversationId);
     if (!context) {
-      desktopAlert('未选择对话', '请先选择一个 Codex 对话。');
+      desktopAlert(t('alert.noConversation'), t('alert.pickCodexConversation'));
       return false;
     }
     const lastMessage = timelineRef.current.find(
       (entry) => entry.conversationId === conversationId && entry.kind === 'incoming' && entry.subtitle.trim(),
     );
     if (!lastMessage) {
-      desktopAlert('Copy', '当前对话还没有可复制的 Codex 回复。');
+      desktopAlert('Copy', t('alert.noCodexReply'));
       return false;
     }
     await navigator.clipboard.writeText(lastMessage.subtitle);
-    appendTimeline(makeSystemEntry('Copied last response', '最近一条 Codex 回复已复制到剪贴板。', context.workspace.id, context.conversation.id));
+    appendTimeline(makeSystemEntry('Copied last response', t('sess.copiedLastResponse'), context.workspace.id, context.conversation.id));
     return true;
   }, [appendTimeline, getConversationContext]);
 
@@ -6400,14 +6403,14 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       const context = getConversationContext(conversationId);
 
       if (!context) {
-        desktopAlert('未选择工作区', '请先选择一个工作区。');
+        desktopAlert(t('alert.noWorkspace'), t('alert.pickWorkspace'));
         return;
       }
 
       const { workspace, conversation } = context;
       if (conversation.provider === 'pi' && isV2Conversation(conversation)) {
         const route = routePiSlashCommand(input, getProviderCommandCatalog(conversation.id));
-        if (route.kind === 'blocked') { toast.warning('Pi 命令', { description: route.message }); return; }
+        if (route.kind === 'blocked') { toast.warning(t('sess.piCommand'), { description: route.message }); return; }
         if (route.kind === 'native') {
           void sendV2Prompt(route.input, conversation.id).then(accepted => {
             if (accepted) setConversationChatDraft(conversation.id, current => current.trim() === input.trim() ? '' : current);
@@ -6425,13 +6428,13 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         if (lower === 'compact' || lower === 'retry' || lower === 'resume') {
           const provider = v2ProvidersRef.current.find((item) => item.id === conversation.provider);
           if (!conversation.v2ConversationId || !provider?.capabilities.controlActions?.includes(lower)) {
-            setLastError(lower === 'resume' ? '请发送明确的后续消息继续对话；当前 Agent 不支持独立恢复操作。' : '当前 Agent 不支持此操作。');
+            setLastError(lower === 'resume' ? t('sess.resumeNeedsMessage') : t('sess.operationUnsupported'));
             return;
           }
           void sendProtocolCommand({ id: createRequestId(lower), type: `conversation.${lower}`, payload: {
             conversationId: conversation.v2ConversationId,
           } }).then(() => recoverConversation(conversation.id)).catch((error: unknown) => {
-            setLastError(error instanceof Error ? error.message : '操作失败');
+            setLastError(error instanceof Error ? error.message : t('sess.operationFailed'));
             void recoverConversation(conversation.id);
           });
           return;
@@ -6454,7 +6457,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
             const threadId = await ensureThreadId(workspace, conversation, !normalizeThreadId(conversation.threadId));
             sendLocalMethod(method, makeParams(threadId), title, detail);
           } catch (error) {
-            const message = error instanceof Error ? error.message : `${title} 失败`;
+            const message = error instanceof Error ? error.message : t('sess.actionFailed', { title });
             setLastError(message);
           }
         })();
@@ -6494,7 +6497,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         const requestId = rest[1] || selectedRequest?.requestId || '';
         const target = pendingRequests.find((request) => request.requestId === requestId) ?? selectedRequest;
         if (!target) {
-          desktopAlert('没有待处理请求', '当前没有可回复的审批或问题。');
+          desktopAlert(t('alert.noPendingRequests'), t('alert.noPendingRequestsBody'));
           return;
         }
         sendApprovalResponse(!deny, target);
@@ -6517,7 +6520,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       }
 
       if (lower === 'apps') {
-        sendLocalMethod('app/list', { limit: 50, forceRefetch: /reload|refresh|true|1/i.test(rest[0] ?? '') }, 'Apps requested', '已请求 Codex app-server 列出 apps。');
+        sendLocalMethod('app/list', { limit: 50, forceRefetch: /reload|refresh|true|1/i.test(rest[0] ?? '') }, 'Apps requested', t('sess.appsRequested'));
         return;
       }
 
@@ -6529,12 +6532,12 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         }
         if (subcommand === 'verbose') {
           void requestMcpInventory(conversation.id, 'full');
-          addCommandNotice('MCP inventory requested', '已请求 MCP server 详细状态。');
+          addCommandNotice('MCP inventory requested', t('sess.mcpInventoryDetail'));
           return;
         }
         if (/^(status|list|tools|refresh)$/i.test(subcommand)) {
           void requestMcpInventory(conversation.id, 'toolsAndAuthOnly');
-          addCommandNotice('MCP inventory requested', '已请求 MCP server 状态。');
+          addCommandNotice('MCP inventory requested', t('sess.mcpInventory'));
           return;
         }
         desktopAlert('MCP', 'Usage: /mcp [verbose]');
@@ -6542,7 +6545,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       }
 
       if (lower === 'compact') {
-        sendThreadMethod('thread/compact/start', (threadId) => ({ threadId }), 'Compact started', '已请求 Codex app-server 压缩当前 thread 上下文。');
+        sendThreadMethod('thread/compact/start', (threadId) => ({ threadId }), 'Compact started', t('sess.compactStarted'));
         return;
       }
 
@@ -6561,7 +6564,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
             'thread/goal/set',
             (threadId) => ({ threadId, status }),
             'Goal command sent',
-            `已发送 thread/goal/set status=${status}。`,
+            t('sess.sentGoalSet', { status }),
           );
           return;
         }
@@ -6591,7 +6594,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           method,
           (threadId) => (method === 'thread/goal/set' ? { threadId, objective } : { threadId }),
           'Goal command sent',
-          `已发送 ${method}。`,
+          t('sess.sentMethod', { method }),
         );
         return;
       }
@@ -6599,7 +6602,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       if (lower === 'rename') {
         const nextTitle = rest.join(' ').trim();
         if (!nextTitle) {
-          desktopAlert('Rename', '请输入新的对话标题。');
+          desktopAlert('Rename', t('alert.conversationTitleBody'));
           return;
         }
         updateConversation(conversation.id, { title: nextTitle });
@@ -6612,7 +6615,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       }
 
       if (lower === 'logout') {
-        sendLocalMethod('account/logout', {}, 'Logout requested', '已请求 Codex app-server 登出当前账号。');
+        sendLocalMethod('account/logout', {}, 'Logout requested', t('sess.logoutRequested'));
         return;
       }
 
@@ -6676,14 +6679,14 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
 
       if (lower === 'stop') {
         if (conversation.threadId) {
-          sendLocalMethod('thread/backgroundTerminals/clean', { threadId: conversation.threadId }, 'Background terminals clean requested', '已请求 Codex 清理后台终端。');
+          sendLocalMethod('thread/backgroundTerminals/clean', { threadId: conversation.threadId }, 'Background terminals clean requested', t('sess.cleanTerminalsRequested'));
         }
         if (sendWorkspaceCommand(workspace, 'codex.local.stop', { force: false }, conversation)) {
           const pending = pendingLocalStartsRef.current.get(conversation.id);
           if (pending) {
             clearTimeout(pending.timeoutId);
             pendingLocalStartsRef.current.delete(conversation.id);
-            pending.reject(new Error('本地会话已停止'));
+            pending.reject(new Error(t('sess.localSessionStopped')));
           }
           updateConversation(conversation.id, { localAdapterState: 'stopped' });
         }
@@ -6716,7 +6719,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
 
       if (lower === 'resume') {
         if (!normalizeThreadId(conversation.threadId)) {
-          setLastError('当前记录还没有可 resume 的原生 thread。');
+          setLastError(t('sess.noResumableThread'));
           return;
         }
         void sendNativeThreadAction(
@@ -6746,7 +6749,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           }),
           { selectResult: true },
         );
-        addCommandNotice('Thread fork sent', lower === 'side' || lower === 'btw' ? '已请求创建临时 side thread。' : '已请求 fork 当前原生 thread。');
+        addCommandNotice('Thread fork sent', lower === 'side' || lower === 'btw' ? t('sess.sideThreadRequested') : t('sess.forkThreadRequested'));
         return;
       }
 
@@ -6772,7 +6775,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       if (lower === 'interrupt') {
         const threadId = normalizeThreadId(conversation.threadId);
         if (!threadId) {
-          setLastError('当前对话还没有可中断的 thread。');
+          setLastError(t('sess.noInterruptibleThreadInConversation'));
           return;
         }
         sendWorkspaceCommand(workspace, 'codex.local.interrupt', {
@@ -6883,7 +6886,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       if (lower === 'quit' || lower === 'exit') {
         if (sendWorkspaceCommand(workspace, 'codex.local.stop', { force: false }, conversation)) {
           updateConversation(conversation.id, { localAdapterState: 'stopped' });
-          addCommandNotice(`/${lower} recognized`, '已停止当前本地 Codex 会话；移动端应用不会退出。');
+          addCommandNotice(`/${lower} recognized`, t('sess.localSessionStoppedNotice'));
         }
         return;
       }
@@ -6894,7 +6897,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         return;
       }
 
-      addCommandNotice(`/${lower} recognized`, '该命令不在当前内置命令清单中，已阻止作为普通 prompt 发送。');
+      addCommandNotice(`/${lower} recognized`, t('sess.commandNotBuiltin'));
     },
     [
       applyPermissionProfile,
@@ -7075,27 +7078,27 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       ? workspacesRef.current.find((item) => item.id === conversation.workspaceId) ?? null
       : null;
     if (!workspace || !conversation) {
-      desktopAlert('未选择工作区', '请先选择一个工作区。');
+      desktopAlert(t('alert.noWorkspace'), t('alert.pickWorkspace'));
       return;
     }
     if (isV2Conversation(conversation)) {
       const v2Id = conversation.v2ConversationId || conversation.id;
       void sendProtocolCommand(buildConversationControlMessage(v2Id, 'cancel')).then(() => {
-        appendTimeline(makeSystemEntry('停止请求已确认', '正在同步当前回合状态。', workspace.id, conversation.id));
+        appendTimeline(makeSystemEntry(t('sess.stopConfirmed'), t('sess.syncingTurn'), workspace.id, conversation.id));
         return recoverConversation(conversation.id);
       }).catch((error: unknown) => {
-        setLastError(error instanceof Error ? error.message : '停止结果尚未确认。');
+        setLastError(error instanceof Error ? error.message : t('sess.stopUnconfirmed'));
         void recoverConversation(conversation.id);
       });
       return;
     }
     const threadId = normalizeThreadId(conversation.threadId);
     if (!threadId) {
-      setLastError('当前还没有可中断的 thread。');
+      setLastError(t('sess.noInterruptibleThread'));
       return;
     }
     if (sendWorkspaceCommand(workspace, 'codex.local.interrupt', { threadId, turnId: turnIds[conversationId] || '' }, conversation)) {
-      appendTimeline(makeSystemEntry('已发送停止', '正在请求 Codex 中断当前思考。', workspace.id, conversation.id));
+      appendTimeline(makeSystemEntry(t('sess.stopSent'), t('sess.stopRequested'), workspace.id, conversation.id));
     }
   }, [appendTimeline, recoverConversation, sendProtocolCommand, sendWorkspaceCommand, turnIds]);
 
@@ -7108,7 +7111,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     }
     const context = getConversationContext(conversationId);
     if (!context) {
-      desktopAlert('未选择工作区', '请先选择一个工作区。');
+      desktopAlert(t('alert.noWorkspace'), t('alert.pickWorkspace'));
       return;
     }
     const { workspace, conversation } = context;
@@ -7120,7 +7123,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         profileCapability: providerImageInputRef.current[conversation.id],
       });
       if (!imageSupport.supported) {
-        setLastError(imageSupport.reason || '当前 Agent 不支持图片输入');
+        setLastError(imageSupport.reason || t('image.agentUnsupportedShort'));
         return;
       }
     }
@@ -7131,7 +7134,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     }
     if (text === '/compact' && conversation.provider !== 'pi') {
       if (isThinking || pendingV2SubmissionsRef.current.has(conversationId)) {
-        setLastError('请等待当前任务结束后再压缩上下文。');
+        setLastError(t('sess.compactWait'));
         return;
       }
       sendSlashCommand(text, conversationId);
@@ -7143,15 +7146,15 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       rememberMentionReferences(workspace.id, mentionReferences);
       const mentionSummary = summarizeMentionReferences(mentionReferences);
       if (mentionSummary) {
-        appendTimeline(makeSystemEntry('已引用文件', mentionSummary, workspace.id, conversationId));
+        appendTimeline(makeSystemEntry(t('sess.filesReferenced'), mentionSummary, workspace.id, conversationId));
       }
     }
     const liveAttachments = liveComposerAttachments(text, attachments);
     if (liveAttachments.length > 0) {
-      appendTimeline(makeSystemEntry('已附加附件', attachmentSummary(liveAttachments), workspace.id, conversationId));
+      appendTimeline(makeSystemEntry(t('sess.attachmentsAttached'), attachmentSummary(liveAttachments), workspace.id, conversationId));
     }
     if (skills.length > 0) {
-      appendTimeline(makeSystemEntry('已选择 Skill', selectedSkillSummary(skills), workspace.id, conversationId));
+      appendTimeline(makeSystemEntry(t('sess.skillSelected'), selectedSkillSummary(skills), workspace.id, conversationId));
     }
     const clearSubmittedComposer = () => {
       setConversationChatDraft(conversationId, (current) => current.trim() === text ? '' : current);
@@ -7167,7 +7170,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         return;
       }
       if ((queuedChatDraftsRef.current[conversationId]?.length ?? 0) >= 32) {
-        setLastError('候选队列最多保存 32 条消息。'); return;
+        setLastError(t('sess.candidateQueueFull')); return;
       }
       clearSubmittedComposer();
       queuedChatDraftsRef.current = {
@@ -7176,7 +7179,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           { id: createRequestId('queued'), text, attachments, skills }],
       };
       setQueuedChatDrafts(queuedChatDraftsRef.current);
-      appendTimeline(makeSystemEntry('消息已加入候选', '当前任务完成后会自动继续发送。', workspace.id, conversationId));
+      appendTimeline(makeSystemEntry(t('sess.messageQueued'), t('sess.messageQueuedHint'), workspace.id, conversationId));
       return;
     }
     if (isV2Conversation(conversation)) {
@@ -7209,7 +7212,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     if (command === 'interrupt') {
       const threadId = normalizeThreadId(conversation.threadId);
       if (!threadId) {
-        setLastError('当前对话还没有可中断的 thread。');
+        setLastError(t('sess.noInterruptibleThreadInConversation'));
         return;
       }
       sendWorkspaceCommand(workspace, 'codex.local.interrupt', {
@@ -7223,7 +7226,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       if (pending) {
         clearTimeout(pending.timeoutId);
         pendingLocalStartsRef.current.delete(conversation.id);
-        pending.reject(new Error('本地会话已停止'));
+        pending.reject(new Error(t('sess.localSessionStopped')));
       }
       updateConversation(conversation.id, { localAdapterState: 'stopped' });
     }
@@ -7245,7 +7248,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       } else if (action === 'history' || action === 'detail' || action === 'turns') {
         void recoverConversation(conversationId);
       } else {
-        setLastError('当前 Agent 未提供此对话操作。');
+        setLastError(t('sess.conversationActionUnsupported'));
       }
       return;
     }
@@ -7340,7 +7343,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     if (prompt.command === 'memory') {
       const mode = parseThreadMemoryMode(trimmed);
       if (!mode) {
-        desktopAlert('Memory', '请输入 on、off 或 reset。');
+        desktopAlert('Memory', t('alert.memoryArgs'));
         return;
       }
       if (mode === 'reset') {
@@ -7360,7 +7363,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     }
     if (prompt.command === 'shell') {
       if (!trimmed) {
-        desktopAlert('Shell command', '请输入要执行的 shell command。');
+        desktopAlert('Shell command', t('alert.shellCommand'));
         return;
       }
       void sendNativeThreadAction(prompt.conversationId, 'shell', 'thread/shellCommand', (threadId) => ({
@@ -7376,7 +7379,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     }
     if (prompt.command === 'items') {
       if (!trimmed) {
-        desktopAlert('Turn items', '请输入 turn id。');
+        desktopAlert('Turn items', t('alert.turnId'));
         return;
       }
       void sendNativeThreadAction(prompt.conversationId, 'items', 'thread/turns/items/list', (threadId) => ({
@@ -7394,7 +7397,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     if (prompt.command === 'inject') {
       const items = parseJsonArrayPrompt(trimmed);
       if (!items) {
-        desktopAlert('Inject items', '请输入 JSON 数组。');
+        desktopAlert('Inject items', t('alert.jsonArray'));
         return;
       }
       void sendNativeThreadAction(prompt.conversationId, 'inject', 'thread/inject_items', (threadId) => ({
@@ -7419,7 +7422,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         });
         setThreadCommandPrompt(null);
       } catch {
-        desktopAlert('Guardian', '请输入有效 JSON。');
+        desktopAlert('Guardian', t('alert.validJson'));
       }
     }
   }, [sendNativeThreadAction, sendTrackedLocalMethod]);

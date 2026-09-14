@@ -1,4 +1,5 @@
 import type { TodeXWebApi } from '../../preload/index';
+import { t } from '../i18n';
 
 const STORAGE_SCHEMA_KEY = 'todex.web.schemaVersion';
 const STORAGE_SCHEMA_VERSION = '1';
@@ -38,7 +39,7 @@ export function insecureBackendReason(serverUrl: string, pageProtocol = window.l
     const host = url.hostname.toLowerCase();
     const loopback = host === 'localhost' || host === '::1' || /^127(?:\.\d{1,3}){3}$/.test(host);
     if (url.protocol === 'http:' && !loopback) {
-      return '公开 HTTPS 页面只能连接使用 HTTPS/WSS 的远程 Backend';
+      return t('storage.insecureBackend');
     }
   } catch {
     return null;
@@ -66,7 +67,7 @@ export function installWebPlatformBridge(): void {
     },
     fs: {
       readFile: async () => {
-        throw new Error('浏览器预览不支持读取本机文件');
+        throw new Error(t('storage.browserReadFile'));
       },
     },
     app: {
