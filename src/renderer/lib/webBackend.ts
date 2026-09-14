@@ -1,4 +1,5 @@
 import { buildHttpUrl, type ConnectionSettings } from '@todex/protocol/todex';
+import { deviceAuthHeaders, deviceIdentityFromSecret } from '@todex/protocol/deviceAuth';
 
 export type WorkspaceTrust = {
   workspacePath: string;
@@ -10,7 +11,13 @@ async function request<T>(settings: ConnectionSettings, path: string, init: Requ
   const headers = new Headers(init.headers);
   headers.set('Accept', 'application/json');
   if (init.body) headers.set('Content-Type', 'application/json');
-  if (settings.authToken) headers.set('Authorization', `Bearer ${settings.authToken}`);
+  const device = deviceIdentityFromSecret(settings.deviceSecret);
+  if (device) {
+    const body = typeof init.body === 'string' ? new TextEncoder().encode(init.body) : new Uint8Array();
+    for (const [name, value] of Object.entries(deviceAuthHeaders(device, init.method ?? 'GET', path, body))) {
+      headers.set(name, value);
+    }
+  }
   const response = await fetch(buildHttpUrl(settings.serverUrl, path), { ...init, headers });
   const body = await response.json().catch(() => null) as Record<string, unknown> | null;
   if (!response.ok) {

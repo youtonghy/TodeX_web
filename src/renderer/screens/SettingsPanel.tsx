@@ -38,6 +38,7 @@ export function SettingsPanel({ session }: Props) {
   const [languagePreference, setLanguagePreference] = useState<LocalePreference>(() => getLocalePreference());
   const { settings, setSettings, backendConnections, activeBackendConnectionId, setActiveBackendConnectionId, updateBackendConnection, addBackendConnection, removeBackendConnection, connectionState, connectionHealth, serverVersion, connect, closeSocket } = session;
   const [pairingText, setPairingText] = useState('');
+  const [pairingAutoStart, setPairingAutoStart] = useState(0);
   const [chunks, setChunks] = useState<Map<number, PairingQrChunk>>(new Map());
   const connected = connectionState === 'open' || connectionState === 'connecting';
   const activeProfile = backendConnections.find((item) => item.id === activeBackendConnectionId);
@@ -53,8 +54,8 @@ export function SettingsPanel({ session }: Props) {
   const updateServerUrl = (serverUrl: string) => {
     if (!activeProfile) return;
     const changed = normalizeServerUrl(activeProfile.serverUrl) !== normalizeServerUrl(serverUrl);
-    updateBackendConnection(activeProfile.id, { serverUrl, ...(changed ? { authToken: '' } : {}) });
-    setSettings((current) => ({ ...current, serverUrl, ...(changed ? { authToken: '' } : {}) }));
+    updateBackendConnection(activeProfile.id, { serverUrl, ...(changed ? { deviceSecret: '' } : {}) });
+    setSettings((current) => ({ ...current, serverUrl, ...(changed ? { deviceSecret: '' } : {}) }));
   };
 
   const selectBackend = (id: string) => {
@@ -81,6 +82,7 @@ export function SettingsPanel({ session }: Props) {
         && latestSession.current.activeBackendConnectionId === sourceId ? { ...value, ...patch } : value);
       setChunks(new Map());
       toast.success(t('settings.pairingImported'));
+      if (!patch.deviceSecret) setPairingAutoStart((value) => value + 1);
     };
     try {
       const frame = parsePairingQrFrame(raw);
@@ -158,7 +160,6 @@ export function SettingsPanel({ session }: Props) {
               <p className="text-muted text-xs">{t('settings.labelColorHint')}</p>
             </div>
             <Field label={t('settings.serverUrl')} value={activeProfile.serverUrl} onChange={updateServerUrl} />
-            <Field label="Auth token" value={activeProfile.authToken} type="password" onChange={(authToken) => { updateBackendConnection(activeProfile.id, { authToken }); setSettings((current) => ({ ...current, authToken })); }} />
             <p className="text-warning text-xs">{t('settings.credentialWarning')}</p>
             <Field label="Tenant" value={activeProfile.tenantId} onChange={(tenantId) => { updateBackendConnection(activeProfile.id, { tenantId }); setSettings((current) => ({ ...current, tenantId })); }} />
             <Select selectedKey={activeProfile.encryptionProtocol} onSelectionChange={(key) => { if (typeof key === 'string') { const encryptionProtocol = key as typeof activeProfile.encryptionProtocol; updateBackendConnection(activeProfile.id, { encryptionProtocol }); setSettings((current) => ({ ...current, encryptionProtocol })); } }}>
@@ -166,7 +167,7 @@ export function SettingsPanel({ session }: Props) {
               <Select.Popover><ListBox><ListBox.Item id="none" textValue="none">none</ListBox.Item><ListBox.Item id="x25519" textValue="x25519">x25519</ListBox.Item><ListBox.Item id="ml-kem-768" textValue="ml-kem-768">ml-kem-768</ListBox.Item></ListBox></Select.Popover>
             </Select>
             {activeProfile.encryptionProtocol !== 'none' ? <Field label={t('settings.encryptionKey')} value={activeProfile.encryptionPublicKey} onChange={(encryptionPublicKey) => { updateBackendConnection(activeProfile.id, { encryptionPublicKey }); setSettings((current) => ({ ...current, encryptionPublicKey })); }} /> : null}
-            <DevicePairingPanel session={session} deviceName="TodeX Web" />
+            <DevicePairingPanel session={session} deviceName="TodeX Web" autoStartNonce={pairingAutoStart} />
             <div className="flex gap-2"><Button onPress={() => (connected ? closeSocket(true) : connect())}>{connected ? t('settings.disconnect') : connectionState === 'error' ? t('settings.retry') : t('settings.connect')}</Button>{backendConnections.length > 1 ? <Button variant="danger-soft" onPress={() => removeBackendConnection(activeProfile.id)}>{t('settings.removeBackend')}</Button> : null}</div>
           </>
         ) : null}

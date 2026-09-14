@@ -15,6 +15,7 @@ import { prepareBrowserSnapshot } from '../lib/browserSnapshot';
 import { normalizeWorkbenchLayout } from '../session/workbenchLayout';
 import { SETTINGS_STORAGE_KEY, attachmentId, referenceToken, uniqueReferenceName } from '../session/helpers';
 import { V2ApiClient } from '@todex/protocol/v2';
+import { deviceIdentityFromSecret } from '@todex/protocol/deviceAuth';
 import { t, useT, type MessageKey } from '../i18n';
 
 type Props = {
@@ -469,7 +470,7 @@ function BrowserPane({ workspacePath, session, target, onTargetChange }: { works
       setUrl(parsed.toString());
       setSrcDoc('');
       setError('');
-      const api = new V2ApiClient({ serverUrl: session.settings.serverUrl, authToken: session.settings.authToken });
+      const api = new V2ApiClient({ serverUrl: session.settings.serverUrl, device: deviceIdentityFromSecret(session.settings.deviceSecret) });
       const result = await api.fetchBrowser(parsed.toString());
       if (!result.contentType.toLowerCase().includes('text/html')) {
         throw new Error(t('workbench.cannotPreview', { contentType: result.contentType || t('workbench.nonHtml') }));
@@ -481,7 +482,7 @@ function BrowserPane({ workspacePath, session, target, onTargetChange }: { works
       setSrcDoc('');
       setError(reason instanceof Error ? reason.message : t('workbench.snapshotFailed'));
     }
-  }, [session.settings.authToken, session.settings.serverUrl]);
+  }, [session.settings.deviceSecret, session.settings.serverUrl]);
 
   useEffect(() => {
     if (target?.url) {
@@ -496,14 +497,14 @@ function BrowserPane({ workspacePath, session, target, onTargetChange }: { works
     setUrl('');
     setSrcDoc('');
     setError('');
-    const api = new V2ApiClient({ serverUrl: session.settings.serverUrl, authToken: session.settings.authToken });
+    const api = new V2ApiClient({ serverUrl: session.settings.serverUrl, device: deviceIdentityFromSecret(session.settings.deviceSecret) });
     void api.readWorkspaceFile(target.filePath)
       .then((file) => {
         if (!file.text) throw new Error(t('workbench.webFileNotText'));
         setSrcDoc(file.text);
       })
       .catch((reason) => setError(reason instanceof Error ? reason.message : t('workbench.webFileReadFailed')));
-  }, [loadSnapshot, session.settings.authToken, session.settings.serverUrl, target?.filePath, target?.url]);
+  }, [loadSnapshot, session.settings.deviceSecret, session.settings.serverUrl, target?.filePath, target?.url]);
 
   const appendReference = useCallback((element: HTMLElement) => {
     const tag = element.tagName.toLowerCase();
@@ -824,7 +825,7 @@ function FilesPane({ session, target, onTargetChange }: { session: TodeXSession;
     setFile(null);
     setFileLoading(true);
     setError('');
-    const api = new V2ApiClient({ serverUrl: session.settings.serverUrl, authToken: session.settings.authToken });
+    const api = new V2ApiClient({ serverUrl: session.settings.serverUrl, device: deviceIdentityFromSecret(session.settings.deviceSecret) });
     try {
       const next = await api.readWorkspaceFile(path);
       if (request === fileRequestRef.current) setFile(next);
@@ -833,7 +834,7 @@ function FilesPane({ session, target, onTargetChange }: { session: TodeXSession;
     } finally {
       if (request === fileRequestRef.current) setFileLoading(false);
     }
-  }, [session.settings.authToken, session.settings.serverUrl]);
+  }, [session.settings.deviceSecret, session.settings.serverUrl]);
 
   useEffect(() => () => { fileRequestRef.current += 1; }, []);
 
@@ -863,7 +864,7 @@ function FilesPane({ session, target, onTargetChange }: { session: TodeXSession;
   const loadDirectory = useCallback(async (directory: string) => {
     setLoading(true);
     setError('');
-    const api = new V2ApiClient({ serverUrl: session.settings.serverUrl, authToken: session.settings.authToken });
+    const api = new V2ApiClient({ serverUrl: session.settings.serverUrl, device: deviceIdentityFromSecret(session.settings.deviceSecret) });
     try {
       const snapshot = await api.listWorkspaceEntries(directory, '', 100);
       const children = snapshot.entries
@@ -876,7 +877,7 @@ function FilesPane({ session, target, onTargetChange }: { session: TodeXSession;
     } finally {
       setLoading(false);
     }
-  }, [currentPath, session.settings.authToken, session.settings.serverUrl]);
+  }, [currentPath, session.settings.deviceSecret, session.settings.serverUrl]);
 
   useEffect(() => {
     setEntries([]);

@@ -24,7 +24,7 @@ const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB';
 const session = {
   activeConversation: { id: 'conversation' },
   activeWorkspace: { id: 'workspace', path: '/workspace' },
-  settings: { serverUrl: 'https://backend.test', authToken: 'test-token' },
+  settings: { serverUrl: 'https://backend.test', deviceSecret: 'test-secret' },
   terminalById: {}, connectionState: 'closed', connectionHealth: { latencyMs: null },
 } as unknown as TodeXSession;
 

@@ -43,8 +43,8 @@ function render() {
   const session = {
     activeBackendConnectionId: 'a',
     backendConnections: [{ id: 'a', serverUrl: 'https://a.test', encryptionProtocol: 'x25519', encryptionPublicKey: '' }],
-    settings: { serverUrl: 'https://a.test', authToken: '', encryptionProtocol: 'x25519', encryptionPublicKey: '' },
-    updateBackendConnection, setSettings, connect,
+    settings: { serverUrl: 'https://a.test', deviceSecret: '', encryptionProtocol: 'x25519', encryptionPublicKey: '' },
+    updateBackendConnection, setSettings, connect, onDevicePairingApproved: vi.fn(),
   } as unknown as TodeXSession;
   container = document.createElement('div');
   document.body.append(container);
@@ -68,26 +68,22 @@ async function tick(ms = 2000) {
 }
 function notices() { return [...document.querySelectorAll('[data-slot="toast"]')].map(item => item.textContent).join(' '); }
 
-it('shows a verification code and saves only the approved token, leaving encryption and connection intact', async () => {
+it('shows a verification code, enrolls a fresh device key, and connects on approval', async () => {
   const req = request();
-  req.poll.mockResolvedValue({ status: 'approved', authToken: 'approved-token' });
+  req.poll.mockResolvedValue({ status: 'approved', deviceId: 'dev_test1234567890' });
   vi.mocked(beginDevicePairing).mockResolvedValue(req);
   const state = render();
   await press('设备验证');
   expect(container.textContent).toContain('SAFE-1234');
   expect(container.textContent).toContain('等待后端批准');
-  expect(beginDevicePairing).toHaveBeenCalledWith('https://a.test', 'TodeX Web', expect.any(AbortSignal));
+  // A device key is generated and persisted before the request is sent.
+  expect(state.updateBackendConnection).toHaveBeenCalledWith('a', { deviceSecret: expect.any(String) });
+  expect(beginDevicePairing).toHaveBeenCalledWith('https://a.test', 'TodeX Web', expect.objectContaining({ deviceId: expect.any(String) }), expect.any(AbortSignal));
   await tick();
-  expect(state.updateBackendConnection).toHaveBeenCalledExactlyOnceWith('a', { authToken: 'approved-token' });
-  const update = state.setSettings.mock.calls[0][0];
-  expect(update(state.session.settings)).toEqual({ ...state.session.settings, authToken: 'approved-token' });
-  const changedEncryption = { ...state.session.settings, encryptionProtocol: 'ml-kem-768', encryptionPublicKey: 'newly-imported-key' };
-  expect(update(changedEncryption)).toEqual({ ...changedEncryption, authToken: 'approved-token' });
+  expect(state.session.onDevicePairingApproved).toHaveBeenCalledOnce();
   expect(notices()).toContain('已批准，可连接');
   expect(notices()).toContain('仍需通过下方二维码或粘贴配对内容导入公钥');
-  expect(container.querySelector('section')?.textContent).not.toContain('已批准，可连接');
   expect(container.querySelector('section')?.textContent).not.toContain('缺少加密公钥');
-  expect(state.connect).not.toHaveBeenCalled();
   expect(req.cancel).not.toHaveBeenCalled();
 });
 
@@ -104,11 +100,10 @@ it.each(['profile', 'address', 'settings address'] as const)('ignores a late app
   else if (change === 'address') next.backendConnections = state.session.backendConnections.map(p => ({ ...p, serverUrl: 'https://b.test' }));
   else next.settings = { ...state.session.settings, serverUrl: 'https://b.test' };
   state.rerender(next);
-  await act(async () => { pending.resolve({ status: 'approved', authToken: 'late-token' }); });
+  await act(async () => { pending.resolve({ status: 'approved', deviceId: 'dev_late1234567890' }); });
   expect(req.cancel).toHaveBeenCalledOnce();
   expect(req.poll.mock.calls[0][0]?.aborted).toBe(true);
-  expect(state.updateBackendConnection).not.toHaveBeenCalled();
-  expect(state.setSettings).not.toHaveBeenCalled();
+  expect(next.onDevicePairingApproved).not.toHaveBeenCalled();
   await flushNotices();
   expect(notices()).not.toContain('已批准');
 });
@@ -123,11 +118,11 @@ it('does not overlap polls and cancels an in-flight request without accepting it
   await tick(10_000);
   expect(req.poll).toHaveBeenCalledOnce();
   await press('取消验证');
-  await act(async () => { pending.resolve({ status: 'approved', authToken: 'late-token' }); });
+  await act(async () => { pending.resolve({ status: 'approved', deviceId: 'dev_late1234567890' }); });
   await flushNotices();
   expect(notices()).toContain('已取消');
   expect(req.cancel).toHaveBeenCalledOnce();
-  expect(state.updateBackendConnection).not.toHaveBeenCalled();
+  expect(state.session.onDevicePairingApproved).not.toHaveBeenCalled();
 });
 
 it('cancels a late creation response after unmounting', async () => {
@@ -139,7 +134,7 @@ it('cancels a late creation response after unmounting', async () => {
   const req = request();
   await act(async () => { pending.resolve(req); });
   expect(vi.mocked(beginDevicePairing).mock.calls).toHaveLength(1);
-  expect(vi.mocked(beginDevicePairing).mock.calls[0][2]?.aborted).toBe(true);
+  expect(vi.mocked(beginDevicePairing).mock.calls[0][3]?.aborted).toBe(true);
   expect(req.cancel).toHaveBeenCalledOnce();
   expect(req.poll).not.toHaveBeenCalled();
 });
@@ -154,8 +149,8 @@ it('expires locally even while a poll is stalled and ignores a late approval', a
   await press('设备验证');
   await tick(5000);
   expect(notices()).toContain('申请已过期');
-  await act(async () => { pending.resolve({ status: 'approved', authToken: 'late-token' }); });
-  expect(state.updateBackendConnection).not.toHaveBeenCalled();
+  await act(async () => { pending.resolve({ status: 'approved', deviceId: 'dev_late1234567890' }); });
+  expect(state.session.onDevicePairingApproved).not.toHaveBeenCalled();
   expect(req.cancel).toHaveBeenCalledOnce();
 });
 
@@ -168,16 +163,17 @@ it.each(['rejected', 'expired'] as const)('shows terminal %s feedback and stops 
   await tick(10_000);
   expect(notices()).toContain(status === 'rejected' ? '后端已拒绝申请' : '申请已过期');
   expect(req.poll).toHaveBeenCalledOnce();
-  expect(state.updateBackendConnection).not.toHaveBeenCalled();
+  // The device key is persisted up front so a retry enrolls the same key.
+  expect(state.updateBackendConnection).toHaveBeenCalledExactlyOnceWith('a', { deviceSecret: expect.any(String) });
 });
 
-it('shows a safe error instead of saving an approval without a token', async () => {
+it('shows a safe error instead of applying a malformed approval', async () => {
   const req = request();
-  req.poll.mockResolvedValue({ status: 'approved' });
+  req.poll.mockRejectedValue(new Error('校验失败，请重试'));
   vi.mocked(beginDevicePairing).mockResolvedValue(req);
   const state = render();
   await press('设备验证');
   await tick();
-  expect(notices()).toContain('缺少连接凭据');
-  expect(state.updateBackendConnection).not.toHaveBeenCalled();
+  expect(notices()).toContain('校验失败');
+  expect(state.session.onDevicePairingApproved).not.toHaveBeenCalled();
 });

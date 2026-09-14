@@ -26,7 +26,7 @@ beforeEach(() => {
   vi.mocked(readGitStatus).mockReset().mockResolvedValue(status);
   Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
   session = {
-    settings: { serverUrl: 'http://localhost', authToken: 'test' }, connectionState: 'open', activeBackendConnectionId: 'backend',
+    settings: { serverUrl: 'http://localhost', deviceSecret: 'test-secret' }, connectionState: 'open', activeBackendConnectionId: 'backend',
     activeConversation: { id: 'c', workspaceId: 'one' },
     workspaces: [{ id: 'one', path: '/one' }, { id: 'two', path: '/two' }], thinkingConversations: {},
   } as unknown as TodeXSession;

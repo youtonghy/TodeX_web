@@ -29,8 +29,8 @@ function render() {
   const updateBackendConnection = vi.fn();
   const setSettings = vi.fn();
   const session = {
-    activeBackendConnectionId: 'a', backendConnections: [{ id: 'a', name: 'Backend A', serverUrl: 'https://a.test', authToken: 'device-token', tenantId: '', encryptionProtocol: 'x25519', encryptionPublicKey: '' }],
-    settings: { serverUrl: 'https://a.test', authToken: 'device-token', tenantId: '', encryptionProtocol: 'x25519', encryptionPublicKey: '' },
+    activeBackendConnectionId: 'a', backendConnections: [{ id: 'a', name: 'Backend A', serverUrl: 'https://a.test', deviceSecret: 'device-secret', tenantId: '', encryptionProtocol: 'x25519', encryptionPublicKey: '' }],
+    settings: { serverUrl: 'https://a.test', deviceSecret: 'device-secret', tenantId: '', encryptionProtocol: 'x25519', encryptionPublicKey: '' },
     connectionState: 'idle', connectionHealth: { state: 'idle' }, updateBackendConnection, setSettings,
   } as unknown as TodeXSession;
   container = document.createElement('div');
@@ -48,22 +48,24 @@ async function importQr() {
   });
   await act(async () => { [...container.querySelectorAll('button')].find(button => button.textContent === '导入粘贴内容')!.click(); });
 }
-const pairing: ParsedPairing = { serverUrl: 'https://a.test', authToken: '', encryptionProtocol: 'x25519', encryptionPublicKey: 'imported-key' };
+const pairing: ParsedPairing = { serverUrl: 'https://a.test', encryptionProtocol: 'x25519', encryptionPublicKey: 'imported-key' };
 it('updates both the profile and live settings with the imported public key without losing device approval', async () => {
   vi.mocked(resolvePairingPayload).mockResolvedValue(pairing);
   const state = render();
   await importQr();
-  const expected = { ...pairing, authToken: 'device-token' };
+  const expected = { ...pairing, deviceSecret: 'device-secret' };
   expect(state.updateBackendConnection).toHaveBeenCalledExactlyOnceWith('a', expected);
   expect(state.setSettings.mock.calls[0][0](state.session.settings)).toEqual({ ...state.session.settings, ...expected });
 });
-it('clears the old backend token in both destinations when importing a different public backend', async () => {
+it('clears the old backend device credential in both destinations when importing a different backend', async () => {
   const other = { ...pairing, serverUrl: 'https://b.test' };
   vi.mocked(resolvePairingPayload).mockResolvedValue(other);
   const state = render();
   await importQr();
-  expect(state.updateBackendConnection).toHaveBeenCalledExactlyOnceWith('a', other);
-  expect(state.setSettings.mock.calls[0][0](state.session.settings).authToken).toBe('');
+  expect(state.updateBackendConnection).toHaveBeenCalledWith('a', { ...other, deviceSecret: '' });
+  expect(state.setSettings.mock.calls[0][0](state.session.settings).deviceSecret).toBe('');
+  // The cleared credential auto-starts device verification, persisting a fresh key.
+  expect(state.updateBackendConnection).toHaveBeenCalledWith('a', { deviceSecret: expect.any(String) });
 });
 it('ignores an import that resolves after the user switches backend profiles', async () => {
   let finish!: (value: ParsedPairing) => void;

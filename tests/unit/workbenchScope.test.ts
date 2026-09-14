@@ -37,7 +37,7 @@ function Harness({ conversation, workspace, mode }: { conversation: string; work
   requestOpen = (next, nextTarget) => { setTab(next); setTarget(nextTarget); };
   const session = {
     activeConversation: { id: conversation }, activeWorkspace: { id: workspace, path: `/${workspace}` },
-    settings: { serverUrl: 'https://backend.test', authToken: 'test' }, terminalById: terminals,
+    settings: { serverUrl: 'https://backend.test', deviceSecret: 'test-secret' }, terminalById: terminals,
     connectionState: 'open', connectionHealth: { latencyMs: null }, requestTerminalStatus: status,
     startTerminalSession: startTerminal, stopTerminalSession: stopTerminal, resizeTerminalSession: vi.fn(),
   } as unknown as TodeXSession;

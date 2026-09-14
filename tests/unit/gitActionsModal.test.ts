@@ -48,7 +48,7 @@ function render({ active = true, outcome = 'sent', pending = false, busy = false
   const session = {
     activeConversation: active ? { id: 'c', workspaceId: 'w', provider: 'pi', title: 'Current task' } : null,
     workspaces: [{ id: 'other', name: 'Other', path: '/wrong' }, { id: 'w', name: 'Current', path: '/project/current' }],
-    settings: { serverUrl: 'http://localhost', authToken: 'test' }, thinkingConversations: busy ? { c: true } : {}, submissionStatusByConversation: {}, sendAgentMessage,
+    settings: { serverUrl: 'http://localhost', deviceSecret: 'test-secret' }, thinkingConversations: busy ? { c: true } : {}, submissionStatusByConversation: {}, sendAgentMessage,
     chatDrafts: draft, composerAttachments: attachments, setChatDraft,
   } as unknown as TodeXSession;
   container = document.createElement('div');

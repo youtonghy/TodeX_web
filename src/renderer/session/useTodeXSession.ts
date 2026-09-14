@@ -33,7 +33,8 @@ import {
 import type { ProviderDescriptor, ProviderKind, ConversationManifest, PromptContentRef, PromptSkillRef, SkillCatalogDescriptor, ProviderModelDescriptor, ContextCompactionState, SubagentRun, MemoryEntry } from '@todex/protocol/v2';
 import { contextCompactionStatus } from '@todex/protocol/v2';
 import { V2ApiClient, buildV2WebSocketUrlWithOptions, normalizeConversationEvent } from '@todex/protocol/v2';
-import { probeBackendConnection, nextReconnectDelayMs, inspectServerUrl, tokenMatchesOrigin } from '@todex/protocol/connectionProbe';
+import { probeBackendConnection, nextReconnectDelayMs, inspectServerUrl, credentialMatchesOrigin } from '@todex/protocol/connectionProbe';
+import { deviceIdentityFromSecret } from '@todex/protocol/deviceAuth';
 import {
   ConnectionSettings,
   CodexMemorySettings,
@@ -111,8 +112,8 @@ import {
   EXPERIMENTAL_FEATURES_STORAGE_KEY,
   USAGE_RECORDS_STORAGE_KEY,
   PROVIDER_MODEL_PREFERENCES_STORAGE_KEY,
-  TOKEN_STORAGE_KEY,
-  TOKEN_ORIGIN_STORAGE_KEY,
+  DEVICE_SECRET_STORAGE_KEY,
+  DEVICE_ORIGIN_STORAGE_KEY,
   BACKEND_CONNECTIONS_STORAGE_KEY,
   JSON_SAVE_DEBOUNCE_MS,
   SESSION_CURSOR_SAVE_DEBOUNCE_MS,
@@ -508,8 +509,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const [submissionStatusByConversation, setSubmissionStatusByConversation] = useState<Record<string, 'sending' | 'running' | 'unknown' | undefined>>({});
   const settledV2TurnsRef = useRef(new Map<string, string>());
   const runtimeReplayRef = useRef((id: string, after: number, limit: number) =>
-    new V2ApiClient({ serverUrl: settings.serverUrl, authToken: settings.authToken }).replayEvents(id, after, limit));
-  runtimeReplayRef.current = (id, after, limit) => new V2ApiClient({ serverUrl: settings.serverUrl, authToken: settings.authToken }).replayEvents(id, after, limit);
+    new V2ApiClient({ serverUrl: settings.serverUrl, device: deviceIdentityFromSecret(settings.deviceSecret) }).replayEvents(id, after, limit));
+  runtimeReplayRef.current = (id, after, limit) => new V2ApiClient({ serverUrl: settings.serverUrl, device: deviceIdentityFromSecret(settings.deviceSecret) }).replayEvents(id, after, limit);
   const runtimeUpdateRef = useRef<(state: ConversationRuntime, applied: ConversationEvent[], recovering: boolean) => void>(() => {});
   const notifyTurnCompletedRef = useRef<(localId: string, state: ConversationRuntime, turnId: string) => void>(() => {});
   const conversationRecoveryRef = useRef<ConversationRecovery | null>(null);
@@ -539,7 +540,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     if (!hydrated || !settings.serverUrl.trim()) {
       return;
     }
-    const api = new V2ApiClient({ serverUrl: settings.serverUrl, authToken: settings.authToken });
+    const api = new V2ApiClient({ serverUrl: settings.serverUrl, device: deviceIdentityFromSecret(settings.deviceSecret) });
     let active = true;
     setDirectorySyncStatus('loading');
     void Promise.all([api.listProviders(), api.listConversations()])
@@ -569,7 +570,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       active = false;
       clearInterval(refreshTimer);
     };
-  }, [hydrated, settings.authToken, settings.serverUrl]);
+  }, [hydrated, settings.deviceSecret, settings.serverUrl]);
 
   useEffect(() => {
     timelineRef.current = timeline;
@@ -967,8 +968,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         storedUsageRecords,
         storedBackendConnections,
         storedProviderModelPreferences,
-        storedToken,
-        storedTokenOrigin,
+        storedDeviceSecret,
+        storedDeviceOrigin,
       ] = await Promise.all([
         loadJson<PersistedSettings | null>(SETTINGS_STORAGE_KEY, null),
         loadJson<WorkspaceRecord[]>(WORKSPACES_STORAGE_KEY, []),
@@ -982,8 +983,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         loadJson<unknown>(USAGE_RECORDS_STORAGE_KEY, []),
         loadJson<BackendConnectionProfile[]>(BACKEND_CONNECTIONS_STORAGE_KEY, []),
         loadJson<unknown>(PROVIDER_MODEL_PREFERENCES_STORAGE_KEY, {}),
-        loadSecret(TOKEN_STORAGE_KEY),
-        loadSecret(TOKEN_ORIGIN_STORAGE_KEY),
+        loadSecret(DEVICE_SECRET_STORAGE_KEY),
+        loadSecret(DEVICE_ORIGIN_STORAGE_KEY),
       ]);
 
       if (!alive) {
@@ -992,11 +993,11 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
 
       const nextSettings = fromPersistedSettings(
         storedSettings,
-        tokenMatchesOrigin(storedTokenOrigin, storedSettings?.serverUrl || defaultSettings.serverUrl) ? storedToken : '',
+        credentialMatchesOrigin(storedDeviceOrigin, storedSettings?.serverUrl || defaultSettings.serverUrl) ? storedDeviceSecret : '',
       );
       nextSettings.serverUrl = normalizeServerUrl(nextSettings.serverUrl);
       const storedProfiles = (storedBackendConnections as unknown[]).map(normalizeBackendConnectionProfile).filter((profile): profile is BackendConnectionProfile => Boolean(profile));
-      const hydratedProfiles = storedProfiles.length ? await Promise.all(storedProfiles.map(async (profile) => ({ ...profile, authToken: (await loadSecret(`${TOKEN_STORAGE_KEY}.${profile.id}`)) || (profile.id === 'default-backend' ? nextSettings.authToken : '') }))) : [];
+      const hydratedProfiles = storedProfiles.length ? await Promise.all(storedProfiles.map(async (profile) => ({ ...profile, deviceSecret: (await loadSecret(`${DEVICE_SECRET_STORAGE_KEY}.${profile.id}`)) || (profile.id === 'default-backend' ? nextSettings.deviceSecret : '') }))) : [];
       const profiles = hydratedProfiles.length ? hydratedProfiles : [profileFromSettings(nextSettings)];
       const normalizedWorkspaces = storedWorkspaces.map((workspace) => ({
         ...workspace,
@@ -1124,14 +1125,14 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       return;
     }
     void saveJson(SETTINGS_STORAGE_KEY, toPersistedSettings(settings));
-    void saveSecret(TOKEN_STORAGE_KEY, settings.authToken);
-    void saveSecret(TOKEN_ORIGIN_STORAGE_KEY, settings.authToken ? normalizeServerUrl(settings.serverUrl) : '');
+    void saveSecret(DEVICE_SECRET_STORAGE_KEY, settings.deviceSecret);
+    void saveSecret(DEVICE_ORIGIN_STORAGE_KEY, settings.deviceSecret ? normalizeServerUrl(settings.serverUrl) : '');
   }, [hydrated, settings]);
 
   useEffect(() => {
     if (hydrated) {
-      void saveJson(BACKEND_CONNECTIONS_STORAGE_KEY, backendConnections.map(({ authToken: _authToken, ...profile }) => profile));
-      for (const profile of backendConnections) void saveSecret(`${TOKEN_STORAGE_KEY}.${profile.id}`, profile.authToken);
+      void saveJson(BACKEND_CONNECTIONS_STORAGE_KEY, backendConnections.map(({ deviceSecret: _deviceSecret, ...profile }) => profile));
+      for (const profile of backendConnections) void saveSecret(`${DEVICE_SECRET_STORAGE_KEY}.${profile.id}`, profile.deviceSecret);
     }
   }, [backendConnections, hydrated]);
 
@@ -1147,10 +1148,11 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         const activeSnapshot = snapshot.filter((workspace) =>
           !workspace.backendConnectionId || workspace.backendConnectionId === activeBackendConnectionId,
         );
+        const body = JSON.stringify({ workspaces: prepareWorkspaceSyncPayload(activeSnapshot) });
         const response = await fetch(buildHttpUrl(settings.serverUrl, '/v2/workspaces'), {
           method: 'PUT',
-          headers: authHeaders(settings, { 'Content-Type': 'application/json' }),
-          body: JSON.stringify({ workspaces: prepareWorkspaceSyncPayload(activeSnapshot) }),
+          headers: authHeaders(settings, 'PUT', '/v2/workspaces', new TextEncoder().encode(body), { 'Content-Type': 'application/json' }),
+          body,
         });
         if (!response.ok) {
           throw new Error(`workspace sync returned ${response.status}`);
@@ -1182,7 +1184,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     workspaceBackendReadyRef.current = false;
     try {
       const response = await fetch(buildHttpUrl(settings.serverUrl, '/v2/workspaces'), {
-        headers: authHeaders(settings),
+        headers: authHeaders(settings, 'GET', '/v2/workspaces'),
       });
       if (!response.ok) {
         throw new Error(`workspace sync returned ${response.status}`);
@@ -1243,7 +1245,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
 
       workspaceBackendReadyRef.current = true;
       try {
-        const conversationResponse = await new V2ApiClient({ serverUrl: settings.serverUrl, authToken: settings.authToken }).listConversations();
+        const conversationResponse = await new V2ApiClient({ serverUrl: settings.serverUrl, device: deviceIdentityFromSecret(settings.deviceSecret) }).listConversations();
         setV2Conversations(conversationResponse.conversations);
         setConversations((current) => mergeManifestConversations(current, conversationResponse.conversations, nextWorkspaces));
       } catch (error) {
@@ -1267,7 +1269,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     }
     configureKanbanSync({
       serverUrl: settings.serverUrl,
-      authToken: settings.authToken,
+      deviceSecret: settings.deviceSecret,
       backendConnectionId: activeBackendConnectionId,
     });
     const timer = setInterval(() => {
@@ -1275,7 +1277,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       void syncKanbanTasksFromBackend();
     }, 15000);
     return () => clearInterval(timer);
-  }, [activeBackendConnectionId, connectionState, hydrated, settings.authToken, settings.serverUrl, syncWorkspacesFromBackend]);
+  }, [activeBackendConnectionId, connectionState, hydrated, settings.deviceSecret, settings.serverUrl, syncWorkspacesFromBackend]);
 
   useEffect(() => {
     if (!hydrated) {
@@ -1345,7 +1347,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     const workspacePath = activeWorkspace?.path || settings.defaultWorkspacePath;
     if (!workspacePath) return;
     setCapabilityCatalogs((current) => ({ ...current, [provider]: { ...(current[provider] ?? {}), status: 'loading', error: undefined } }));
-    const api = new V2ApiClient({ serverUrl: settings.serverUrl, authToken: settings.authToken });
+    const api = new V2ApiClient({ serverUrl: settings.serverUrl, device: deviceIdentityFromSecret(settings.deviceSecret) });
     try {
       const [skills, mcp] = await Promise.all([
         api.listSkillCatalog(provider, workspacePath),
@@ -1358,7 +1360,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         [provider]: { ...(current[provider] ?? {}), status: 'error', error: error instanceof Error ? error.message : t('sess.catalogReadFailed') },
       }));
     }
-  }, [activeWorkspace?.path, settings.authToken, settings.defaultWorkspacePath, settings.serverUrl]);
+  }, [activeWorkspace?.path, settings.deviceSecret, settings.defaultWorkspacePath, settings.serverUrl]);
 
   useEffect(() => {
     if (!hydrated || !activeWorkspace?.path || v2Providers.length === 0) return;
@@ -1375,7 +1377,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   useEffect(() => {
     if (!hydrated || !activeWorkspace?.path || v2Providers.length === 0) return;
     let cancelled = false;
-    const api = new V2ApiClient({ serverUrl: settings.serverUrl, authToken: settings.authToken });
+    const api = new V2ApiClient({ serverUrl: settings.serverUrl, device: deviceIdentityFromSecret(settings.deviceSecret) });
     void Promise.all(v2Providers.filter((item) => item.available).map(async (provider) => {
       try {
         const result = await api.listProviderModels(provider.id, activeWorkspace.path);
@@ -1416,7 +1418,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       }
     }));
     return () => { cancelled = true; };
-  }, [activeBackendConnectionId, activeWorkspace?.path, hydrated, rememberProviderModelSelection, resolveRememberedProviderSelection, settings.authToken, settings.serverUrl, v2Providers]);
+  }, [activeBackendConnectionId, activeWorkspace?.path, hydrated, rememberProviderModelSelection, resolveRememberedProviderSelection, settings.deviceSecret, settings.serverUrl, v2Providers]);
 
   const activeConversation = useMemo(
     () => conversations.find((item) => item.id === activeConversationId) ?? null,
@@ -1446,7 +1448,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     let cancelled = false;
     setProviderCommandCatalogs(current => ({ ...current,
       [activeCommandKey]: { contextKey: activeCommandKey, status: 'loading', commands: [] } }));
-    const api = new V2ApiClient({ serverUrl: settings.serverUrl, authToken: settings.authToken });
+    const api = new V2ApiClient({ serverUrl: settings.serverUrl, device: deviceIdentityFromSecret(settings.deviceSecret) });
     void api.listProviderCommands(provider as ProviderKind, workspace, conversationId || undefined).then(result => {
       if (!cancelled) setProviderCommandCatalogs(current => ({ ...current,
         [activeCommandKey]: { contextKey: activeCommandKey, status: 'ready', commands: result.commands, source: result.catalogSource } }));
@@ -1456,7 +1458,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           error: error instanceof Error ? error.message : t('sess.commandCatalogFailed') } }));
     });
     return () => { cancelled = true; };
-  }, [hydrated, activeCommandKey, commandCatalogRevision, settings.serverUrl, settings.authToken]);
+  }, [hydrated, activeCommandKey, commandCatalogRevision, settings.serverUrl, settings.deviceSecret]);
 
   useEffect(() => {
     if (!hydrated || !activeConversation || !activeWorkspace?.path) return;
@@ -1465,7 +1467,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     const conversationId = activeConversation.id;
     let cancelled = false;
     setProviderImageInput((current) => ({ ...current, [conversationId]: { status: 'loading' } }));
-    const api = new V2ApiClient({ serverUrl: settings.serverUrl, authToken: settings.authToken });
+    const api = new V2ApiClient({ serverUrl: settings.serverUrl, device: deviceIdentityFromSecret(settings.deviceSecret) });
     void api.getProviderImageInput(
       descriptor.id,
       activeWorkspace.path,
@@ -1488,7 +1490,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       }));
     });
     return () => { cancelled = true; };
-  }, [activeConversation, activeWorkspace?.path, hydrated, settings.authToken, settings.serverUrl, v2Providers]);
+  }, [activeConversation, activeWorkspace?.path, hydrated, settings.deviceSecret, settings.serverUrl, v2Providers]);
 
   const restorePendingSubmission = useCallback((conversationId: string) => {
     const submission = pendingV2SubmissionsRef.current.get(conversationId);
@@ -1645,12 +1647,12 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     setStoppingProviderRuntimes({});
     setRecoveringConversations({});
     settledV2TurnsRef.current.clear();
-  }, [settings.serverUrl, settings.authToken]);
+  }, [settings.serverUrl, settings.deviceSecret]);
 
   useEffect(() => {
     if (!hydrated || !activeConversation?.v2ConversationId || !settings.serverUrl.trim()) return;
     void recoverConversation(activeConversation.id);
-  }, [activeConversation?.id, activeConversation?.v2ConversationId, hydrated, recoverConversation, settings.serverUrl, settings.authToken]);
+  }, [activeConversation?.id, activeConversation?.v2ConversationId, hydrated, recoverConversation, settings.serverUrl, settings.deviceSecret]);
 
   const runtimeStatus = useMemo<RuntimeStatusState>(() => ({
     socket: connectionState,
@@ -3114,7 +3116,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       if (!isAttemptCurrent()) return;
       const probe = await probeBackendConnection({
         serverUrl: inspected.origin,
-        authToken: settings.authToken,
+        device: deviceIdentityFromSecret(settings.deviceSecret),
       });
       if (!isAttemptCurrent()) return;
       if (!probe.ok || probe.error) {
@@ -3170,7 +3172,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
 
       const wsUrl = buildV2WebSocketUrlWithOptions(inspected.origin, {
         cryptoQueryString: crypto?.queryString,
-        authToken: settings.authToken,
+        device: deviceIdentityFromSecret(settings.deviceSecret),
       });
 
       try {
@@ -3734,7 +3736,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       return {
         ...profile,
         ...patch,
-        ...(originChanged && patch.authToken === undefined ? { authToken: '' } : {}),
+        ...(originChanged && patch.deviceSecret === undefined ? { deviceSecret: '' } : {}),
         updatedAt: Date.now(),
       };
     }));
@@ -3751,7 +3753,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
 
   const removeBackendConnection = useCallback((id: string) => {
     if (backendConnections.length <= 1) return;
-    void saveSecret(`${TOKEN_STORAGE_KEY}.${id}`, '').catch((error) => {
+    void saveSecret(`${DEVICE_SECRET_STORAGE_KEY}.${id}`, '').catch((error) => {
       setLastError(error instanceof Error ? error.message : t('sess.credentialClearFailed'));
     });
     const next = backendConnections.filter((profile) => profile.id !== id);
@@ -3827,7 +3829,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       ) {
         void fetch(buildHttpUrl(settings.serverUrl, `/v2/workspaces/${encodeURIComponent(workspaceId)}`), {
           method: 'DELETE',
-          headers: authHeaders(settings),
+          headers: authHeaders(settings, 'DELETE', `/v2/workspaces/${encodeURIComponent(workspaceId)}`),
         }).then((response) => {
           if (!response.ok) throw new Error(`workspace delete returned ${response.status}`);
         }).catch((error) => setLastError(error instanceof Error ? error.message : t('sess.workspaceDeleteSyncFailed')));
@@ -5422,7 +5424,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
             conversationId: conversation.v2ConversationId, title: t('sess.forkTitle', { title: conversation.title || t('sess.conversation') }),
           } }, 45_000);
           if (typeof result.conversationId !== 'string') throw new Error(t('sess.forkNoId'));
-          const api = new V2ApiClient({ serverUrl: settings.serverUrl, authToken: settings.authToken });
+          const api = new V2ApiClient({ serverUrl: settings.serverUrl, device: deviceIdentityFromSecret(settings.deviceSecret) });
           const created = await api.getConversation(result.conversationId);
           const record = { ...conversationFromManifest(created, workspace.id), backendConnectionId: conversation.backendConnectionId,
             model: conversation.model, reasoningEffort: conversation.reasoningEffort,
@@ -5469,7 +5471,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       { selectResult: true, resultConversationId: nextConversation.id },
     );
     return nextConversation;
-  }, [getConversationContext, recoverConversation, sendProtocolCommand, settings.serverUrl, settings.authToken, sendNativeThreadAction, settings.approvalPolicy, settings.approvalsReviewer, settings.defaultModel, settings.sandboxMode]);
+  }, [getConversationContext, recoverConversation, sendProtocolCommand, settings.serverUrl, settings.deviceSecret, sendNativeThreadAction, settings.approvalPolicy, settings.approvalsReviewer, settings.defaultModel, settings.sandboxMode]);
 
   const removeConversation = useCallback((conversationId: string) => {
     const context = getConversationContext(conversationId);
@@ -5587,7 +5589,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       try {
         const api = new V2ApiClient({
           serverUrl: backendProfile?.serverUrl ?? settings.serverUrl,
-          authToken: backendProfile?.authToken ?? settings.authToken,
+          device: deviceIdentityFromSecret(backendProfile?.deviceSecret ?? settings.deviceSecret),
         });
         const created = await api.createConversation({
           provider: provider.id,
@@ -5649,7 +5651,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         pendingV2ConversationCreatesRef.current.delete(conversationId);
       }
     }
-  }, [backendConnections, getConversationContext, recoverConversation, sendRawProtocolFrame, settings.authToken, settings.serverUrl]);
+  }, [backendConnections, getConversationContext, recoverConversation, sendRawProtocolFrame, settings.deviceSecret, settings.serverUrl]);
 
   const sendV2Prompt = useCallback(
     async (
@@ -6025,10 +6027,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     if (!workspacePath) {
       throw new Error(t('sess.pickWorkspaceFirst'));
     }
-    const api = new V2ApiClient({ serverUrl: settings.serverUrl, authToken: settings.authToken });
+    const api = new V2ApiClient({ serverUrl: settings.serverUrl, device: deviceIdentityFromSecret(settings.deviceSecret) });
     const result = await api.getSkillResource(provider, workspacePath, resourceId);
     return result.content;
-  }, [activeWorkspace?.path, settings.authToken, settings.defaultWorkspacePath, settings.serverUrl]);
+  }, [activeWorkspace?.path, settings.deviceSecret, settings.defaultWorkspacePath, settings.serverUrl]);
 
   const refreshMcpServer = useCallback((conversationId: string, resourceId: string) => {
     const conversation = conversationsRef.current.find((item) => item.id === conversationId) ?? null;
@@ -7523,6 +7525,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     activeConversation,
     connect,
     closeSocket,
+    onDevicePairingApproved: () => connect(),
     createWorkspace,
     openGitWorktree,
     updateWorkspace,
@@ -7559,7 +7562,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     callMcpTool,
     fetchWorkspaceDirectorySnapshot: (path?: string) => fetchWorkspaceDirectorySnapshot(settings, path),
     fetchWorkspaceEntries: async (cwd: string, query: string) => {
-      const api = new V2ApiClient({ serverUrl: settings.serverUrl, authToken: settings.authToken });
+      const api = new V2ApiClient({ serverUrl: settings.serverUrl, device: deviceIdentityFromSecret(settings.deviceSecret) });
       return api.listWorkspaceEntries(cwd, query);
     },
     openModelPicker,

@@ -70,7 +70,7 @@ function render() {
   function Harness() { session = useTodeXSession(() => {}); return null; }
   container = document.createElement('div'); document.body.append(container); root = createRoot(container);
   act(() => root.render(createElement(Harness)));
-  act(() => session.setSettings(value => ({ ...value, serverUrl: 'https://backend.test', authToken: 'test-token', encryptionProtocol: 'x25519', encryptionPublicKey: 'key' })));
+  act(() => session.setSettings(value => ({ ...value, serverUrl: 'https://backend.test', deviceSecret: 'test-secret', encryptionProtocol: 'x25519', encryptionPublicKey: 'key' })));
 }
 async function connect() { await act(async () => { session.connect(); }); }
 function deferred() {

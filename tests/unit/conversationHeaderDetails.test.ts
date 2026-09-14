@@ -42,7 +42,7 @@ beforeEach(() => {
 afterEach(() => { act(() => root.unmount()); container.remove(); observers.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 async function render() {
   const session = {
-    settings: { serverUrl: 'http://localhost', authToken: 'test' }, connectionState: 'open', activeBackendConnectionId: 'backend',
+    settings: { serverUrl: 'http://localhost', deviceSecret: 'test-secret' }, connectionState: 'open', activeBackendConnectionId: 'backend',
     activeConversation: { id: 'c', workspaceId: 'w', provider: 'pi', version: 2 },
     workspaces: [{ id: 'w', name: 'Workspace title', path: '/project' }], thinkingConversations: {},
   } as unknown as TodeXSession;

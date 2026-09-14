@@ -2,10 +2,12 @@ import { afterEach, expect, it, vi } from 'vitest';
 import type { ConnectionSettings } from '@todex/protocol/todex';
 import { GitWorkspaceError, readGitStatus, readGitWorkspace, runGitWorkspaceOperation } from '../../src/renderer/lib/gitWorkspace';
 
-const settings = { serverUrl: 'ws://localhost:8787', authToken: 'test-token' } as ConnectionSettings;
+import { deviceIdentityFromSecret } from '@todex/protocol/deviceAuth';
+const device = deviceIdentityFromSecret('FRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRU')!;
+const settings = { serverUrl: 'ws://localhost:8787', deviceSecret: device.secretKey } as ConnectionSettings;
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 
-it('reads the selected workspace using an encoded query and bearer authentication', async () => {
+it('reads the selected workspace using an encoded query and device authentication', async () => {
   const snapshot = { repositoryPath: '/test', initialized: true, currentBranch: 'main', branches: [], worktrees: [], dirty: false };
   const fetcher = vi.fn(async () => new Response(JSON.stringify(snapshot)));
   vi.stubGlobal('fetch', fetcher);
@@ -14,7 +16,8 @@ it('reads the selected workspace using an encoded query and bearer authenticatio
   expect(new URL(url).pathname).toBe('/v2/git/workspace');
   expect(new URL(url).searchParams.get('workspacePath')).toBe('/test & examples');
   expect(options.method).toBe('GET');
-  expect(options.headers).toEqual({ Authorization: 'Bearer test-token' });
+  expect(options.headers).toMatchObject({ 'x-todex-device-id': device.deviceId });
+  expect((options.headers as Record<string, string>)['x-todex-auth-sig']).toBeTruthy();
 });
 
 it('posts the operation as structured JSON with the workspace and no shell interpolation', async () => {
@@ -26,7 +29,8 @@ it('posts the operation as structured JSON with the workspace and no shell inter
   const [url, options] = fetcher.mock.calls[0] as unknown as [string, RequestInit];
   expect(new URL(url).pathname).toBe('/v2/git/operation');
   expect(options.method).toBe('POST');
-  expect(options.headers).toEqual({ Authorization: 'Bearer test-token', 'Content-Type': 'application/json' });
+  expect(options.headers).toMatchObject({ 'x-todex-device-id': device.deviceId, 'Content-Type': 'application/json' });
+  expect((options.headers as Record<string, string>)['x-todex-auth-sig']).toBeTruthy();
   expect(JSON.parse(options.body as string)).toEqual({ workspacePath: '/test', operation });
 });
 
@@ -87,7 +91,8 @@ it('reads status from the encoded workspace route with auth and propagates cance
   expect(new URL(url).pathname).toBe('/v2/git/status');
   expect(new URL(url).searchParams.get('workspacePath')).toBe('/test & worktree');
   expect(options.method).toBe('GET');
-  expect(options.headers).toEqual({ Authorization: 'Bearer test-token' });
+  expect(options.headers).toMatchObject({ 'x-todex-device-id': device.deviceId });
+  expect((options.headers as Record<string, string>)['x-todex-auth-sig']).toBeTruthy();
   abort.abort();
   await expect(pending).rejects.toMatchObject({ code: 'REQUEST_ABORTED', unknownOutcome: false });
   expect(fetcher).toHaveBeenCalledTimes(1);
