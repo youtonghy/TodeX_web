@@ -10,7 +10,6 @@
   },
   "scripts": {
     "dev": "vite --host 127.0.0.1",
-    "releases:refresh": "node scripts/update-releases.mjs",
     "build:client": "vite build",
     "build:server": "tsc -p tsconfig.server.json",
     "build": "pnpm run build:client && pnpm run build:server",

@@ -6,7 +6,7 @@
 - Brand: existing `src/renderer/assets/brand/t-icon-light.png`.
 - Agent marks: the existing `ProviderIcon` and locally installed `@lobehub/icons-static-svg` assets.
 - The workbench illustration uses example content, explicitly labeled on the page, and is built from HTML/CSS. It does not represent a live session.
-- Download catalog: `src/renderer/site/releases.json`. Run `pnpm releases:refresh` to replace it with the current public stable releases. Historical versions and actual file names are retained.
+- Download catalog: fetched live from GitHub Releases by the Node server at `GET /api/releases` (10-minute cache, stale fallback, optional `GITHUB_TOKEN` for higher rate limits). Visitors never call the GitHub API. Historical versions and actual file names are retained.
 
 ## Sky image
 

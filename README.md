@@ -42,21 +42,16 @@ nested `/app/*` URLs also load the workbench, including on direct visits and ref
 
 ## Website downloads
 
-The version and platform selectors use `src/renderer/site/releases.json`, a
-snapshot of published stable releases and their actual GitHub asset URLs. Refresh
-it before preparing a website release:
-
-```bash
-pnpm releases:refresh
-```
-
-The refresh needs public GitHub API access, but no token. Website visitors do not
-call the GitHub API. Desktop and Backend versions are selected independently;
-unpublished architectures are not offered. Download links point to official
-release assets, with release notes and SHA256 checksum files alongside them.
-Product copy is based on the ecosystem, Desktop, Backend, and Web READMEs.
-The original generated sky asset and its prompt are documented in
-[website assets](docs/website-assets.md).
+The version and platform selectors are served by `GET /api/releases`, which the
+Node server answers with live GitHub Releases data (10-minute in-memory cache;
+the last good catalog is served flagged `stale` if a refresh fails). The server
+needs public GitHub API access; set `GITHUB_TOKEN` to raise the rate limit.
+Website visitors never contact GitHub directly. Desktop and Backend versions
+are selected independently; unpublished architectures are not offered.
+Download links point to official release assets, with release notes and SHA256
+checksum files alongside them. Product copy is based on the ecosystem, Desktop,
+Backend, and Web READMEs. The original generated sky asset and its prompt are
+documented in [website assets](docs/website-assets.md).
 
 ## Production
 
@@ -74,8 +69,9 @@ version `0.0.0`.
 Published images live at `ghcr.io/youtonghy/todex_web`, tagged with each release
 version plus `latest`. The container listens on `4173`, runs as the unprivileged
 `node` user, and ships a health check against `GET /healthz`. `HOST` and `PORT`
-are the only runtime settings; there is no Backend proxy, user database, session
-store, or secret to configure.
+are the only required runtime settings; `GITHUB_TOKEN` is optional and only
+raises the GitHub API rate limit used by `GET /api/releases`. There is no
+Backend proxy, user database, or session store.
 
 Run it directly:
 

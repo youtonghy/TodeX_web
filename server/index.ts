@@ -2,11 +2,14 @@ import compression from 'compression';
 import express, { type Express } from 'express';
 import helmet from 'helmet';
 import { existsSync } from 'node:fs';
+import type { IncomingMessage, ServerResponse } from 'node:http';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createReleaseCatalogHandler } from './releases.js';
 
 export type WebServerOptions = {
   clientDirectory?: string;
+  releasesHandler?: (request: IncomingMessage, response: ServerResponse) => void;
 };
 
 export function createApp(options: WebServerOptions = {}): Express {
@@ -42,6 +45,8 @@ export function createApp(options: WebServerOptions = {}): Express {
     response.setHeader('Cache-Control', 'no-store');
     response.json({ status: 'ok' });
   });
+
+  app.get('/api/releases', options.releasesHandler ?? createReleaseCatalogHandler());
 
   app.use('/api', (_request, response) => {
     response.status(404).json({ code: 'NOT_FOUND', message: 'TodeX Web has no server-side Backend API.' });

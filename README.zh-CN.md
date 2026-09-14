@@ -35,11 +35,11 @@ CI 打包时应通过 `TODEX_BUILD_VERSION` 传入正式版本。开发构建显
 
 官网开发地址为 `http://127.0.0.1:5173`，面板地址为 `http://127.0.0.1:5173/app`。官网和面板独立加载，访问官网不会初始化面板或连接 Backend。同一 origin 下已有的 `todex.web.*` 浏览器数据继续可用，无需迁移；`/app/` 和 `/app/*` 子路径也支持直接访问和刷新。
 
-生产服务提供网页和 `GET /healthz`，不包含 Backend 代理、用户数据库、服务端会话或密钥配置。
+生产服务提供网页、`GET /healthz` 和下载清单 `GET /api/releases`，不包含 Backend 代理、用户数据库或服务端会话。运行期只需 `HOST` 和 `PORT`；`GITHUB_TOKEN` 为可选项，仅用于提高 `/api/releases` 查询 GitHub API 的速率上限。
 
 ### Docker 部署
 
-镜像发布在 `ghcr.io/youtonghy/todex_web`，按版本号打标签并附带 `latest`。容器监听 `4173`，以非特权 `node` 用户运行，并内置针对 `GET /healthz` 的健康检查。运行期只有 `HOST` 和 `PORT` 两个配置项。
+镜像发布在 `ghcr.io/youtonghy/todex_web`，按版本号打标签并附带 `latest`。容器监听 `4173`，以非特权 `node` 用户运行，并内置针对 `GET /healthz` 的健康检查。运行期只需 `HOST` 和 `PORT`，`GITHUB_TOKEN` 为可选项。
 
 直接运行：
 
@@ -98,7 +98,7 @@ docker buildx build \
 
 ## 官网与下载清单
 
-官网内容来自各项目 README。版本和平台选择使用 `src/renderer/site/releases.json` 中已发布的稳定版本及真实文件地址；准备发布官网时执行 `pnpm releases:refresh` 刷新。该命令只需访问公开 GitHub API，无需 token，官网访客不会请求 GitHub API。
+官网内容来自各项目 README。版本和平台选择由 Node 服务的 `GET /api/releases` 实时返回 GitHub Releases 数据（内存缓存 10 分钟；刷新失败时回退到最近一次成功的清单并标记 `stale`）。服务需要访问公开 GitHub API，可通过 `GITHUB_TOKEN` 提高速率上限，官网访客不会请求 GitHub API。
 
 Desktop 和 Backend 的版本独立选择，下载链接直达 GitHub 官方文件，同时提供版本说明和 SHA256 校验文件。未发布的架构不显示下载入口，移动端仅显示暂缓发布状态。云空图片和生成提示词见[官网资源说明](docs/website-assets.md)。
 
