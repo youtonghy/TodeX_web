@@ -62,6 +62,11 @@ async function render(conversation: string, workspace = 'workspace', mode: 'conv
   await act(async () => { root.render(createElement(Harness, { conversation, workspace, mode })); });
 }
 async function open(tab: WorkbenchTab, target: OpenPanelOptions) { await act(async () => { requestOpen(tab, target); }); }
+// Tab headers are icon-only buttons; the label lives on `aria-label` ("文件 /path").
+function tabButton(name: string) {
+  return [...container.querySelectorAll<HTMLElement>('button[aria-label]')]
+    .find(node => node.getAttribute('aria-label')?.startsWith(name));
+}
 async function addTerminal() {
   const trigger = container.querySelector<HTMLElement>('[aria-label="新建工作台标签"]');
   expect(trigger).not.toBeNull();
@@ -76,9 +81,9 @@ it('isolates new conversations and restores each conversation’s tabs and file/
   await open('files', { filePath: '/workspace/shot.png' });
   await open('browser', { url: 'http://127.0.0.1:8080/preview' });
   await addTerminal();
-  expect(container.textContent).toContain('文件 1');
-  expect(container.textContent).toContain('浏览器 1');
-  expect(container.textContent).toContain('终端 1');
+  expect(tabButton('文件')).toBeTruthy();
+  expect(tabButton('浏览器')).toBeTruthy();
+  expect(tabButton('终端')).toBeTruthy();
   const storedA = disk.get(tabsKey(scope('a')));
   expect(storedA).toEqual(expect.objectContaining({ items: expect.arrayContaining([
     expect.objectContaining({ type: 'files', target: { filePath: '/workspace/shot.png' } }),
@@ -91,9 +96,9 @@ it('isolates new conversations and restores each conversation’s tabs and file/
   expect(container.querySelector('iframe')).toBeNull();
   expect(disk.get(tabsKey(scope('a')))).toEqual(storedA);
   await render('a');
-  expect(container.textContent).toContain('文件 1');
-  expect(container.textContent).toContain('浏览器 1');
-  expect(container.textContent).toContain('终端 1');
+  expect(tabButton('文件')).toBeTruthy();
+  expect(tabButton('浏览器')).toBeTruthy();
+  expect(tabButton('终端')).toBeTruthy();
   expect(container.querySelector('img')?.alt).toBe('shot.png');
   expect(container.querySelector('iframe')?.getAttribute('srcdoc')).toContain('Saved browser preview');
   expect(V2ApiClient.prototype.fetchBrowser).toHaveBeenLastCalledWith('http://127.0.0.1:8080/preview');
@@ -105,7 +110,7 @@ it('keeps the same shared terminal identity when changing conversations within a
   const firstId = status.mock.calls.at(-1)?.[2];
   expect(firstId).toBeTruthy();
   await render('b', 'workspace', 'workspace');
-  expect(container.textContent).toContain('终端 1');
+  expect(tabButton('终端')).toBeTruthy();
   expect(status.mock.calls.at(-1)?.[2]).toBe(firstId);
   expect(status.mock.calls.at(-1)?.[1]).toEqual(expect.objectContaining({ id: 'b' }));
   const tabKeys = [...disk.keys()].filter(key => key.includes('.workbenchTabs.v1:'));
@@ -152,7 +157,7 @@ it('disables adding tabs until delayed stored tabs have finished restoring', asy
   expect(document.querySelector('[role="menu"]')).toBeNull();
   expect(window.todexWeb.store.set).not.toHaveBeenCalled();
   await act(async () => { resolve(saved); });
-  expect(container.textContent).toContain('Existing file');
+  expect(tabButton('文件')).toBeTruthy();
   expect(container.querySelector('img')?.alt).toBe('kept.png');
   expect(disk.get(tabsKey(scope('a')))).toEqual(saved);
   expect(trigger?.hasAttribute('disabled') || trigger?.getAttribute('aria-disabled') === 'true').toBe(false);
@@ -174,5 +179,5 @@ it('keeps a manually stopped shared terminal stopped when switching conversation
   await render('b', 'workspace', 'workspace');
   await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
   expect(startTerminal).not.toHaveBeenCalled();
-  expect(container.textContent).toContain('终端 1');
+  expect(tabButton('终端')).toBeTruthy();
 });

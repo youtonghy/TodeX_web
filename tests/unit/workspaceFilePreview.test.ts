@@ -51,6 +51,11 @@ function deferred<T>() {
 function imageFile(path: string): PreviewFile {
   return { name: path.split('/').pop(), path, mimeType: 'image/png', dataUrl: png };
 }
+// Tab headers are icon-only buttons; the label lives on `aria-label` ("文件 /path").
+function tabButton(name: string) {
+  return [...container.querySelectorAll<HTMLElement>('button[aria-label]')]
+    .find(node => node.getAttribute('aria-label')?.startsWith(name));
+}
 async function renderWorkbench(target: OpenPanelOptions, onTabChange = vi.fn()) {
   await act(async () => { root.render(createElement(WorkbenchPanel, { session, tab: 'files', target, onTabChange })); });
   return onTabChange;
@@ -67,7 +72,7 @@ describe('Files open requests', () => {
     expect(read).toHaveBeenCalledExactlyOnceWith('/workspace/shot.png');
     expect(container.querySelector('img')?.getAttribute('src')).toBe(png);
     expect(container.querySelector('img')?.getAttribute('alt')).toBe('shot.png');
-    expect(container.textContent).toContain('文件 1');
+    expect(tabButton('文件')).toBeTruthy();
     expect(container.textContent).not.toContain('暂无打开的标签');
   });
 
@@ -80,8 +85,8 @@ describe('Files open requests', () => {
     const img = container.querySelector('img');
     expect(img).not.toBeNull();
     expect(img?.closest('.hidden')).toBeNull();
-    expect(container.textContent).toContain('终端 1');
-    expect(container.textContent).toContain('文件 1');
+    expect(tabButton('终端')).toBeTruthy();
+    expect(tabButton('文件')).toBeTruthy();
   });
 
   it('ignores an older file response that arrives after the newly requested file', async () => {
