@@ -14,7 +14,7 @@
 
 - Node.js 22 或更高版本
 - pnpm 11.24.0
-- 相邻目录存在 `TodeX_app`，构建时复用其中的 `src/lib` 协议实现
+- 相邻目录存在 `TodeX_protocol`，构建时复用其中的 `src` 协议实现
 - 浏览器可访问的 `todex-agentd`
 
 ## 开发与部署
@@ -76,21 +76,21 @@ services:
 
 #### 构建镜像
 
-`docker` GitHub Actions 工作流需手动触发（**Actions → docker → Run workflow**）并填写版本号（如 `1.2.3`），会推送 `ghcr.io/youtonghy/todex_web:<version>`（默认同时打 `latest`）。仓库需配置 `HEROUI_KEY` secret（`hp_…` 密钥）供 `hpsetup` 拉取授权的 `@heroui-pro/react` 内容；`protocol_ref` 输入用于指定编译协议源码所用的 `youtonghy/TodeX` 分支或标签。
+`docker` GitHub Actions 工作流需手动触发（**Actions → docker → Run workflow**）并填写版本号（如 `1.2.3`），会推送 `ghcr.io/youtonghy/todex_web:<version>`（默认同时打 `latest`）。仓库需配置 `HEROUI_KEY` secret（`hp_…` 密钥）供 `hpsetup` 拉取授权的 `@heroui-pro/react` 内容；`protocol_ref` 输入用于指定编译协议源码所用的 `youtonghy/TodeX_protocol` 分支或标签。
 
-本地构建需要相邻目录的 `TodeX_app` 作为 `todexapp` 构建上下文，并在 shell 中导出 `HEROUI_KEY`。密钥通过 BuildKit secret 传入，不会写入镜像层。[`compose.build.yaml`](compose.build.yaml) 会为服务叠加 `build` 配置：
+本地构建需要相邻目录的 `TodeX_protocol` 作为 `todexprotocol` 构建上下文，并在 shell 中导出 `HEROUI_KEY`。密钥通过 BuildKit secret 传入，不会写入镜像层。[`compose.build.yaml`](compose.build.yaml) 会为服务叠加 `build` 配置：
 
 ```bash
 export HEROUI_KEY="hp_..."
 docker compose -f compose.yaml -f compose.build.yaml up -d --build
-# 可用 TODEX_APP_DIR=/path/to/TodeX_app 和 TODEX_BUILD_VERSION=1.2.3 覆盖默认值
+# 可用 TODEX_PROTOCOL_DIR=/path/to/TodeX_protocol 和 TODEX_BUILD_VERSION=1.2.3 覆盖默认值
 ```
 
 等价的 `docker buildx` 命令：
 
 ```bash
 docker buildx build \
-  --build-context todexapp=/path/to/TodeX_app \
+  --build-context todexprotocol=/path/to/TodeX_protocol \
   --secret id=HEROUI_KEY,env=HEROUI_KEY \
   --build-arg TODEX_BUILD_VERSION=1.2.3 \
   -t todex-web .

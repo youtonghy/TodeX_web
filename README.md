@@ -20,7 +20,7 @@ The chat model picker includes a search field above the list, with case-insensit
 
 - Node.js 22 or newer
 - pnpm 11.24.0
-- `TodeX_app` checked out next to this directory because the build reuses its `src/lib` protocol implementation
+- `TodeX_protocol` checked out next to this directory because the build reuses its `src` protocol implementation
 - A reachable `todex-agentd` with browser access enabled
 
 ## Development
@@ -117,10 +117,10 @@ Run workflow**) with a release version such as `1.2.3`. It pushes
 `ghcr.io/youtonghy/todex_web:<version>` (plus `:latest` by default) and requires
 a `HEROUI_KEY` repository secret (the `hp_…` key) so `hpsetup` can fetch the
 licensed `@heroui-pro/react` contents. The `protocol_ref` input pins which
-`youtonghy/TodeX` branch or tag the protocol sources are compiled from.
+`youtonghy/TodeX_protocol` branch or tag the protocol sources are compiled from.
 
-To build locally, the image needs a sibling `TodeX_app` checkout as the
-`todexapp` build context and `HEROUI_KEY` exported in the shell. The key is
+To build locally, the image needs a sibling `TodeX_protocol` checkout as the
+`todexprotocol` build context and `HEROUI_KEY` exported in the shell. The key is
 passed as a BuildKit secret and never stored in a layer.
 [`compose.build.yaml`](compose.build.yaml) layers a `build` section onto the
 service:
@@ -128,14 +128,14 @@ service:
 ```bash
 export HEROUI_KEY="hp_..."
 docker compose -f compose.yaml -f compose.build.yaml up -d --build
-# TODEX_APP_DIR=/path/to/TodeX_app and TODEX_BUILD_VERSION=1.2.3 override the defaults
+# TODEX_PROTOCOL_DIR=/path/to/TodeX_protocol and TODEX_BUILD_VERSION=1.2.3 override the defaults
 ```
 
 The equivalent plain `docker buildx` invocation:
 
 ```bash
 docker buildx build \
-  --build-context todexapp=/path/to/TodeX_app \
+  --build-context todexprotocol=/path/to/TodeX_protocol \
   --secret id=HEROUI_KEY,env=HEROUI_KEY \
   --build-arg TODEX_BUILD_VERSION=1.2.3 \
   -t todex-web .

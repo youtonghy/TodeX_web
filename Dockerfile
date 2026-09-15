@@ -1,10 +1,10 @@
 # syntax=docker/dockerfile:1
 
-# This build expects the sibling TodeX_app checkout (GitHub repo youtonghy/TodeX)
-# as a named build context, because the web bundle compiles protocol sources
-# from ../TodeX_app/src/lib:
+# This build expects the sibling TodeX_protocol checkout as a named build
+# context, because the web bundle compiles protocol sources from
+# ../TodeX_protocol/src:
 #
-#   docker buildx build --build-context todexapp=/path/to/TodeX_app -t todex-web .
+#   docker buildx build --build-context todexprotocol=/path/to/TodeX_protocol -t todex-web .
 #
 # The licensed @heroui-pro/react contents are fetched by hpsetup with the hp_
 # key; pass it as a build secret (never in a build-arg or copied file):
@@ -29,9 +29,9 @@ ARG HPSETUP_VERSION=latest
 RUN --mount=type=secret,id=HEROUI_KEY,env=HEROUI_KEY \
     pnpm dlx "hpsetup@$HPSETUP_VERSION" "$HEROUI_KEY"
 # Protocol sources resolve their @noble/* imports through this node_modules.
-RUN mkdir -p /build/TodeX_app \
-    && ln -s /build/TodeX_web/node_modules /build/TodeX_app/node_modules
-COPY --from=todexapp src/lib /build/TodeX_app/src/lib
+RUN mkdir -p /build/TodeX_protocol \
+    && ln -s /build/TodeX_web/node_modules /build/TodeX_protocol/node_modules
+COPY --from=todexprotocol src /build/TodeX_protocol/src
 
 FROM deps AS build
 COPY . .

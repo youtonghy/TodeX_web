@@ -26,7 +26,7 @@ export default defineConfig({
     dedupe: ['react', 'react-dom', '@heroui/react', 'react-aria-components'],
     alias: {
       '@renderer': resolve(webRoot, 'src/renderer'),
-      '@todex/protocol': resolve(webRoot, '../TodeX_app/src/lib'),
+      '@todex/protocol': resolve(webRoot, '../TodeX_protocol/src'),
       '@react-native-community/netinfo': resolve(webRoot, 'src/renderer/stubs/netinfo.ts'),
     },
   },

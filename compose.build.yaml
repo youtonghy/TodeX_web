@@ -1,12 +1,13 @@
 # Override that builds the image from this checkout instead of pulling it.
-# Requires a sibling TodeX_app checkout (or TODEX_APP_DIR) and HEROUI_KEY in
-# the shell; the key is forwarded as a BuildKit secret, never baked into layers.
+# Requires a sibling TodeX_protocol checkout (or TODEX_PROTOCOL_DIR) and
+# HEROUI_KEY in the shell; the key is forwarded as a BuildKit secret, never
+# baked into layers.
 services:
   web:
     build:
       context: .
       additional_contexts:
-        todexapp: ${TODEX_APP_DIR:-../TodeX_app}
+        todexprotocol: ${TODEX_PROTOCOL_DIR:-../TodeX_protocol}
       args:
         TODEX_BUILD_VERSION: ${TODEX_BUILD_VERSION:-DEV0.0.0}
       secrets:
