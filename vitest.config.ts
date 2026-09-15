@@ -4,6 +4,9 @@ import { defineConfig } from 'vitest/config';
 const webRoot = import.meta.dirname;
 
 export default defineConfig({
+  define: {
+    __TODEX_BUILD_VERSION__: JSON.stringify('DEV0.0.0'),
+  },
   resolve: {
     alias: {
       '@renderer': resolve(webRoot, 'src/renderer'),
