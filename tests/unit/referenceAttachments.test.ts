@@ -55,14 +55,15 @@ describe('reference tokens in the composer', () => {
     expect(uniqueReferenceName('对话摘录', [reference({ name: '对话摘录' }), reference({ name: '对话摘录 2', id: 'ref-2' })], '')).toBe('对话摘录 3');
   });
 
-  it('keeps only references whose token survives in the text', () => {
+  it('keeps only attachments whose capsule token survives in the text', () => {
     const ref = reference();
     const image: ComposerAttachmentDraft = {
       id: 'img-1', kind: 'image', name: 'a.png', mimeType: 'image/png',
       sizeBytes: 10, dataUrl: 'data:image/png;base64,AAAA', source: 'clipboard',
     };
-    expect(liveComposerAttachments('看看 [引用:App.swift:10-12]', [ref, image])).toEqual([ref, image]);
-    expect(liveComposerAttachments('删掉了 token', [ref, image])).toEqual([image]);
+    expect(liveComposerAttachments('看看 [引用:App.swift:10-12] [图片:a.png]', [ref, image])).toEqual([ref, image]);
+    expect(liveComposerAttachments('看看 [引用:App.swift:10-12]', [ref, image])).toEqual([ref]);
+    expect(liveComposerAttachments('删掉了 token', [ref, image])).toEqual([]);
   });
 });
 
