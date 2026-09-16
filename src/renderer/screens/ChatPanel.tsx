@@ -13,6 +13,7 @@ import { Markdown, type MarkdownProps } from '@heroui-pro/react/markdown';
 import { providerDisplayName, type ProviderKind, type PermissionMode } from '@todex/protocol/v2';
 import { ConversationPermissionActions, ConversationPromptInput, ConversationRunStatus, TurnUsageSummary } from '../components/ConversationRunStatus';
 import { ReferenceComposer, type ReferenceComposerHandle } from '../components/ReferenceComposer';
+import { ComposerAttachmentPreview } from '../components/ComposerAttachmentPreview';
 import { activeChatProcessId, buildChatRenderItems, isChatTimelineEntry, isChatToolEntry, latestIncomingEntryIds } from '../components/conversationTimeline';
 import type { ChatRenderItem } from '../components/conversationTimeline';
 import { ModelReasoningCard } from '../components/ModelReasoningCard';
@@ -43,6 +44,7 @@ import {
   referenceToken,
   uniqueAttachmentName,
   STREAMING_REPLY_PLACEHOLDER,
+  type ComposerAttachmentDraft,
 } from '../session/helpers';
 import { selectionInside } from '../lib/selection';
 import { findCapabilityHashTrigger } from '@todex/protocol/todex';
@@ -264,6 +266,7 @@ export function ChatPanel({ session }: Props) {
   const [mentionSuggestions, setMentionSuggestions] = useState<Array<{ id: string; title: string; description: string; insertText: string }>>([]);
   const [suggestionIndex, setSuggestionIndex] = useState(0);
   const [isDraggingAttachment, setIsDraggingAttachment] = useState(false);
+  const [previewAttachment, setPreviewAttachment] = useState<ComposerAttachmentDraft | null>(null);
   const [expandedProcessIds, setExpandedProcessIds] = useState<Set<string>>(() => new Set());
   const [collapsedProcessIds, setCollapsedProcessIds] = useState<Set<string>>(() => new Set());
   const [processGroupLoad, setProcessGroupLoad] = useState<Record<string, 'loading' | 'error'>>({});
@@ -521,6 +524,19 @@ export function ChatPanel({ session }: Props) {
 
   const isToolCallEntry = isChatToolEntry;
 
+  const openAttachmentSource = (item: ComposerAttachmentDraft) => {
+    setPreviewAttachment(null);
+    if (item.path) {
+      session.openPanel('Files', { filePath: item.path });
+      return;
+    }
+    if (item.messageId) {
+      messagesRef.current
+        ?.querySelector(`[data-message-id="${CSS.escape(item.messageId)}"]`)
+        ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  };
+
   const insertAttachmentTokens = (tokens: string[]) => {
     if (!tokens.length) return;
     const text = draftRef.current;
@@ -763,6 +779,11 @@ export function ChatPanel({ session }: Props) {
           }}>{t('chat.quoteAdd')}</Button>
         </div>
       ) : null}
+      <ComposerAttachmentPreview
+        attachment={previewAttachment}
+        onOpenChange={(open) => { if (!open) setPreviewAttachment(null); }}
+        onOpenSource={openAttachmentSource}
+      />
       <div className="border-separator border-t px-5 py-4">
         <div className="composer-container mx-auto max-w-2xl">
           {currentProvider === 'pi' && runtime ? <PiExtensionPanel placement="aboveEditor"
@@ -963,18 +984,9 @@ export function ChatPanel({ session }: Props) {
                       if (!item) return undefined;
                       return item.kind === 'reference' ? referencePreview(item.textContent) || item.name : item.name;
                     }}
-                    onTokenClick={(_kind, name) => {
-                      const item = attachments.find((entry) => entry.kind === 'reference' && entry.name === name);
-                      if (!item) return;
-                      if (item.path) {
-                        session.openPanel('Files', { filePath: item.path });
-                        return;
-                      }
-                      if (item.messageId) {
-                        messagesRef.current
-                          ?.querySelector(`[data-message-id="${CSS.escape(item.messageId)}"]`)
-                          ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                      }
+                    onTokenClick={(kind, name) => {
+                      const item = attachments.find((entry) => entry.kind === kind && entry.name === name);
+                      if (item) setPreviewAttachment(item);
                     }}
                   />
                 </PromptInput.Content>
