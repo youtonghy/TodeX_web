@@ -970,7 +970,7 @@ export function ChatPanel({ session }: Props) {
             submissionStatus={submissionStatus}
             runtime={runtime}
             compaction={compaction}
-            onRecover={() => session.recoverConversation(conversation.id)}
+            onRecover={() => session.reconcilePendingSubmission(conversation.id)}
           />
           {conversation.v2ConversationId ? <ConversationControls
             runtime={runtime}
