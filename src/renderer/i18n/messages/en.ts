@@ -1301,6 +1301,7 @@ export const en: Messages = {
   'ap.save': 'Save',
   'ap.unmanaged': 'Unmanaged',
   'ap.adopt': 'Adopt',
+  'ap.adoptParsed': 'Parsed from the live config — review and edit before saving.',
   'ap.noProviders': 'No providers yet',
   'ap.add': 'Add provider',
   'ap.fetchModels': 'Fetch models',
