@@ -35,8 +35,10 @@ afterEach(() => {
   container?.remove();
 });
 
-function render({ active = true, outcome = 'sent', pending = false, busy = false }: {
+function render({ active = true, outcome = 'sent', pending = false, busy = false, openGitWorktree, workspacePath = '/project/current' }: {
   active?: boolean; outcome?: 'sent' | 'queued'; pending?: boolean; busy?: boolean;
+  openGitWorktree?: (path: string, sourceConversationId: string) => unknown;
+  workspacePath?: string;
 } = {}) {
   let finish!: (value: 'sent' | 'queued') => void;
   const response = pending ? new Promise<'sent' | 'queued'>(resolve => { finish = resolve; }) : Promise.resolve(outcome);
@@ -47,9 +49,10 @@ function render({ active = true, outcome = 'sent', pending = false, busy = false
   const onOpenChange = vi.fn();
   const session = {
     activeConversation: active ? { id: 'c', workspaceId: 'w', provider: 'pi', title: 'Current task' } : null,
-    workspaces: [{ id: 'other', name: 'Other', path: '/wrong' }, { id: 'w', name: 'Current', path: '/project/current' }],
+    workspaces: [{ id: 'other', name: 'Other', path: '/wrong' }, { id: 'w', name: 'Current', path: workspacePath }],
     settings: { serverUrl: 'http://localhost', deviceSecret: 'test-secret' }, thinkingConversations: busy ? { c: true } : {}, submissionStatusByConversation: {}, sendAgentMessage,
     chatDrafts: draft, composerAttachments: attachments, setChatDraft,
+    openGitWorktree: openGitWorktree ?? vi.fn(() => null),
   } as unknown as TodeXSession;
   container = document.createElement('div');
   document.body.append(container);
@@ -199,6 +202,45 @@ it('blocks direct writes while the current agent is busy', async () => {
   await act(async () => { button('创建分支').click(); });
   expect(runGitWorkspaceOperation).not.toHaveBeenCalled();
   expect(state.sendAgentMessage).not.toHaveBeenCalled();
+});
+
+it('creates a todex/xxx worktree then opens its workspace conversation', async () => {
+  const openGitWorktree = vi.fn(() => ({ workspace: { id: 'wt' }, conversation: { id: 'c2' } }));
+  const state = render({ openGitWorktree });
+  await act(async () => { action('创建工作树').click(); });
+  await act(async () => { fill('my-task', 'docs'); });
+  await act(async () => { button('创建工作树').click(); });
+  expect(runGitWorkspaceOperation).toHaveBeenCalledExactlyOnceWith(state.session.settings, '/project/current',
+    { action: 'create-worktree', path: '/project/todex/docs', branchName: 'todex/docs' });
+  expect(openGitWorktree).toHaveBeenCalledExactlyOnceWith('/project/todex/docs', 'c');
+  expect(state.onOpenChange).toHaveBeenCalledWith(false);
+  expect(state.sendAgentMessage).not.toHaveBeenCalled();
+});
+
+it('anchors the new worktree next to the main worktree', async () => {
+  vi.mocked(readGitWorkspace).mockResolvedValue({ repositoryPath: '/project/todex/current', initialized: true, currentBranch: 'todex/current',
+    branches: [{ name: 'todex/current', current: true, remote: false }],
+    worktrees: [
+      { path: '/project/repo', branch: 'main', current: false, main: true, locked: false, dirty: false, accessible: true },
+      { path: '/project/todex/current', branch: 'todex/current', current: true, main: false, locked: false, dirty: false, accessible: true },
+    ], dirty: false });
+  const openGitWorktree = vi.fn(() => null);
+  const state = render({ openGitWorktree, workspacePath: '/project/todex/current' });
+  await act(async () => { action('创建工作树').click(); });
+  await act(async () => { fill('my-task', 'next'); });
+  await act(async () => { button('创建工作树').click(); });
+  expect(runGitWorkspaceOperation).toHaveBeenCalledExactlyOnceWith(state.session.settings, '/project/todex/current',
+    { action: 'create-worktree', path: '/project/todex/next', branchName: 'todex/next' });
+});
+
+it('keeps the result visible when the new worktree cannot be opened', async () => {
+  vi.mocked(runGitWorkspaceOperation).mockResolvedValue({ repositoryPath: '/project/current', action: 'create-worktree', output: 'Preparing worktree' });
+  const state = render();
+  await act(async () => { action('创建工作树').click(); });
+  await act(async () => { fill('my-task', 'docs'); });
+  await act(async () => { button('创建工作树').click(); });
+  expect(document.body.textContent).toContain('Preparing worktree');
+  expect(state.onOpenChange).not.toHaveBeenCalled();
 });
 
 it('disables branch switching when the snapshot has uncommitted changes', async () => {
