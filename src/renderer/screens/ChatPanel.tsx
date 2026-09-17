@@ -57,6 +57,9 @@ type Props = {
 
 const MAX_WEB_IMAGE_BYTES = 2_500_000;
 const MAX_WEB_TEXT_BYTES = 512 * 1024;
+// Clipboard text longer than this becomes a capsule attachment instead of
+// flooding the composer.
+const PASTED_TEXT_MAX_LINES = 5;
 const COMPOSER_IMAGE_ACCEPT = 'image/png,image/jpeg,image/gif,image/webp';
 const COMPOSER_TEXT_ACCEPT = 'text/*,.md,.mdx,.json,.yaml,.yml,.toml,.csv,.tsv,.ts,.tsx,.js,.jsx,.css,.html,.xml,.svg,.sh,.py,.rs,.go,.java,.kt,.swift';
 const SUPPORTED_COMPOSER_IMAGE_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
@@ -653,6 +656,33 @@ export function ChatPanel({ session }: Props) {
     }
   };
 
+  // Returns true when the pasted text was converted into a capsule attachment.
+  const addPastedText = (text: string): boolean => {
+    if (text.replace(/\n+$/, '').split('\n').length <= PASTED_TEXT_MAX_LINES) return false;
+    if (attachments.length >= MAX_COMPOSER_ATTACHMENTS) {
+      toast.danger(t('chat.maxAttachments', { max: MAX_COMPOSER_ATTACHMENTS }));
+      return true;
+    }
+    const sizeBytes = new TextEncoder().encode(text).length;
+    if (sizeBytes > MAX_WEB_TEXT_BYTES) {
+      toast.danger(t('chat.textAttachmentLimit'));
+      return true;
+    }
+    const attachment: ComposerAttachmentDraft = {
+      id: attachmentId(),
+      kind: 'file',
+      name: uniqueAttachmentName(t('chat.pastedTextName'), attachments, draft),
+      mimeType: 'text/plain',
+      sizeBytes,
+      dataUrl: '',
+      textContent: text,
+      source: 'clipboard',
+    };
+    session.setConversationAttachments(conversation.id, (current) => [...current, attachment]);
+    insertAttachmentTokens([attachmentToken(attachment)]);
+    return true;
+  };
+
   const submitComposer = () => {
     if (executionUnknown || submissionStatus === 'sending') return;
     if (hasBlockedImageAttachment) {
@@ -725,7 +755,7 @@ export function ChatPanel({ session }: Props) {
                             {isToolCallEntry(entry) ? (() => {
                               const { toolName, argsText } = toolPresentation(entry.subtitle);
                               return <ChatTool defaultExpanded={thinking} state={thinking ? 'input-streaming' : 'output-available'} toolName={toolName} argsText={argsText} />;
-                            })() : <p className="whitespace-pre-wrap text-xs">{entry.subtitle || entry.title}</p>}
+                            })() : <p className="max-w-full overflow-x-auto whitespace-pre-wrap wrap-anywhere text-xs">{entry.subtitle || entry.title}</p>}
                           </ChainOfThought.Step>
                         ))}
                       </ChainOfThought.Steps>
@@ -764,7 +794,7 @@ export function ChatPanel({ session }: Props) {
                           ))}
                         </ChatAttachmentGroup>
                       ) : null}
-                      {entry.subtitle ? <p className="whitespace-pre-wrap break-words">{entry.subtitle === STREAMING_REPLY_PLACEHOLDER ? t('chat.replying') : entry.subtitle}</p> : null}
+                      {entry.subtitle ? <p className="whitespace-pre-wrap wrap-anywhere">{entry.subtitle === STREAMING_REPLY_PLACEHOLDER ? t('chat.replying') : entry.subtitle}</p> : null}
                     </div> : (
                       <Markdown
                         id={entry.id}
@@ -824,6 +854,13 @@ export function ChatPanel({ session }: Props) {
         attachment={previewAttachment}
         onOpenChange={(open) => { if (!open) setPreviewAttachment(null); }}
         onOpenSource={openAttachmentSource}
+        onSaveText={(item, text) => {
+          session.setConversationAttachments(conversation.id, (current) =>
+            current.map((entry) => entry.id === item.id
+              ? { ...entry, textContent: text, sizeBytes: new TextEncoder().encode(text).length }
+              : entry));
+          setPreviewAttachment(null);
+        }}
       />
       <div className="border-separator border-t px-5 py-4">
         <div className="composer-container mx-auto max-w-2xl">
@@ -1006,11 +1043,20 @@ export function ChatPanel({ session }: Props) {
                   setIsDraggingAttachment(false);
                   void addBrowserFiles(files);
                 }}
-                onPaste={(event) => {
+                // Capture phase so long text pastes become capsules before the
+                // editor inserts them as plain text.
+                onPasteCapture={(event) => {
                   const files = clipboardFiles(event.clipboardData);
-                  if (files.length === 0) return;
-                  event.preventDefault();
-                  void addBrowserFiles(files, 'clipboard');
+                  if (files.length > 0) {
+                    event.preventDefault();
+                    void addBrowserFiles(files, 'clipboard');
+                    return;
+                  }
+                  const text = event.clipboardData.getData('text/plain');
+                  if (text && addPastedText(text)) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                  }
                 }}
               >
                 <PromptInput.Content

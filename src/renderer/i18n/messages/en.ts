@@ -371,6 +371,7 @@ export const en: Messages = {
   'chat.sentAttachments': 'Sent attachments',
   'chat.scrollToLatest': 'Jump to latest',
   'chat.quoteName': 'Conversation excerpt',
+  'chat.pastedTextName': 'Pasted text',
   'chat.quoteAdded': 'Reference added',
   'chat.quoteAdd': 'Add to conversation',
   'chat.piPluginRequest': 'Pi extension request',
@@ -444,6 +445,7 @@ export const en: Messages = {
   'controls.candidateNumber': 'Candidate message {order}',
   'controls.openInFiles': 'Open in Files',
   'controls.close': 'Close',
+  'controls.save': 'Save',
 
   // runStatus
   'runStatus.stale': 'No new run status yet',
