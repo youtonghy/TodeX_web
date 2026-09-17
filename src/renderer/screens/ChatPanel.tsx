@@ -3,8 +3,8 @@ import { piCommandCompatibility, piTodexCommands } from '../session/providerComm
 import { ConversationControls } from '../components/ConversationControls';
 import { NoticeToast } from '../components/NoticeToast';
 import { RiArrowDownDoubleLine, RiAttachment2, RiBarChartBoxLine, RiClipboardLine, RiCpuLine, RiGitBranchLine, RiListCheck2, RiShieldLine, RiStopCircleLine } from '@remixicon/react';
-import { useEffect, useMemo, useRef, useState } from 'react';
-import type { KeyboardEvent } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import type { Dispatch, KeyboardEvent, SetStateAction } from 'react';
 import { Button, Label, ListBox, Popover, ScrollShadow, Select, Tooltip, toast } from '@heroui/react';
 import { ChainOfThought, ChatAttachment, ChatAttachmentGroup, ChatAttachmentInput, ChatMessage, HoverCard, PromptInput } from '@heroui-pro/react';
 import { ChatMessageActions } from '@heroui-pro/react/chat-message-actions';
@@ -254,6 +254,204 @@ function AgentMessageActions({
   );
 }
 
+type ChatTimelineItemProps = {
+  item: ChatRenderItem;
+  conversationId: string;
+  thinking: boolean;
+  isStreamingGroup: boolean;
+  groupLabelActive: boolean;
+  groupExpanded: boolean;
+  groupLoadState: 'loading' | 'error' | undefined;
+  groupPendingCount: number;
+  request: TodeXSession['pendingRequests'][number] | undefined;
+  isActionable: boolean;
+  isPendingReply: boolean;
+  markdownComponents: NonNullable<MarkdownProps['components']>;
+  onHydrateGroup: TodeXSession['hydrateProcessGroup'];
+  onApprove: TodeXSession['sendApprovalResponse'];
+  setExpandedProcessIds: Dispatch<SetStateAction<Set<string>>>;
+  setCollapsedProcessIds: Dispatch<SetStateAction<Set<string>>>;
+  setProcessGroupLoad: Dispatch<SetStateAction<Record<string, 'loading' | 'error'>>>;
+  // Excluded from the memo comparison: its members are stable useCallbacks,
+  // and the stats AgentMessageActions reads self-correct on the next entry
+  // update.
+  session: TodeXSession;
+};
+
+// Timeline entries keep object identity while unchanged, so an element-wise
+// comparison of a group's entries is enough to detect real updates.
+function chatRowItemEqual(prev: ChatRenderItem, next: ChatRenderItem): boolean {
+  if (prev.type !== next.type) return false;
+  if (prev.type === 'executionGroup' && next.type === 'executionGroup') {
+    return prev.id === next.id
+      && prev.entries.length === next.entries.length
+      && prev.entries.every((entry, index) => entry === next.entries[index]);
+  }
+  if (prev.type === 'entry' && next.type === 'entry') return prev.entry === next.entry;
+  return false;
+}
+
+// Memo boundary per timeline row: during live streaming only the rows the
+// event touched re-render, instead of re-parsing every markdown body in the
+// conversation on each socket batch.
+const ChatTimelineItem = memo(function ChatTimelineItem({
+  item,
+  conversationId,
+  thinking,
+  isStreamingGroup,
+  groupLabelActive,
+  groupExpanded,
+  groupLoadState,
+  groupPendingCount,
+  request,
+  isActionable,
+  isPendingReply,
+  markdownComponents,
+  onHydrateGroup,
+  onApprove,
+  setExpandedProcessIds,
+  setCollapsedProcessIds,
+  setProcessGroupLoad,
+  session,
+}: ChatTimelineItemProps) {
+  const t = useT();
+  if (item.type === 'executionGroup') {
+    const hasStubs = item.entries.some((entry) => entry.detailStub);
+    /** Folded groups fetched as summary stubs load their full events on expand;
+     * a failed load keeps a retryable error state per group. */
+    const requestDetails = () => {
+      const sequences = item.entries
+        .filter((entry) => entry.detailStub)
+        .map((entry) => entry.sequence ?? 0)
+        .filter((sequence) => sequence > 0);
+      if (!sequences.length || groupLoadState === 'loading') return;
+      setProcessGroupLoad((current) => ({ ...current, [item.id]: 'loading' }));
+      void onHydrateGroup(conversationId, Math.min(...sequences), Math.max(...sequences))
+        .then((hydrated) => setProcessGroupLoad((current) => {
+          const next = { ...current };
+          if (hydrated) delete next[item.id];
+          else next[item.id] = 'error';
+          return next;
+        }))
+        .catch(() => setProcessGroupLoad((current) => ({ ...current, [item.id]: 'error' })));
+    };
+    return (
+      <ChainOfThought
+        isExpanded={groupExpanded}
+        onExpandedChange={(nextExpanded) => {
+          if (nextExpanded && hasStubs) requestDetails();
+          if (nextExpanded) {
+            setExpandedProcessIds((current) => new Set(current).add(item.id));
+            setCollapsedProcessIds((current) => {
+              const next = new Set(current);
+              next.delete(item.id);
+              return next;
+            });
+          } else {
+            setExpandedProcessIds((current) => {
+              const next = new Set(current);
+              next.delete(item.id);
+              return next;
+            });
+            setCollapsedProcessIds((current) => new Set(current).add(item.id));
+          }
+        }}
+        isStreaming={isStreamingGroup}
+        className="chat-process-trace min-w-0"
+      >
+        <ChainOfThought.Trigger className="min-h-7 py-1 text-xs">{progressGroupLabel(item.entries, groupLabelActive, groupPendingCount)}</ChainOfThought.Trigger>
+        <ChainOfThought.Content>
+          {hasStubs ? (
+            groupLoadState === 'error' ? (
+              <button type="button" className="text-danger cursor-pointer text-xs" onClick={requestDetails}>
+                加载过程记录失败，点按重试
+              </button>
+            ) : (
+              <p className="text-muted text-xs">正在加载过程记录…</p>
+            )
+          ) : (
+            <ChainOfThought.Steps>
+              {item.entries.map((entry) => (
+                <ChainOfThought.Step key={entry.id} label={entry.title}>
+                  {isChatToolEntry(entry) ? (() => {
+                    const { toolName, argsText } = toolPresentation(entry.subtitle);
+                    return <ChatTool defaultExpanded={thinking} state={thinking ? 'input-streaming' : 'output-available'} toolName={toolName} argsText={argsText} />;
+                  })() : <p className="max-w-full overflow-x-auto whitespace-pre-wrap wrap-anywhere text-xs">{entry.subtitle || entry.title}</p>}
+                </ChainOfThought.Step>
+              ))}
+            </ChainOfThought.Steps>
+          )}
+        </ChainOfThought.Content>
+      </ChainOfThought>
+    );
+  }
+  const entry = item.entry;
+  if (isChatToolEntry(entry)) {
+    const { toolName, argsText } = toolPresentation(entry.subtitle);
+    return <ChatTool defaultExpanded={thinking} state={thinking ? 'input-streaming' : 'output-available'} toolName={toolName} argsText={argsText} triggerPrefix={thinking ? t('chat.toolCalling') : t('chat.toolCalled')} />;
+  }
+  const isUser = entry.kind === 'outgoing';
+  return (
+    <div data-message-id={entry.id} className={`flex gap-3 py-1 ${isUser ? 'justify-end' : 'justify-start'}`}>
+      <div className={`min-w-0 max-w-[85%] ${isUser ? 'text-right' : ''}`}>
+        {isUser ? <p className="text-muted text-xs font-medium">You</p> : entry.category === 'extension' ? <p className="text-muted text-xs font-medium">{t('chat.piExtensionEntry', { title: entry.title })}</p> : null}
+        <div className={`${isUser ? 'mt-1' : ''} text-sm leading-6`}>
+          {isUser ? <div className="flex flex-col items-end gap-2">
+            {entry.sentAttachments?.length ? (
+              <ChatAttachmentGroup aria-label={t('chat.sentAttachments')} className="justify-end text-left" role="list">
+                {entry.sentAttachments.map((attachment) => (
+                  <ChatAttachment
+                    key={attachment.id}
+                    mimeType={attachment.mimeType}
+                    name={attachment.name}
+                    role="listitem"
+                    size={attachment.sizeBytes ?? undefined}
+                    src={attachment.previewUrl}
+                  >
+                    <ChatAttachment.Preview />
+                    <ChatAttachment.Info />
+                  </ChatAttachment>
+                ))}
+              </ChatAttachmentGroup>
+            ) : null}
+            {entry.subtitle ? <p className="whitespace-pre-wrap wrap-anywhere">{entry.subtitle === STREAMING_REPLY_PLACEHOLDER ? t('chat.replying') : entry.subtitle}</p> : null}
+          </div> : (
+            <Markdown
+              id={entry.id}
+              components={markdownComponents}
+            >
+              {entry.subtitle === STREAMING_REPLY_PLACEHOLDER ? t('chat.replying') : entry.subtitle}
+            </Markdown>
+          )}
+        </div>
+        {entry.kind === 'incoming' && isActionable && !isPendingReply
+          ? <AgentMessageActions conversationId={conversationId} entry={entry} session={session} />
+          : null}
+        {request ? (
+          <ChatMessage.Actions>
+            <ConversationPermissionActions request={request} onSelect={(option, data) => { onApprove(option, request, data); }} />
+          </ChatMessage.Actions>
+        ) : null}
+      </div>
+      {isUser ? <ChatMessage.Avatar alt="You" fallback="You" /> : null}
+    </div>
+  );
+}, (prev, next) =>
+  chatRowItemEqual(prev.item, next.item)
+  && prev.conversationId === next.conversationId
+  && prev.thinking === next.thinking
+  && prev.isStreamingGroup === next.isStreamingGroup
+  && prev.groupLabelActive === next.groupLabelActive
+  && prev.groupExpanded === next.groupExpanded
+  && prev.groupLoadState === next.groupLoadState
+  && prev.groupPendingCount === next.groupPendingCount
+  && prev.request === next.request
+  && prev.isActionable === next.isActionable
+  && prev.isPendingReply === next.isPendingReply
+  && prev.markdownComponents === next.markdownComponents
+  && prev.onHydrateGroup === next.onHydrateGroup
+  && prev.onApprove === next.onApprove);
+
 export function ChatPanel({ session }: Props) {
   const t = useT();
   const conversation = session.activeConversation;
@@ -383,24 +581,6 @@ export function ChatPanel({ session }: Props) {
     });
   const items = buildChatRenderItems(chatEntries);
   const actionableIncoming = latestIncomingEntryIds(chatEntries);
-  /** Folded groups fetched as summary stubs load their full events on expand;
-   * a failed load keeps a retryable error state per group. */
-  const requestProcessDetails = (item: Extract<ChatRenderItem, { type: 'executionGroup' }>) => {
-    const sequences = item.entries
-      .filter((entry) => entry.detailStub)
-      .map((entry) => entry.sequence ?? 0)
-      .filter((sequence) => sequence > 0);
-    if (!sequences.length || processGroupLoad[item.id] === 'loading') return;
-    setProcessGroupLoad((current) => ({ ...current, [item.id]: 'loading' }));
-    void session.hydrateProcessGroup(conversation.id, Math.min(...sequences), Math.max(...sequences))
-      .then((hydrated) => setProcessGroupLoad((current) => {
-        const next = { ...current };
-        if (hydrated) delete next[item.id];
-        else next[item.id] = 'error';
-        return next;
-      }))
-      .catch(() => setProcessGroupLoad((current) => ({ ...current, [item.id]: 'error' })));
-  };
   const currentProvider = isV2Conversation(conversation) ? conversation.provider || '' : '';
   const agentProvider = conversation.provider || (isV2Conversation(conversation) ? '' : 'codex');
   const slashTrigger = draft.trim().startsWith('/') ? draft.trim() : '';
@@ -566,8 +746,6 @@ export function ChatPanel({ session }: Props) {
       : !currentPermission ? t('chat.permissionHintReselect')
         : t('chat.permissionHintApply');
 
-  const isToolCallEntry = isChatToolEntry;
-
   const openAttachmentSource = (item: ComposerAttachmentDraft) => {
     setPreviewAttachment(null);
     if (item.path) {
@@ -707,114 +885,37 @@ export function ChatPanel({ session }: Props) {
             </p>
           ) : null}
           {items.map((item) => {
-            if (item.type === 'executionGroup') {
-              const autoExpanded = thinking && item.entries.some((entry) => entry.at >= (conversationTimeline.at(-1)?.at ?? 0));
-              const expanded = (expandedProcessIds.has(item.id) || autoExpanded) && !collapsedProcessIds.has(item.id);
-              const hasStubs = item.entries.some((entry) => entry.detailStub);
-              const loadState = processGroupLoad[item.id];
-              const pendingCount = item.entries.filter((entry) => entry.requestId && session.pendingRequests.some((request) => request.requestId === entry.requestId)).length;
-              return (
-                <ChainOfThought
-                  key={item.id}
-                  isExpanded={expanded}
-                  onExpandedChange={(nextExpanded) => {
-                    if (nextExpanded && hasStubs) requestProcessDetails(item);
-                    if (nextExpanded) {
-                      setExpandedProcessIds((current) => new Set(current).add(item.id));
-                      setCollapsedProcessIds((current) => {
-                        const next = new Set(current);
-                        next.delete(item.id);
-                        return next;
-                      });
-                    } else {
-                      setExpandedProcessIds((current) => {
-                        const next = new Set(current);
-                        next.delete(item.id);
-                        return next;
-                      });
-                      setCollapsedProcessIds((current) => new Set(current).add(item.id));
-                    }
-                  }}
-                  isStreaming={autoExpanded}
-                  className="chat-process-trace min-w-0"
-                >
-                  <ChainOfThought.Trigger className="min-h-7 py-1 text-xs">{progressGroupLabel(item.entries, thinking && item.id === latestProcessGroupId, pendingCount)}</ChainOfThought.Trigger>
-                  <ChainOfThought.Content>
-                    {hasStubs ? (
-                      loadState === 'error' ? (
-                        <button type="button" className="text-danger cursor-pointer text-xs" onClick={() => requestProcessDetails(item)}>
-                          加载过程记录失败，点按重试
-                        </button>
-                      ) : (
-                        <p className="text-muted text-xs">正在加载过程记录…</p>
-                      )
-                    ) : (
-                      <ChainOfThought.Steps>
-                        {item.entries.map((entry) => (
-                          <ChainOfThought.Step key={entry.id} label={entry.title}>
-                            {isToolCallEntry(entry) ? (() => {
-                              const { toolName, argsText } = toolPresentation(entry.subtitle);
-                              return <ChatTool defaultExpanded={thinking} state={thinking ? 'input-streaming' : 'output-available'} toolName={toolName} argsText={argsText} />;
-                            })() : <p className="max-w-full overflow-x-auto whitespace-pre-wrap wrap-anywhere text-xs">{entry.subtitle || entry.title}</p>}
-                          </ChainOfThought.Step>
-                        ))}
-                      </ChainOfThought.Steps>
-                    )}
-                  </ChainOfThought.Content>
-                </ChainOfThought>
-              );
-            }
-            const entry = item.entry;
-            if (isToolCallEntry(entry)) {
-              const { toolName, argsText } = toolPresentation(entry.subtitle);
-              return <ChatTool key={entry.id} defaultExpanded={thinking} state={thinking ? 'input-streaming' : 'output-available'} toolName={toolName} argsText={argsText} triggerPrefix={thinking ? t('chat.toolCalling') : t('chat.toolCalled')} />;
-            }
-            const request = session.pendingRequests.find((pendingItem) => !sessionPermissionIds.has(pendingItem.requestId) && pendingItem.requestId && (entry.requestId === pendingItem.requestId || entry.raw.includes(pendingItem.requestId)));
-            const isUser = entry.kind === 'outgoing';
+            const autoExpanded = item.type === 'executionGroup'
+              && thinking
+              && item.entries.some((entry) => entry.at >= (conversationTimeline.at(-1)?.at ?? 0));
             return (
-              <div key={entry.id} data-message-id={entry.id} className={`flex gap-3 py-1 ${isUser ? 'justify-end' : 'justify-start'}`}>
-                <div className={`min-w-0 max-w-[85%] ${isUser ? 'text-right' : ''}`}>
-                  {isUser ? <p className="text-muted text-xs font-medium">You</p> : entry.category === 'extension' ? <p className="text-muted text-xs font-medium">{t('chat.piExtensionEntry', { title: entry.title })}</p> : null}
-                  <div className={`${isUser ? 'mt-1' : ''} text-sm leading-6`}>
-                    {isUser ? <div className="flex flex-col items-end gap-2">
-                      {entry.sentAttachments?.length ? (
-                        <ChatAttachmentGroup aria-label={t('chat.sentAttachments')} className="justify-end text-left" role="list">
-                          {entry.sentAttachments.map((attachment) => (
-                            <ChatAttachment
-                              key={attachment.id}
-                              mimeType={attachment.mimeType}
-                              name={attachment.name}
-                              role="listitem"
-                              size={attachment.sizeBytes ?? undefined}
-                              src={attachment.previewUrl}
-                            >
-                              <ChatAttachment.Preview />
-                              <ChatAttachment.Info />
-                            </ChatAttachment>
-                          ))}
-                        </ChatAttachmentGroup>
-                      ) : null}
-                      {entry.subtitle ? <p className="whitespace-pre-wrap wrap-anywhere">{entry.subtitle === STREAMING_REPLY_PLACEHOLDER ? t('chat.replying') : entry.subtitle}</p> : null}
-                    </div> : (
-                      <Markdown
-                        id={entry.id}
-                        components={markdownComponents}
-                      >
-                        {entry.subtitle === STREAMING_REPLY_PLACEHOLDER ? t('chat.replying') : entry.subtitle}
-                      </Markdown>
-                    )}
-                  </div>
-                  {entry.kind === 'incoming' && actionableIncoming.has(entry.id) && entry.id !== pendingReplyId
-                    ? <AgentMessageActions conversationId={conversation.id} entry={entry} session={session} />
-                    : null}
-                  {request ? (
-                    <ChatMessage.Actions>
-                      <ConversationPermissionActions request={request} onSelect={(option, data) => { session.sendApprovalResponse(option, request, data); }} />
-                    </ChatMessage.Actions>
-                  ) : null}
-                </div>
-                {isUser ? <ChatMessage.Avatar alt="You" fallback="You" /> : null}
-              </div>
+              <ChatTimelineItem
+                key={item.type === 'executionGroup' ? item.id : item.entry.id}
+                item={item}
+                conversationId={conversation.id}
+                thinking={thinking}
+                isStreamingGroup={autoExpanded}
+                groupLabelActive={item.type === 'executionGroup' && thinking && item.id === latestProcessGroupId}
+                groupExpanded={item.type === 'executionGroup'
+                  && (expandedProcessIds.has(item.id) || autoExpanded)
+                  && !collapsedProcessIds.has(item.id)}
+                groupLoadState={item.type === 'executionGroup' ? processGroupLoad[item.id] : undefined}
+                groupPendingCount={item.type === 'executionGroup'
+                  ? item.entries.filter((entry) => entry.requestId && session.pendingRequests.some((request) => request.requestId === entry.requestId)).length
+                  : 0}
+                request={item.type === 'entry'
+                  ? session.pendingRequests.find((pendingItem) => !sessionPermissionIds.has(pendingItem.requestId) && pendingItem.requestId && (item.entry.requestId === pendingItem.requestId || item.entry.raw.includes(pendingItem.requestId)))
+                  : undefined}
+                isActionable={item.type === 'entry' && actionableIncoming.has(item.entry.id)}
+                isPendingReply={item.type === 'entry' && item.entry.id === pendingReplyId}
+                markdownComponents={markdownComponents}
+                onHydrateGroup={session.hydrateProcessGroup}
+                onApprove={session.sendApprovalResponse}
+                setExpandedProcessIds={setExpandedProcessIds}
+                setCollapsedProcessIds={setCollapsedProcessIds}
+                setProcessGroupLoad={setProcessGroupLoad}
+                session={session}
+              />
             );
           })}
         </div>
