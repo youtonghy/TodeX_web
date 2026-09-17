@@ -170,7 +170,7 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
     setActiveId(item.id);
     onTabChange(type);
   };
-  const closeTab = (id: string) => {
+  const closeTab = useCallback((id: string) => {
     setItems((current) => {
       const next = current.filter((item) => item.id !== id);
       if (id === activeId) {
@@ -180,7 +180,27 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
       }
       return next;
     });
-  };
+  }, [activeId, onTabChange]);
+
+  const closeActiveTab = useCallback(() => {
+    if (!activeId) return false;
+    closeTab(activeId);
+    return true;
+  }, [activeId, closeTab]);
+
+  // Browsers reserve Cmd+W for closing the browser tab, so this only runs in
+  // hosts that deliver the key (e.g. embedded webviews); the desktop client
+  // handles the same shortcut via IPC instead.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      if (event.key.toLowerCase() !== 'w') return;
+      if (!closeActiveTab()) return;
+      event.preventDefault();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [closeActiveTab]);
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -195,15 +215,16 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
                 ? item.target?.url || item.target?.filePath || 'http://127.0.0.1:7345'
                 : item.target?.filePath || workspacePath;
             const title = location ? `${workbenchLabel(item.type)} ${location}` : item.title;
+            const isActive = item.id === activeId;
             return (
-              <div key={item.id} className={`group flex h-10 shrink-0 items-center border-r border-separator ${item.id === activeId ? 'bg-surface text-foreground' : 'text-muted'}`}>
+              <div key={item.id} className={`group relative flex h-10 shrink-0 items-center border-r border-separator ${isActive ? 'bg-surface text-foreground' : 'text-muted'}`}>
                 <Tooltip delay={200}>
                   <Button
-                    isIconOnly variant="ghost" aria-label={title} aria-pressed={item.id === activeId}
+                    isIconOnly variant="ghost" aria-label={title} aria-pressed={isActive}
                     className="size-10 min-w-10 rounded-none text-inherit"
                     onPress={() => { setActiveId(item.id); onTabChange(item.type); }}
                   >
-                    <Icon aria-hidden="true" className="size-4" />
+                    <Icon aria-hidden="true" className={`size-4 transition-opacity group-hover:opacity-0 group-focus-within:opacity-0${isActive ? ' [@media(hover:none)]:opacity-0' : ''}`} />
                   </Button>
                   <Tooltip.Content placement="bottom" className="max-w-sm break-all text-xs">
                     {title}
@@ -211,10 +232,10 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
                 </Tooltip>
                 <Button
                   isIconOnly size="sm" variant="ghost" aria-label={t('workbench.closeTab', { title })}
-                  className="mr-1 size-5 min-w-5 rounded-sm text-muted opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100"
+                  className={`pointer-events-none absolute inset-0 m-auto size-6 min-w-6 rounded-md text-muted opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100${isActive ? ' [@media(hover:none)]:pointer-events-auto [@media(hover:none)]:opacity-100' : ''}`}
                   onPress={() => closeTab(item.id)}
                 >
-                  <RiCloseLine aria-hidden="true" className="size-3" />
+                  <RiCloseLine aria-hidden="true" className="size-4" />
                 </Button>
               </div>
             );
