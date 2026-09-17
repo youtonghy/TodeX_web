@@ -3,7 +3,7 @@ import { PiExtensionEffects, canApplyPluginDraft } from './piExtensionEffects';
 import { commandContextKey, routePiSlashCommand, type ProviderCommandCatalog } from './providerCommands';
 import { piExtensionPlainText } from '../components/piExtensionPresentation';
 import type { ExtensionEditorRequest } from '@todex/protocol/conversationRuntime';
-import type { BackendConnectionProfile } from './backendColors';
+import { normalizeBackendLabelColor, type BackendConnectionProfile } from './backendColors';
 import { useWorkbenchSharing } from './useWorkbenchSharing';
 import {
   completionNotificationBody,
@@ -1056,6 +1056,12 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
                   mode: (conversation.mode === 'plan' ? 'plan' : 'implement') as ConversationRecord['mode'],
                   goalStatus: conversation.goalStatus || '',
                   goalObjective: conversation.goalObjective || '',
+                  // Records predating read tracking start out as read so the
+                  // upgrade does not light up every stored conversation.
+                  lastReadAt: typeof conversation.lastReadAt === 'number' && Number.isFinite(conversation.lastReadAt)
+                    ? conversation.lastReadAt
+                    : Date.now(),
+                  labelColor: normalizeBackendLabelColor(conversation.labelColor),
                 };
               })
           : normalizedWorkspaces.map((workspace) => createDefaultConversation(workspace));
@@ -1874,6 +1880,42 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       }),
     );
   }, []);
+
+  // Read marking goes through a dedicated path: bumping updatedAt or
+  // lastCompletedAt would disturb sidebar ordering and turn bookkeeping.
+  const markConversationRead = useCallback((conversationId: string) => {
+    setConversations((current) => {
+      const index = current.findIndex((item) => item.id === conversationId);
+      if (index < 0) return current;
+      const readAt = Date.now();
+      if ((current[index].lastReadAt ?? 0) >= readAt) return current;
+      const next = [...current];
+      next[index] = { ...next[index], lastReadAt: readAt };
+      return next;
+    });
+  }, []);
+
+  const setConversationLabelColor = useCallback((conversationId: string, labelColor?: string) => {
+    updateConversation(conversationId, { labelColor: normalizeBackendLabelColor(labelColor) });
+  }, [updateConversation]);
+
+  // A conversation counts as read while it is on screen in a focused window:
+  // opening it, refocusing the app, or watching replies stream in all clear
+  // the unread marker. Activity that lands while hidden stays unread.
+  useEffect(() => {
+    const markActiveRead = () => {
+      if (!activeConversationId) return;
+      if (document.visibilityState !== 'visible' || !document.hasFocus()) return;
+      markConversationRead(activeConversationId);
+    };
+    markActiveRead();
+    window.addEventListener('focus', markActiveRead);
+    document.addEventListener('visibilitychange', markActiveRead);
+    return () => {
+      window.removeEventListener('focus', markActiveRead);
+      document.removeEventListener('visibilitychange', markActiveRead);
+    };
+  }, [activeConversationId, timeline, turnIds, markConversationRead]);
 
   const upsertNativeThreads = useCallback((workspaceId: string, sessionId: string, threads: CodexNativeThread[]) => {
     if (!threads.length) {
@@ -7752,6 +7794,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     renameConversation,
     forkConversation,
     removeConversation,
+    setConversationLabelColor,
     requestNativeThreadList,
     submitChat,
     sendAgentMessage,
