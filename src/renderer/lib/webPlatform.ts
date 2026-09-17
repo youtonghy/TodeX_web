@@ -72,6 +72,7 @@ export function installWebPlatformBridge(): void {
     },
     app: {
       focus: () => window.focus(),
+      windowChrome: 'native' as const,
     },
     theme: {
       shouldUseDark: async () => window.matchMedia('(prefers-color-scheme: dark)').matches,

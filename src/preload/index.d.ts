@@ -16,6 +16,7 @@ export type TodeXWebApi = {
   };
   app: {
     focus: () => void;
+    windowChrome: 'hidden-inset' | 'native';
   };
   theme: {
     shouldUseDark: () => Promise<boolean>;
