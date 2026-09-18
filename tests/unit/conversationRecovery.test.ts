@@ -83,4 +83,36 @@ describe('shared conversation recovery', () => {
     expect(recovery.get('c')?.pendingPermissions).toHaveLength(0);
   });
 
+  it('refuses to hydrate a conversation without a committed runtime', () => {
+    const update = vi.fn();
+    const recovery = new ConversationRecovery(async () => page([]), update, () => {});
+    const full = event(2, 'provider.event', {
+      turnId: 't', toolCallId: 'b',
+      block: { id: 'b', category: 'tool', phase: 'completed', turnId: 't' },
+    });
+    expect(recovery.hydrate('missing', 'w', [full])).toBe(false);
+    expect(recovery.get('missing')).toBeUndefined();
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it('hydrates folded stub entries into the committed runtime', () => {
+    const stub = event(2, 'provider.event', {
+      turnId: 't', detailStub: true, toolCallId: 'b',
+      block: { id: 'b', category: 'tool', phase: 'completed', turnId: 't' },
+    });
+    const update = vi.fn();
+    const recovery = new ConversationRecovery(async () => page([]), update, () => {});
+    recovery.receive('c', 'w', [start, stub]);
+    expect(recovery.get('c')?.timeline.some((entry) => entry.detailStub)).toBe(true);
+    const full = event(2, 'provider.event', {
+      turnId: 't', toolCallId: 'b', result: 'ok',
+      block: { id: 'b', category: 'tool', phase: 'completed', turnId: 't' },
+    });
+    expect(recovery.hydrate('c', 'w', [full])).toBe(true);
+    const entry = recovery.get('c')?.timeline.find((item) => item.category === 'tool');
+    expect(entry?.detailStub).toBeUndefined();
+    expect(entry?.subtitle).toContain('ok');
+    expect(update).toHaveBeenCalled();
+  });
+
 });
