@@ -35,6 +35,12 @@ COPY --from=todexprotocol src /build/TodeX_protocol/src
 
 FROM deps AS build
 COPY . .
+# hpsetup rewrites these manifests (it installs @heroui-pro/react@latest plus
+# the peer deps the licensed bundle needs). Keep the deps-stage copies so they
+# stay in sync with node_modules — with the repo copies restored, pnpm's
+# verifyDepsBeforeRun (default: install) would reinstall the unlicensed npm
+# stub over the licensed package contents before lint/typecheck.
+COPY --from=deps /build/TodeX_web/package.json /build/TodeX_web/pnpm-lock.yaml /build/TodeX_web/pnpm-workspace.yaml ./
 ARG TODEX_BUILD_VERSION=DEV0.0.0
 ENV TODEX_BUILD_VERSION=$TODEX_BUILD_VERSION
 RUN pnpm lint && pnpm typecheck && pnpm build
