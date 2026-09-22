@@ -82,6 +82,26 @@ describe('bounded attachment receipts', () => {
     expect(result[0]).toEqual(record().attachments[0]);
     expect(result.every(item => !('dataUrl' in item) && !item.previewUrl)).toBe(true);
   });
+  it('keeps file text content on the receipt for later preview', async () => {
+    const [file] = await prepareSentAttachments([
+      { id: 'f1', kind: 'file', name: 'notes.txt', mimeType: 'text/plain', sizeBytes: 5, dataUrl: 'data:text/plain;base64,aGVsbG8=', textContent: 'hello' },
+    ]);
+    expect(file).toMatchObject({ kind: 'file', textContent: 'hello' });
+    expect(file).not.toHaveProperty('dataUrl');
+    const [image] = await prepareSentAttachments([
+      { id: 'i1', kind: 'image', name: 'a.png', mimeType: 'image/png', sizeBytes: 1, dataUrl: 'not-an-image', textContent: 'ignored' },
+    ]);
+    expect(image).not.toHaveProperty('textContent');
+  });
+  it('strips oversized text content but keeps text within the cap', () => {
+    const records = [
+      { ...record('old'), attachments: [{ ...record('old').attachments[0], kind: 'file' as const, mimeType: 'text/plain', textContent: 'x'.repeat(200 * 1024) }] },
+      { ...record('new'), attachments: [{ ...record('new').attachments[0], kind: 'file' as const, mimeType: 'text/plain', textContent: 'kept' }] },
+    ];
+    const pruned = pruneSentAttachmentRecords(records);
+    expect(pruned[0].attachments[0]).not.toHaveProperty('textContent');
+    expect(pruned[1].attachments[0].textContent).toBe('kept');
+  });
   it('keeps the latest 150 records and drops older previews before newer ones', () => {
     const records = Array.from({ length: 151 }, (_, index) => ({
       ...record(String(index)), attachments: [{ ...record(String(index)).attachments[0], previewUrl: 'data:image/webp;base64,' + 'a'.repeat(99 * 1024) }],
@@ -118,6 +138,12 @@ describe('legacy message attachment recovery', () => {
   it('recovers live legacy request input without requiring a cache record', () => {
     const message = { ...entry(), raw: JSON.stringify({ type: 'codex.local.turn', payload: { input: content } }) };
     expect(projectSentAttachments([message], [], 'c')[0].sentAttachments).toHaveLength(2);
+  });
+  it('recovers the text payload from Content blocks for preview', () => {
+    const block = '[附件: notes.txt]\nMIME: text/plain\nSize: 5 B\nContent:\nhello\nworld';
+    const message = { ...entry('with-text'), raw: JSON.stringify({ type: 'userMessage', content: [{ type: 'text', text: block }] }) };
+    expect(projectSentAttachments([message], [], 'c')[0].sentAttachments?.[0])
+      .toMatchObject({ name: 'notes.txt', textContent: 'hello\nworld' });
   });
   it('does not infer attachments from malformed raw data or ordinary text', () => {
     const rows = [
