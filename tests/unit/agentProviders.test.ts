@@ -5,6 +5,8 @@ import {
   defaultEfforts,
   emptyModelEntry,
   extractFormValues,
+  providerBaseUrl,
+  providerModelIds,
   validateModelForm,
   type ModelFormEntry,
 } from '../../src/renderer/lib/agentProviders';
@@ -201,5 +203,81 @@ describe('defaultEfforts', () => {
   it('matches each agent\'s default thinking level set', () => {
     expect(defaultEfforts('pi')).toEqual(['off', 'minimal', 'low', 'medium', 'high']);
     expect(defaultEfforts('opencode')).toEqual(['low', 'medium', 'high']);
+  });
+});
+
+describe('grok build providers', () => {
+  const session = {
+    'https://auth.x.ai': { key: MASKED_SECRET, auth_mode: 'oidc', user_id: 'u1', email: 'u1@example.com' },
+  };
+
+  it('builds an API profile with a per-model key targeting the xAI API by default', () => {
+    const form = extractFormValues('grok-build');
+    expect(form.authMode).toBe('api');
+    expect(validateModelForm('grok-build', form)).toBe('ap.modelRequired');
+    const next = buildSettingsConfig('grok-build', {
+      ...form, name: 'xAI', apiKey: 'xai-k', model: 'grok-4.7', apiKind: 'responses',
+    });
+    expect(next.auth).toBeNull();
+    const config = next.config as string;
+    expect(config).toContain('[models]\ndefault = "grok-4.7"');
+    expect(config).toContain('[model."grok-4.7"]');
+    expect(config).toContain('base_url = "https://api.x.ai/v1"');
+    expect(config).toContain('api_key = "xai-k"');
+    expect(config).toContain('api_backend = "responses"');
+    expect(providerModelIds('grok-build', next)).toEqual(['grok-4.7']);
+    expect(providerBaseUrl('grok-build', next)).toBe('https://api.x.ai/v1');
+  });
+
+  it('keeps the catalog key and masked key when only the model id changes', () => {
+    const existing = {
+      settingsConfig: {
+        auth: null,
+        config: '[ui]\ntheme = "auto"\n\n[models]\ndefault = "gw"\n\n[model.gw]\nmodel = "m1"\nbase_url = "https://gw.example.com/v1"\napi_key = "__TODEX_MASKED__"\n',
+      },
+    };
+    const form = extractFormValues('grok-build', existing);
+    expect(form).toMatchObject({ authMode: 'api', model: 'm1', apiKey: MASKED_SECRET, baseUrl: 'https://gw.example.com/v1' });
+    const config = buildSettingsConfig('grok-build', { ...form, model: 'm2' }, existing).config as string;
+    expect(config).toContain('default = "gw"');
+    expect(config).toContain('model = "m2"');
+    expect(config).toContain(`api_key = "${MASKED_SECRET}"`);
+    expect(config).toContain('theme = "auto"');
+    expect(config.match(/\[model\.gw\]/g)).toHaveLength(1);
+  });
+
+  it('keeps the session for subscription profiles and drops a per-model key', () => {
+    const existing = {
+      settingsConfig: {
+        auth: session,
+        config: '[models]\ndefault = "grok-build"\n\n[model.grok-build]\napi_key = "__TODEX_MASKED__"\ntemperature = 0.5\n',
+      },
+    };
+    const form = extractFormValues('grok-build', existing);
+    expect(form.authMode).toBe('subscription');
+    expect(validateModelForm('grok-build', form)).toBeNull();
+    const next = buildSettingsConfig('grok-build', form, existing);
+    expect(next.auth).toEqual(session);
+    expect(next.config as string).not.toContain('api_key');
+    expect(next.config as string).toContain('temperature = 0.5');
+    expect(providerBaseUrl('grok-build', next)).toBe('u1@example.com');
+  });
+
+  it('switching a subscription profile to an API key drops the session', () => {
+    const existing = { settingsConfig: { auth: session, config: '' } };
+    const form = extractFormValues('grok-build', existing);
+    const next = buildSettingsConfig('grok-build', { ...form, authMode: 'api', apiKey: 'xai-k', model: 'grok-4.7' }, existing);
+    expect(next.auth).toBeNull();
+    expect(next.config as string).toContain('api_key = "xai-k"');
+  });
+
+  it('keeps an unchanged `grok login --api-key` scope in auth.json', () => {
+    const auth = { 'xai::api_key': { key: MASKED_SECRET, auth_mode: 'api_key', user_id: '' } };
+    const existing = { settingsConfig: { auth, config: '' } };
+    const form = extractFormValues('grok-build', existing);
+    expect(form).toMatchObject({ authMode: 'api', apiKey: MASKED_SECRET });
+    const next = buildSettingsConfig('grok-build', { ...form, model: 'grok-4.7' }, existing);
+    expect(next.auth).toEqual(auth);
+    expect(next.config as string).not.toContain('api_key');
   });
 });
