@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { Button } from '@heroui/react';
 import { buttonVariants } from '@heroui/styles';
-import { RiArrowDownLine, RiArrowRightLine, RiArrowRightUpLine, RiCheckLine, RiCloseLine, RiCodeSSlashLine, RiCommandLine, RiComputerLine, RiFileCopyLine, RiGitBranchLine, RiGithubLine, RiGlobalLine, RiMenuLine, RiServerLine, RiShieldCheckLine, RiTerminalBoxLine } from '@remixicon/react';
+import { RiArrowDownLine, RiArrowRightLine, RiArrowRightUpLine, RiCloseLine, RiCodeSSlashLine, RiCommandLine, RiComputerLine, RiGitBranchLine, RiGithubLine, RiGlobalLine, RiMenuLine, RiServerLine, RiShieldCheckLine, RiTerminalBoxLine } from '@remixicon/react';
 import { ProviderIcon } from '../components/ProviderIcon';
 import { useLocale, useT } from '../i18n';
 import brand from '../assets/brand/t-icon-light.png';
 import { DEMO_PATH, type DemoPlaybackMessage } from '../demo/playback';
+import { CopyCommand } from './CopyCommand';
 import { Downloads } from './Downloads';
 import { LanguageSwitcher } from './LanguageSwitcher';
 
@@ -81,13 +82,6 @@ function WorkbenchPreview() {
   </div>;
 }
 
-function CopyCommand() {
-  const t = useT();
-  const [status, setStatus] = useState<'idle' | 'copied' | 'failed'>('idle');
-  useEffect(() => { if (status === 'idle') return; const timer = window.setTimeout(() => setStatus('idle'), 2400); return () => clearTimeout(timer); }, [status]);
-  return <div className="setup-command"><code><span>$</span> todex-agentd tui</code><Button isIconOnly variant="ghost" aria-label={status === 'copied' ? t('site.how.copy.copied') : t('site.how.copy.label')} onPress={async () => { try { await navigator.clipboard.writeText('todex-agentd tui'); setStatus('copied'); } catch { setStatus('failed'); } }}>{status === 'copied' ? <RiCheckLine size={16} /> : <RiFileCopyLine size={16} />}</Button><span className="copy-status" role="status">{status === 'copied' ? t('site.how.copy.done') : status === 'failed' ? t('site.how.copy.failed') : ''}</span></div>;
-}
-
 export function Website() {
   const t = useT();
   const locale = useLocale();
@@ -121,7 +115,7 @@ export function Website() {
           <article className="feature-card"><div className="feature-visual privacy-visual" aria-hidden="true"><div className="privacy-ring"><RiShieldCheckLine size={49} strokeWidth={0.3} /></div><div className="privacy-tag mono"><span /> YOUR MACHINE. YOUR RULES.</div><span className="privacy-spark spark-one">+</span><span className="privacy-spark spark-two">+</span></div><div className="feature-copy"><span className="mono feature-number">03 / OWN</span><h3>{t('site.features.privacy.title')}</h3><p>{t('site.features.privacy.body')}</p><a href={`${backendRepository}#key-features`} target="_blank" rel="noreferrer">{t('site.features.privacy.link')} <RiArrowRightUpLine size={16} /></a></div></article>
         </div>
       </section>
-      <section className="how-section" id="how-it-works" aria-labelledby="how-heading"><div className="section-width how-inner"><div className="how-intro"><span className="eyebrow"><span /> LOCAL ROOTS. LIMITLESS REACH.</span><h2 id="how-heading">{t('site.how.title1')}<br />{t('site.how.title2')}</h2><p>{t('site.how.lede1')}<br />{t('site.how.lede2')}</p><a href={`${backendRepository}#quick-start`} target="_blank" rel="noreferrer" className="text-link">{t('site.how.guide')} <RiArrowRightUpLine size={17} /></a><div className="connection-map" aria-label={t('site.how.mapLabel')}><div className="connection-clients"><span><RiComputerLine size={20} /> Desktop</span><span><RiGlobalLine size={20} /> Web</span></div><div className="connection-lines" aria-hidden="true"><span /><span /></div><div className="connection-backend"><RiServerLine size={24} /><span>{t('site.how.backend')}<small>{t('site.how.backendSub')}</small></span><i /></div></div></div><ol className="setup-steps"><li><span className="step-number mono">01</span><div><h3>{t('site.how.step1.title')}</h3><p>{t('site.how.step1.body')}</p><CopyCommand /></div></li><li><span className="step-number mono">02</span><div><h3>{t('site.how.step2.title')}</h3><p>{t('site.how.step2.body')}</p><span className="step-note"><RiShieldCheckLine size={14} /> {t('site.how.step2.note')}</span></div></li><li><span className="step-number mono">03</span><div><h3>{t('site.how.step3.title')}</h3><p>{t('site.how.step3.body')}</p><a href="/app" className="text-link">{t('site.how.step3.link')} <RiArrowRightLine size={16} /></a></div></li></ol></div></section>
+      <section className="how-section" id="how-it-works" aria-labelledby="how-heading"><div className="section-width how-inner"><div className="how-intro"><span className="eyebrow"><span /> LOCAL ROOTS. LIMITLESS REACH.</span><h2 id="how-heading">{t('site.how.title1')}<br />{t('site.how.title2')}</h2><p>{t('site.how.lede1')}<br />{t('site.how.lede2')}</p><a href={`${backendRepository}#quick-start`} target="_blank" rel="noreferrer" className="text-link">{t('site.how.guide')} <RiArrowRightUpLine size={17} /></a><div className="connection-map" aria-label={t('site.how.mapLabel')}><div className="connection-clients"><span><RiComputerLine size={20} /> Desktop</span><span><RiGlobalLine size={20} /> Web</span></div><div className="connection-lines" aria-hidden="true"><span /><span /></div><div className="connection-backend"><RiServerLine size={24} /><span>{t('site.how.backend')}<small>{t('site.how.backendSub')}</small></span><i /></div></div></div><ol className="setup-steps"><li><span className="step-number mono">01</span><div><h3>{t('site.how.step1.title')}</h3><p>{t('site.how.step1.body')}</p><CopyCommand command="todex-agentd tui" label={t('site.how.copy.label')} /></div></li><li><span className="step-number mono">02</span><div><h3>{t('site.how.step2.title')}</h3><p>{t('site.how.step2.body')}</p><span className="step-note"><RiShieldCheckLine size={14} /> {t('site.how.step2.note')}</span></div></li><li><span className="step-number mono">03</span><div><h3>{t('site.how.step3.title')}</h3><p>{t('site.how.step3.body')}</p><a href="/app" className="text-link">{t('site.how.step3.link')} <RiArrowRightLine size={16} /></a></div></li></ol></div></section>
       <Downloads />
       <section className="closing-section"><span className="eyebrow"><span /> THE NEXT CHAPTER IS YOURS</span><h2>{t('site.closing.title')}</h2><p>{t('site.closing.body')}</p><a href="/app" className={`${buttonVariants({ variant: 'primary', size: 'lg' })} site-button`}>{t('site.closing.cta')} <RiArrowRightUpLine size={18} /></a><span className="closing-coordinate mono" aria-hidden="true">IDEA → BUILD → WHAT'S NEXT?</span></section>
     </main>

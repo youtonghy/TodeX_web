@@ -100,6 +100,8 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .download-skeleton-status { width: 58px; height: 12px; }
 .download-skeleton-asset { height: 44px; margin-bottom: 8px; }
 .download-loading-text { font-size: 10px; color: #8a9582; }
+.install-label { display: inline-flex; align-items: center; gap: 7px; height: 32px; color: #496039; font-size: 12px; font-weight: 500; }.install-label svg { color: #869d6b; }.setup-command.install-command { align-items: flex-start; margin-top: 0; padding: 9px 5px 9px 14px; border-radius: 7px; background: #f1f5eb; border-color: #e0e7d7; }.install-command code { font-size: 11px; line-height: 1.7; color: #496039; word-break: break-all; white-space: normal; }.install-command code > span { user-select: none; }.install-command button { flex-shrink: 0; margin-top: -3px; }.install-hint { margin: 21px 0 0; color: #71805f; font-size: 11px; line-height: 1.8; }.install-windows { margin-top: 6px; margin-bottom: 14px; }.install-windows a { display: inline-flex; align-items: center; gap: 3px; color: #60754b; text-decoration: underline; text-underline-offset: 3px; }.install-hint:last-of-type { margin-bottom: 14px; }
+.download-grid > .download-unavailable-panel { display: flex; flex-direction: column; justify-content: center; }
 .download-unavailable-panel { border: 1px dashed #dae3cf; border-radius: 10px; background: #f7f9f3; padding: 30px 26px; text-align: center; color: #6a7c59; font-size: 13px; }
 .download-unavailable-actions { display: flex; align-items: center; justify-content: center; gap: 18px; margin-top: 16px; }
 .download-unavailable-actions a { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: #546b45; }

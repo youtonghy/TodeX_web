@@ -9,7 +9,7 @@
 </p>
 
 The TodeX public website lives at `/`, with the stateless web workbench at `/app`.
-The website introduces the product and offers official Desktop and Backend downloads;
+The website introduces the product, offers official Desktop packages and a one-line Backend installer;
 the mobile app is not available for download yet. Each workbench browser connects
 directly to its own user-managed `todex-agentd` over REST and WebSocket.
 
@@ -54,10 +54,12 @@ The version and platform selectors are served by `GET /api/releases`, which the
 Node server answers with live GitHub Releases data (10-minute in-memory cache;
 the last good catalog is served flagged `stale` if a refresh fails). The server
 needs public GitHub API access; set `GITHUB_TOKEN` to raise the rate limit.
-Website visitors never contact GitHub directly. Desktop and Backend versions
-are selected independently; unpublished architectures are not offered.
-Download links point to official release assets, with release notes and SHA256
-checksum files alongside them. Product copy is based on the ecosystem, Desktop,
+Website visitors never contact GitHub directly. Only Desktop is offered as
+packages: unpublished architectures are not listed, and download links point to
+official release assets, with release notes and SHA256 checksum files alongside
+them. Backend is installed with the one-line `install.sh` command from
+TodeX_backend (macOS / Linux / WSL), which does not depend on the catalog; on
+Windows the card also links to the native build on the latest release. Product copy is based on the ecosystem, Desktop,
 Backend, and Web READMEs. The original generated sky asset and its prompt are
 documented in [website assets](docs/website-assets.md).
 

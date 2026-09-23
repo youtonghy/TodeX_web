@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
 import { Button, ListBox, Select, Skeleton } from '@heroui/react';
 import { buttonVariants } from '@heroui/styles';
-import { RiAppleFill, RiArrowDownLine, RiArrowRightUpLine, RiComputerLine, RiDownloadLine, RiServerLine, RiWindowsFill } from '@remixicon/react';
+import { RiAppleFill, RiArrowDownLine, RiArrowRightUpLine, RiComputerLine, RiDownloadLine, RiServerLine, RiTerminalBoxLine, RiWindowsFill } from '@remixicon/react';
 import { useLocale, useT } from '../i18n';
+import { CopyCommand } from './CopyCommand';
 import { loadReleaseCatalog, type Release, type ReleaseAsset, type ReleaseCatalog } from './releases';
 
 type Platform = 'macos' | 'windows' | 'linux';
-type Product = 'desktop' | 'backend';
 type CatalogState = { status: 'loading' } | { status: 'ready'; catalog: ReleaseCatalog } | { status: 'error' };
 
 const platforms = [
@@ -15,10 +15,11 @@ const platforms = [
   { id: 'linux' as const, label: 'Linux', Icon: RiComputerLine },
 ];
 
-const productRepositories: Record<Product, string> = {
-  desktop: 'https://github.com/youtonghy/TodeX_desktop',
-  backend: 'https://github.com/youtonghy/TodeX_backend',
-};
+const desktopRepository = 'https://github.com/youtonghy/TodeX_desktop';
+const backendRepository = 'https://github.com/youtonghy/TodeX_backend';
+// install.sh (macOS / Linux / WSL) downloads the latest release, verifies
+// SHA256SUMS and installs todex-agentd; see TodeX_backend/README.md.
+const backendInstallCommand = 'curl -fsSL https://raw.githubusercontent.com/youtonghy/TodeX_backend/main/install.sh | bash';
 
 function initialPlatform(): Platform {
   const agent = navigator.userAgent.toLowerCase();
@@ -29,26 +30,23 @@ function initialPlatform(): Platform {
 
 function packageLabel(asset: ReleaseAsset, t: (key: 'site.downloads.universal') => string) {
   const architecture = asset.name.includes('arm64') ? 'ARM64' : /x64|x86_64/.test(asset.name) ? 'x64' : t('site.downloads.universal');
-  const format = asset.name.endsWith('.tar.gz') ? 'tar.gz' : asset.name.split('.').at(-1);
+  const format = asset.name.split('.').at(-1);
   return { architecture, format, size: `${(asset.size / 1024 / 1024).toFixed(1)} MB` };
 }
 
-function DownloadCard({ product, platform, releases }: { product: Product; platform: Platform; releases: Release[] }) {
+function DesktopCard({ platform, releases }: { platform: Platform; releases: Release[] }) {
   const t = useT();
   const [version, setVersion] = useState(releases[0]?.version ?? '');
   const release = releases.find((item) => item.version === version) ?? releases[0];
-  const desktop = product === 'desktop';
-  const productName = desktop ? 'Desktop' : 'Backend';
-  const assets = release?.assets.filter((asset) => asset.name.includes(`-${platform}-`)
-    && (desktop ? /\.(dmg|exe|AppImage)$/.test(asset.name) : /\.(tar\.gz|zip)$/.test(asset.name))) ?? [];
+  const productName = 'Desktop';
+  const assets = release?.assets.filter((asset) => asset.name.includes(`-${platform}-`) && /\.(dmg|exe|AppImage)$/.test(asset.name)) ?? [];
   const checksums = release?.assets.find((asset) => asset.name === 'SHA256SUMS');
-  const Icon = desktop ? RiComputerLine : RiServerLine;
 
   return (
     <article className="download-card" aria-label={t('site.downloads.cardLabel', { product: productName })}>
-      <div className="download-card-top"><span className="product-symbol"><Icon size={23} /></span><span className="mono">{desktop ? '01 / YOUR WORKSPACE' : '02 / YOUR ENGINE'}</span></div>
-      <h3>TodeX {productName}</h3>
-      <p className="download-description">{t(desktop ? 'site.downloads.desktopDescription' : 'site.downloads.backendDescription')}</p>
+      <div className="download-card-top"><span className="product-symbol"><RiComputerLine size={23} /></span><span className="mono">01 / YOUR WORKSPACE</span></div>
+      <h3>TodeX Desktop</h3>
+      <p className="download-description">{t('site.downloads.desktopDescription')}</p>
       {release ? <>
         <div className="release-control">
           <Select aria-label={t('site.downloads.versionLabel', { product: productName })} value={version} onChange={(value) => { if (typeof value === 'string') setVersion(value); }} className="release-select">
@@ -74,18 +72,46 @@ function DownloadCard({ product, platform, releases }: { product: Product; platf
   );
 }
 
-function DownloadCardSkeleton({ product }: { product: Product }) {
+function DesktopCardSkeleton() {
   const t = useT();
-  const desktop = product === 'desktop';
-  const Icon = desktop ? RiComputerLine : RiServerLine;
   return (
-    <article className="download-card" aria-label={t('site.downloads.cardLabel', { product: desktop ? 'Desktop' : 'Backend' })} aria-busy="true">
-      <div className="download-card-top"><span className="product-symbol"><Icon size={23} /></span><span className="mono">{desktop ? '01 / YOUR WORKSPACE' : '02 / YOUR ENGINE'}</span></div>
-      <h3>TodeX {desktop ? 'Desktop' : 'Backend'}</h3>
-      <p className="download-description">{t(desktop ? 'site.downloads.desktopDescription' : 'site.downloads.backendDescription')}</p>
+    <article className="download-card" aria-label={t('site.downloads.cardLabel', { product: 'Desktop' })} aria-busy="true">
+      <div className="download-card-top"><span className="product-symbol"><RiComputerLine size={23} /></span><span className="mono">01 / YOUR WORKSPACE</span></div>
+      <h3>TodeX Desktop</h3>
+      <p className="download-description">{t('site.downloads.desktopDescription')}</p>
       <div className="release-control"><Skeleton className="download-skeleton download-skeleton-select" /><Skeleton className="download-skeleton download-skeleton-status" /></div>
       <div className="download-assets"><Skeleton className="download-skeleton download-skeleton-asset" /><Skeleton className="download-skeleton download-skeleton-asset" /></div>
       <span className="download-loading-text">{t('site.downloads.loading')}</span>
+    </article>
+  );
+}
+
+function DesktopCardError({ onRetry }: { onRetry: () => void }) {
+  const t = useT();
+  return (
+    <div className="download-unavailable-panel" role="alert">
+      <p>{t('site.downloads.error')}</p>
+      <div className="download-unavailable-actions">
+        <Button variant="primary" onPress={onRetry}>{t('site.downloads.retry')}</Button>
+        <a href={`${desktopRepository}/releases`} target="_blank" rel="noreferrer">Desktop <RiArrowRightUpLine size={14} /></a>
+      </div>
+    </div>
+  );
+}
+
+/** Backend installs from a script, so this card never waits on the release catalog. */
+function BackendInstallCard({ platform }: { platform: Platform }) {
+  const t = useT();
+  return (
+    <article className="download-card" aria-label={t('site.downloads.cardLabel', { product: 'Backend' })}>
+      <div className="download-card-top"><span className="product-symbol"><RiServerLine size={23} /></span><span className="mono">02 / YOUR ENGINE</span></div>
+      <h3>TodeX Backend</h3>
+      <p className="download-description">{t('site.downloads.backendDescription')}</p>
+      <div className="release-control"><span className="install-label"><RiTerminalBoxLine size={15} />{t('site.downloads.installLabel')}</span><span className="release-status"><i />macOS · Linux · WSL</span></div>
+      <CopyCommand className="install-command" command={backendInstallCommand} label={t('site.downloads.copyInstall')} />
+      <p className="install-hint">{t('site.downloads.installHint')}</p>
+      {platform === 'windows' ? <p className="install-hint install-windows">{t('site.downloads.installWindows')} <a href={`${backendRepository}/releases/latest`} target="_blank" rel="noreferrer">{t('site.downloads.windowsNative')} <RiArrowRightUpLine size={12} /></a></p> : null}
+      <div className="download-card-footer"><a href={`${backendRepository}/blob/main/install.sh`} target="_blank" rel="noreferrer">{t('site.downloads.installScript')} <RiArrowRightUpLine size={14} /></a><a href={`${backendRepository}/releases`} target="_blank" rel="noreferrer">{t('site.downloads.allReleases')} <RiArrowRightUpLine size={14} /></a></div>
     </article>
   );
 }
@@ -112,22 +138,12 @@ export function Downloads() {
       <div className="platform-picker" role="group" aria-label={t('site.downloads.platformLabel')}>
         {platforms.map(({ id, label, Icon }) => <Button key={id} variant="ghost" aria-pressed={platform === id} className={platform === id ? 'platform-button selected' : 'platform-button'} onPress={() => setPlatform(id)}><Icon size={18} />{label}</Button>)}
       </div>
-      {state.status === 'error' ? (
-        <div className="download-unavailable-panel" role="alert">
-          <p>{t('site.downloads.error')}</p>
-          <div className="download-unavailable-actions">
-            <Button variant="primary" onPress={() => setAttempt((count) => count + 1)}>{t('site.downloads.retry')}</Button>
-            <a href={`${productRepositories.desktop}/releases`} target="_blank" rel="noreferrer">Desktop <RiArrowRightUpLine size={14} /></a>
-            <a href={`${productRepositories.backend}/releases`} target="_blank" rel="noreferrer">Backend <RiArrowRightUpLine size={14} /></a>
-          </div>
-        </div>
-      ) : (
-        <div className="download-grid">
-          {state.status === 'ready'
-            ? <><DownloadCard key={`desktop-${state.catalog.checkedAt}`} product="desktop" platform={platform} releases={state.catalog.desktop} /><DownloadCard key={`backend-${state.catalog.checkedAt}`} product="backend" platform={platform} releases={state.catalog.backend} /></>
-            : <><DownloadCardSkeleton product="desktop" /><DownloadCardSkeleton product="backend" /></>}
-        </div>
-      )}
+      <div className="download-grid">
+        {state.status === 'ready' ? <DesktopCard key={state.catalog.checkedAt} platform={platform} releases={state.catalog.desktop} />
+          : state.status === 'error' ? <DesktopCardError onRetry={() => setAttempt((count) => count + 1)} />
+            : <DesktopCardSkeleton />}
+        <BackendInstallCard platform={platform} />
+      </div>
       <div className="download-extras"><p><RiDownloadLine size={16} /> {t('site.downloads.source')}</p>{state.status === 'ready' && <span className="mono">{t('site.downloads.updated', { date: new Date(state.catalog.checkedAt).toLocaleDateString(locale) })}</span>}</div>
       <div className="mobile-release"><div><span className="mobile-release-icon">↗</span><span><strong>{t('site.downloads.mobileTitle')}</strong><small>{t('site.downloads.mobileBody')}</small></span></div><span className="coming-soon mono">{t('site.downloads.mobileStatus')}</span></div>
       <p className="browser-alternative">{t('site.downloads.hasBackend')}<a href="/app" className={buttonVariants({ variant: 'ghost' })}>{t('site.downloads.openWeb')} <RiArrowRightUpLine size={16} /></a></p>

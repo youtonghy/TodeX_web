@@ -47,29 +47,44 @@ test('plays the workspace → conversation → message → answer walkthrough', 
   await expect(page.getByText('Your weather dashboard is ready:')).toBeVisible({ timeout: 45_000 });
 });
 
-test('offers the published platform assets and historical backend versions', async ({ page }) => {
+test('offers Desktop packages per platform and a one-line Backend installer', async ({ page }) => {
   await stubReleaseCatalog(page);
   await page.goto('/#downloads');
   const desktop = page.getByRole('article', { name: 'Desktop 下载' });
   const backend = page.getByRole('article', { name: 'Backend 下载' });
+  const installCommand = 'curl -fsSL https://raw.githubusercontent.com/youtonghy/TodeX_backend/main/install.sh | bash';
+  await expect(backend.getByText(installCommand)).toBeVisible();
+  await expect(backend.getByRole('link', { name: /^下载 Backend/ })).toHaveCount(0);
+  await expect(backend.getByRole('link', { name: '查看安装脚本' })).toHaveAttribute('href', 'https://github.com/youtonghy/TodeX_backend/blob/main/install.sh');
   await page.getByRole('button', { name: 'Windows', exact: true }).click();
   await expect(desktop.getByRole('link', { name: '下载 Desktop v2.0.0 windows ARM64', exact: true })).toHaveAttribute('href', 'https://github.com/youtonghy/TodeX_desktop/releases/download/v2.0.0/TodeX-v2.0.0-windows-arm64.exe');
-  await expect(backend.getByRole('link', { name: '下载 Backend v2.0.1 windows x64' })).toHaveAttribute('href', /todex-agentd-v2\.0\.1-windows-x64\.zip$/);
-  await backend.getByRole('button', { name: /Backend 版本/ }).click();
-  await page.getByRole('option', { name: 'v2.0.0', exact: true }).click();
-  await expect(backend.getByRole('link', { name: '下载 Backend v2.0.0 windows x64' })).toHaveAttribute('href', /todex-agentd-v2\.0\.0-windows-x64\.zip$/);
+  await expect(backend.getByText('Windows 请在 WSL 终端中运行此命令。')).toBeVisible();
+  await expect(backend.getByRole('link', { name: '或下载原生 Windows 版本' })).toHaveAttribute('href', 'https://github.com/youtonghy/TodeX_backend/releases/latest');
   await page.getByRole('button', { name: 'Linux', exact: true }).click();
   await expect(desktop.getByRole('link', { name: '下载 Desktop v2.0.0 linux x64' })).toHaveAttribute('href', /TodeX-v2\.0\.0-linux-x86_64\.AppImage$/);
+  await expect(backend.getByText('Windows 请在 WSL 终端中运行此命令。')).toHaveCount(0);
   await page.getByRole('button', { name: 'macOS', exact: true }).click();
   await expect(desktop.getByRole('link', { name: '下载 Desktop v2.0.0 macos ARM64' })).toHaveAttribute('href', /TodeX-v2\.0\.0-macos-arm64\.dmg$/);
   await expect(page.getByText('暂缓发布 / COMING LATER')).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
 
+test('copies the Backend install command', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await stubReleaseCatalog(page);
+  await page.goto('/#downloads');
+  const backend = page.getByRole('article', { name: 'Backend 下载' });
+  await backend.getByRole('button', { name: '复制安装命令' }).click();
+  await expect(backend.getByRole('status')).toHaveText('已复制');
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('curl -fsSL https://raw.githubusercontent.com/youtonghy/TodeX_backend/main/install.sh | bash');
+});
+
 test('shows a retryable error panel when the release catalog is unavailable', async ({ page }) => {
   await page.route('**/api/releases', (route) => route.fulfill({ status: 503, json: { code: 'RELEASES_UNAVAILABLE', message: 'GitHub unreachable' } }));
   await page.goto('/#downloads');
-  await expect(page.getByText('无法获取版本信息，请检查到 GitHub 的网络连接。')).toBeVisible();
+  await expect(page.getByText('无法获取 Desktop 版本信息，请检查到 GitHub 的网络连接。')).toBeVisible();
+  // The Backend installer does not depend on the release catalog.
+  await expect(page.getByRole('article', { name: 'Backend 下载' }).getByRole('button', { name: '复制安装命令' })).toBeVisible();
   await expect(page.getByRole('button', { name: '重试', exact: true })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });

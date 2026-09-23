@@ -8,7 +8,7 @@
   </picture>
 </p>
 
-根路径 `/` 为 TodeX 官网，原有无状态 Web 面板位于 `/app`。官网介绍产品并提供 Desktop 与 Backend 的官方版本下载，移动 App 暂缓发布。Node.js 只托管网页；面板中的每个浏览器通过 REST 和 WebSocket 直连各自的 `todex-agentd`。
+根路径 `/` 为 TodeX 官网，原有无状态 Web 面板位于 `/app`。官网介绍产品，提供 Desktop 官方安装包下载与 Backend 一键安装命令，移动 App 暂缓发布。Node.js 只托管网页；面板中的每个浏览器通过 REST 和 WebSocket 直连各自的 `todex-agentd`。
 
 ## 环境要求
 
@@ -102,7 +102,7 @@ docker buildx build \
 
 官网内容来自各项目 README。版本和平台选择由 Node 服务的 `GET /api/releases` 实时返回 GitHub Releases 数据（内存缓存 10 分钟；刷新失败时回退到最近一次成功的清单并标记 `stale`）。服务需要访问公开 GitHub API，可通过 `GITHUB_TOKEN` 提高速率上限，官网访客不会请求 GitHub API。
 
-Desktop 和 Backend 的版本独立选择，下载链接直达 GitHub 官方文件，同时提供版本说明和 SHA256 校验文件。未发布的架构不显示下载入口，移动端仅显示暂缓发布状态。云空图片和生成提示词见[官网资源说明](docs/website-assets.md)。
+下载区只为 Desktop 提供安装包：可选版本，下载链接直达 GitHub 官方文件，同时提供版本说明和 SHA256 校验文件。Backend 改为 TodeX_backend 的一行 `install.sh` 安装命令（macOS / Linux / WSL），不依赖下载清单；Windows 下额外提供最新 release 的原生版本链接。未发布的架构不显示下载入口，移动端仅显示暂缓发布状态。云空图片和生成提示词见[官网资源说明](docs/website-assets.md)。
 
 公开部署应在可信反向代理终止 TLS。HTTPS 页面连接非 loopback Backend 时必须使用 HTTPS/WSS；Backend 还需允许站点来源的 CORS，并按网络位置配置浏览器 Private Network Access。
 
