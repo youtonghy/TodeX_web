@@ -35,6 +35,8 @@ CI 打包时应通过 `TODEX_BUILD_VERSION` 传入正式版本。开发构建显
 
 官网开发地址为 `http://127.0.0.1:5173`，面板地址为 `http://127.0.0.1:5173/app`。官网和面板独立加载，访问官网不会初始化面板或连接 Backend。同一 origin 下已有的 `todex.web.*` 浏览器数据继续可用，无需迁移；`/app/` 和 `/app/*` 子路径也支持直接访问和刷新。
 
+官网的工作台预览内嵌 `/demo`：由真实的侧栏、对话与工作台面板，基于内存中的示例数据回放一段脚本化演示（新建工作区 → 新建对话 → 发送消息 → 收到回答）。演示不会连接 Backend，也不会写入 `todex.web.*` 存储；滚出视口时自动暂停，开启“减少动态效果”时直接展示完成状态。脚本与示例数据位于 `src/renderer/demo/`。为此 CSP 仅允许同源嵌入（`frame-ancestors 'self'`）。
+
 生产服务提供网页、`GET /healthz` 和下载清单 `GET /api/releases`，不包含 Backend 代理、用户数据库或服务端会话。运行期只需 `HOST` 和 `PORT`；`GITHUB_TOKEN` 为可选项，仅用于提高 `/api/releases` 查询 GitHub API 的速率上限。
 
 ### Docker 部署

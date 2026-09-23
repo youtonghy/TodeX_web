@@ -62,6 +62,9 @@ describe('Node static server', () => {
       expect(await page.text()).toContain('TodeX Test');
       expect(page.headers.get('content-security-policy')).toContain("script-src 'self'");
       expect(page.headers.get('content-security-policy')).not.toContain('upgrade-insecure-requests');
+      // Only the landing page may frame the /demo workbench.
+      expect(page.headers.get('content-security-policy')).toContain("frame-ancestors 'self'");
+      expect(page.headers.get('x-frame-options')).toBe('SAMEORIGIN');
 
       const api = await fetch(`${origin}/api/connections`);
       expect(api.status).toBe(404);

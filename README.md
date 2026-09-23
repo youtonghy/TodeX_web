@@ -40,6 +40,14 @@ workbench bridge or connect to a Backend. Existing `todex.web.*` browser data st
 available at `/app` on the same origin; no data migration is required. `/app/` and
 nested `/app/*` URLs also load the workbench, including on direct visits and refresh.
 
+The website's workbench preview embeds `/demo`: the real sidebar, chat and workbench
+panels replaying a scripted walkthrough (new workspace → new conversation → send a
+message → receive the answer) from in-memory sample data. It never connects to a
+Backend or writes `todex.web.*` storage, pauses while scrolled out of view, and shows
+the finished state without animation under `prefers-reduced-motion`. The script and
+sample data live in `src/renderer/demo/`. The CSP allows same-origin framing
+(`frame-ancestors 'self'`) for this embed only.
+
 ## Website downloads
 
 The version and platform selectors are served by `GET /api/releases`, which the

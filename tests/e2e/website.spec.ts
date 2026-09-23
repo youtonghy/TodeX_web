@@ -21,6 +21,32 @@ test('keeps the public website independent of the workbench and opens /app', asy
   await expect(page.getByText('选择一个对话', { exact: true })).toBeVisible();
 });
 
+test.describe('live workbench demo', () => {
+  test('embeds the real workbench with sample data and leaves saved workbench state alone', async ({ page }) => {
+    await stubReleaseCatalog(page);
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.goto('/');
+    await page.getByRole('img', { name: /TodeX 工作台实时演示/ }).scrollIntoViewIfNeeded();
+    const demo = page.frameLocator('.preview-stage iframe');
+    // Reduced motion skips the animation and settles on the answered conversation.
+    await expect(demo.getByText('天气仪表盘已经就绪', { exact: false })).toBeVisible();
+    await expect(demo.getByText('做一个天气仪表盘：顶部显示当前天气，下面是未来 7 天的预报。')).toBeVisible();
+    expect(await page.evaluate(() => Object.keys(localStorage).filter((key) => key.startsWith('todex.web.')))).toEqual([]);
+    expect(await page.evaluate(() => document.activeElement === document.body)).toBe(true);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  });
+});
+
+test('plays the workspace → conversation → message → answer walkthrough', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop', 'The full animation is viewport-independent; run it once.');
+  test.setTimeout(90_000);
+  await page.goto('/demo?lang=en');
+  await expect(page.getByRole('heading', { name: 'New workspace' })).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByRole('textbox', { name: 'Name' })).toHaveValue('weather-app');
+  await expect(page.getByText('Build a weather dashboard: current conditions on top, a 7-day forecast below.').last()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText('Your weather dashboard is ready:')).toBeVisible({ timeout: 45_000 });
+});
+
 test('offers the published platform assets and historical backend versions', async ({ page }) => {
   await stubReleaseCatalog(page);
   await page.goto('/#downloads');

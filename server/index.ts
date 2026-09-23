@@ -34,7 +34,8 @@ export function createApp(options: WebServerOptions = {}): Express {
         objectSrc: ["'none'"],
         baseUri: ["'self'"],
         formAction: ["'self'"],
-        frameAncestors: ["'none'"],
+        // The landing page embeds the /demo workbench; other origins still cannot frame us.
+        frameAncestors: ["'self'"],
         upgradeInsecureRequests: null,
       },
     },

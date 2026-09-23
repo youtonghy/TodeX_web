@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Button } from '@heroui/react';
 import { buttonVariants } from '@heroui/styles';
-import { RiAddLine, RiArrowDownLine, RiArrowRightLine, RiArrowRightUpLine, RiCheckLine, RiCloseLine, RiCodeSSlashLine, RiCommandLine, RiComputerLine, RiFileCopyLine, RiFileTextLine, RiFolder3Line, RiGitBranchLine, RiGithubLine, RiGlobalLine, RiMenuLine, RiMoreLine, RiServerLine, RiShieldCheckLine, RiTerminalBoxLine } from '@remixicon/react';
+import { RiArrowDownLine, RiArrowRightLine, RiArrowRightUpLine, RiCheckLine, RiCloseLine, RiCodeSSlashLine, RiCommandLine, RiComputerLine, RiFileCopyLine, RiGitBranchLine, RiGithubLine, RiGlobalLine, RiMenuLine, RiServerLine, RiShieldCheckLine, RiTerminalBoxLine } from '@remixicon/react';
 import { ProviderIcon } from '../components/ProviderIcon';
 import { useLocale, useT } from '../i18n';
 import brand from '../assets/brand/t-icon-light.png';
+import { DEMO_PATH, type DemoPlaybackMessage } from '../demo/playback';
 import { Downloads } from './Downloads';
 import { LanguageSwitcher } from './LanguageSwitcher';
 
@@ -33,14 +34,49 @@ function Navigation() {
   </header>;
 }
 
+// The preview is the real workbench (/demo) replaying a scripted session.
+// It renders at desktop size and is scaled down so the three panes keep
+// their real proportions at any page width.
+function demoFrameSize(containerWidth: number) {
+  return containerWidth < 640 ? { width: 900, height: 1000 } : { width: Math.max(containerWidth, 1440), height: 880 };
+}
+
+function DemoFrame({ width }: { width: number }) {
+  const locale = useLocale();
+  const frameRef = useRef<HTMLIFrameElement>(null);
+  const [loaded, setLoaded] = useState(false);
+  useEffect(() => {
+    const frame = frameRef.current;
+    if (!frame || !loaded) return;
+    const observer = new IntersectionObserver(([entry]) => {
+      const message: DemoPlaybackMessage = { type: 'todex-demo-playback', playing: entry.isIntersecting };
+      frame.contentWindow?.postMessage(message, window.location.origin);
+    });
+    observer.observe(frame);
+    return () => observer.disconnect();
+  }, [loaded]);
+  const size = demoFrameSize(width);
+  const scale = width / size.width;
+  return <iframe ref={frameRef} src={`${DEMO_PATH}?lang=${locale}`} title="TodeX" loading="lazy" inert className={loaded ? 'is-loaded' : undefined} onLoad={() => setLoaded(true)} style={{ width: size.width, height: size.height, transform: `scale(${scale})` }} />;
+}
+
 function WorkbenchPreview() {
   const t = useT();
-  return <div className="workbench-preview" role="img" aria-label={t('site.preview.ariaLabel')}>
+  const locale = useLocale();
+  const stageRef = useRef<HTMLDivElement>(null);
+  const [width, setWidth] = useState(0);
+  useEffect(() => {
+    const stage = stageRef.current;
+    if (!stage) return;
+    const observer = new ResizeObserver(([entry]) => setWidth(Math.round(entry.contentRect.width)));
+    observer.observe(stage);
+    return () => observer.disconnect();
+  }, []);
+  const size = demoFrameSize(width);
+  return <div className="workbench-preview">
     <div className="preview-titlebar"><div className="window-dots"><i /><i /><i /></div><span><img src={brand} alt="" /> TodeX <span className="preview-title-slash">/</span> your next big idea</span><span className="preview-demo-label">{t('site.preview.demoLabel')}</span></div>
-    <div className="preview-content">
-      <aside className="preview-sidebar"><div className="preview-sidebar-heading">{t('site.preview.workspace')} <RiAddLine size={14} /></div><div className="preview-project"><RiFolder3Line size={17} /> my-next-project <RiMoreLine size={14} /></div><div className="preview-thread active"><span className="thread-dot" />{t('site.preview.thread1')}</div><div className="preview-thread"><span className="thread-dot muted" />{t('site.preview.thread2')}</div><div className="preview-thread"><span className="thread-dot muted" />{t('site.preview.thread3')}</div><div className="preview-sidebar-heading recent-heading">{t('site.preview.agents')}</div>{[{ id: 'codex', label: 'Codex' }, { id: 'claude', label: 'Claude Code' }, { id: 'pi', label: 'Pi' }].map((provider) => <div className="preview-provider" key={provider.id}><ProviderIcon provider={provider.id} className="size-4" />{provider.label}<i /></div>)}<div className="preview-connection"><span /> {t('site.preview.backend')} <RiShieldCheckLine size={13} /></div></aside>
-      <div className="preview-chat"><div className="preview-chat-heading"><span>{t('site.preview.thread1')} <span className="preview-model-label">Codex</span></span><RiMoreLine size={18} /></div><div className="preview-chat-body"><div className="preview-user-message">{t('site.preview.userMessage')}</div><div className="preview-agent-heading"><ProviderIcon provider="codex" className="size-5" /><strong>Codex</strong><span>{t('site.preview.agentRole')}</span></div><p>{t('site.preview.agentIntro1')}<br />{t('site.preview.agentIntro2')}</p><div className="preview-tool"><RiCheckLine size={14} /><span>{t('site.preview.tool1')}</span><span className="mono">3 files</span></div><div className="preview-tool"><RiCheckLine size={14} /><span>{t('site.preview.tool2')}</span><span className="mono">+128 −16</span></div><p className="preview-finish">{t('site.preview.finish')}</p></div><div className="preview-composer"><span>{t('site.preview.composer')}</span><div><span><RiAddLine size={15} /><span>Codex</span><span className="preview-reasoning">{t('site.preview.reasoning')}</span></span><span className="preview-send"><RiArrowRightLine size={14} /></span></div></div></div>
-      <aside className="preview-workbench"><div className="preview-workbench-tabs"><span className="active"><RiGitBranchLine size={13} /> {t('site.preview.tabChanges')}</span><span><RiTerminalBoxLine size={13} /> {t('site.preview.tabTerminal')}</span></div><div className="preview-file"><RiFileTextLine size={14} /> src / App.tsx <span>+24 −8</span></div><div className="preview-code"><div><span>01</span> <em>export default</em> function App() {'{'}</div><div><span>02</span> &nbsp; return (</div><div className="added"><span>03</span> + &nbsp; &lt;YourNextIdea</div><div className="added"><span>04</span> + &nbsp; &nbsp; possibilities="endless"</div><div className="added"><span>05</span> + &nbsp; &nbsp; workspace="anywhere"</div><div className="added"><span>06</span> + &nbsp; /&gt;</div><div><span>07</span> &nbsp; );</div><div><span>08</span> {'}'}</div></div><div className="preview-terminal"><span><RiTerminalBoxLine size={13} /> TERMINAL</span><p><b>❯</b> pnpm dev</p><p className="terminal-success">✓ Ready. Let's build something.</p><p>Local: &nbsp; http://localhost:5173/</p></div></aside>
+    <div ref={stageRef} className="preview-stage" role="img" aria-label={t('site.preview.ariaLabel')} style={width ? { height: Math.round(size.height * width / size.width) } : undefined}>
+      {width ? <DemoFrame key={locale} width={width} /> : null}
     </div>
   </div>;
 }
