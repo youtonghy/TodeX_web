@@ -7261,7 +7261,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       }
 
       if (lower === 'subagents') {
-        openSlashCommandActionPage(workspace, conversation, '/subagents');
+        openPanel('Subagents', { conversationId: conversation.id });
         return;
       }
 
