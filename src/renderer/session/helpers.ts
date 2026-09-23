@@ -39,7 +39,6 @@ export function buildConversationControlMessage(
 import { providerDisplayName } from '@todex/protocol/v2';
 import {
   buildConversationRenderItems as sharedBuildConversationRenderItems,
-  classifyV2ConversationEvent as sharedClassifyV2ConversationEvent,
   executionGroupId as sharedExecutionGroupId,
   isCollapsibleProgressEntry as sharedIsCollapsibleProgressEntry,
   isStepProgressEntry as sharedIsStepProgressEntry,
@@ -1165,23 +1164,6 @@ export type TimelineEntry = {
   detailStub?: boolean;
 };
 
-export function parseToolCallState(raw: string, fallbackId: string): import('@todex/protocol/v2').ToolCallState {
-  let value: Record<string, unknown> = {};
-  try { value = JSON.parse(raw) as Record<string, unknown>; } catch { /* legacy text event */ }
-  const args = value.arguments ?? value.args ?? value.input;
-  const result = value.result ?? value.output;
-  const status = String(value.status ?? value.phase ?? 'running');
-  const normalizedStatus = (status === 'awaiting_approval' ? 'awaitingApproval' : status) as import('@todex/protocol/v2').ToolCallStatus;
-  return {
-    callId: String(value.callId ?? value.toolCallId ?? fallbackId), name: String(value.toolName ?? value.name ?? value.tool ?? t('chat.toolCall')),
-    argumentsText: typeof args === 'string' ? args : args === undefined ? raw : JSON.stringify(args, null, 2), argumentsJson: typeof args === 'string' ? undefined : args,
-    resultText: typeof result === 'string' ? result : result === undefined ? undefined : JSON.stringify(result, null, 2), resultJson: typeof result === 'string' ? undefined : result,
-    stdout: typeof value.stdout === 'string' ? value.stdout : undefined, stderr: typeof value.stderr === 'string' ? value.stderr : undefined,
-    status: normalizedStatus, error: typeof value.error === 'string' ? value.error : undefined,
-    completionReason: typeof value.completionReason === 'string' ? value.completionReason as import('@todex/protocol/v2').AgentCompletionReason : undefined,
-  };
-}
-
 export function workspaceDisplayName(workspace: Pick<WorkspaceRecord, 'name' | 'path'>): string {
   const name = workspace.name.trim();
   if (name && !/[\\/]/.test(name)) {
@@ -1247,86 +1229,6 @@ export type UsageRecord = import('@todex/protocol/mobileParity').UsageRecord;
 
 export function normalizeUsageRecords(value: unknown): UsageRecord[] {
   return normalizeSharedUsageRecords(value, { limit: MAX_USAGE_RECORDS });
-}
-
-function usageNumber(value: unknown): number {
-  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : 0;
-}
-
-export function contextUsageFromV2Event(event: ConversationEvent): ConversationContextUsage | null {
-  const payload = event.payload && typeof event.payload === 'object' && !Array.isArray(event.payload)
-    ? event.payload as Record<string, unknown>
-    : {};
-  const metadata = payload.metadata && typeof payload.metadata === 'object' && !Array.isArray(payload.metadata)
-    ? payload.metadata as Record<string, unknown>
-    : {};
-  const tokenUsage = metadata.tokenUsage && typeof metadata.tokenUsage === 'object' && !Array.isArray(metadata.tokenUsage)
-    ? metadata.tokenUsage as Record<string, unknown>
-    : null;
-  const last = tokenUsage?.last && typeof tokenUsage.last === 'object' && !Array.isArray(tokenUsage.last)
-    ? tokenUsage.last as Record<string, unknown>
-    : null;
-
-  const normalizedUsage = payload.usage && typeof payload.usage === 'object' && !Array.isArray(payload.usage)
-    ? payload.usage as Record<string, unknown>
-    : null;
-  const normalizedLast = normalizedUsage?.last && typeof normalizedUsage.last === 'object' && !Array.isArray(normalizedUsage.last)
-    ? normalizedUsage.last as Record<string, unknown>
-    : null;
-
-  if (event.type === 'usage.updated' && normalizedLast) {
-    const inputTokens = usageNumber(normalizedLast.input);
-    const outputTokens = usageNumber(normalizedLast.output);
-    const cachedInputTokens = usageNumber(normalizedLast.cacheRead);
-    const cacheWriteTokens = usageNumber(normalizedLast.cacheWrite);
-    const nativeTotal = usageNumber(normalizedLast.total);
-    return {
-      usedTokens: nativeTotal || inputTokens + outputTokens + cachedInputTokens + cacheWriteTokens,
-      contextWindow: usageNumber(payload.contextWindow) || undefined,
-      inputTokens,
-      outputTokens,
-      cachedInputTokens,
-      cacheWriteTokens,
-      model: typeof payload.model === 'string' ? payload.model : undefined,
-      updatedAt: Date.parse(event.time) || Date.now(),
-    };
-  }
-
-  if (payload.providerMethod === 'thread/tokenUsage/updated' && last) {
-    return {
-      usedTokens: usageNumber(last.totalTokens),
-      contextWindow: usageNumber(tokenUsage?.modelContextWindow) || undefined,
-      inputTokens: usageNumber(last.inputTokens),
-      outputTokens: usageNumber(last.outputTokens),
-      cachedInputTokens: usageNumber(last.cachedInputTokens),
-      cacheWriteTokens: usageNumber(last.cacheWriteInputTokens),
-      updatedAt: Date.parse(event.time) || Date.now(),
-    };
-  }
-
-  const message = payload.message && typeof payload.message === 'object' && !Array.isArray(payload.message)
-    ? payload.message as Record<string, unknown>
-    : null;
-  const usage = message?.usage && typeof message.usage === 'object' && !Array.isArray(message.usage)
-    ? message.usage as Record<string, unknown>
-    : null;
-  if (event.type !== 'message.completed' || message?.role !== 'assistant' || !usage) {
-    return null;
-  }
-  const inputTokens = usageNumber(usage.input);
-  const outputTokens = usageNumber(usage.output);
-  const cachedInputTokens = usageNumber(usage.cacheRead);
-  const cacheWriteTokens = usageNumber(usage.cacheWrite);
-  const nativeTotal = usageNumber(usage.totalTokens);
-  return {
-    usedTokens: nativeTotal || inputTokens + outputTokens + cachedInputTokens + cacheWriteTokens,
-    inputTokens,
-    outputTokens,
-    cachedInputTokens,
-    cacheWriteTokens,
-    model: typeof message.model === 'string' ? message.model : undefined,
-    updatedAt: Date.parse(event.time) || Date.now(),
-  };
 }
 
 export type ConversationRenderItem =
@@ -2257,15 +2159,6 @@ export function mergeManifestConversations(
     return current;
   }
   return next.sort((left, right) => (right.updatedAt - left.updatedAt) || (left.id < right.id ? -1 : 1));
-}
-
-export function classifyV2ConversationEvent(
-  event: ConversationEvent,
-  workspaceId: string,
-  activeTurnId = '',
-): TimelineEntry | null {
-  const entry = sharedClassifyV2ConversationEvent(event, workspaceId, activeTurnId);
-  return entry ? { ...entry, raw: entry.category ? '' : shortJson(event), sequence: event.sequence } : null;
 }
 
 export function shouldAppendV2ConversationEvent(event: ConversationEvent): boolean {
