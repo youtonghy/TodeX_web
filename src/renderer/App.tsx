@@ -334,7 +334,8 @@ export function App() {
                       ) : null}
                     </span>
                   ) : null}
-                  <Button isIconOnly size="sm" variant="ghost" aria-label={asideOpen ? t('app.closeAside') : t('app.openAside')} aria-expanded={asideOpen} onPress={() => persistAsideOpen(!asideOpen)}>
+                  {/* The workbench is scoped to a workspace/conversation; before one exists there is nothing to open. */}
+                  <Button isIconOnly size="sm" variant="ghost" isDisabled={!scopeKey} aria-label={asideOpen ? t('app.closeAside') : t('app.openAside')} aria-expanded={Boolean(scopeKey) && asideOpen} onPress={() => persistAsideOpen(!asideOpen)}>
                     <RiLayoutRightLine className="size-4" />
                   </Button>
                 </Navbar.Content>

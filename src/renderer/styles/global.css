@@ -867,6 +867,20 @@ body {
 }
 
 @container (max-width: 34rem) {
+  /* The start controls keep fixed widths; when the end group grows (Stop while
+     running) they scroll instead of sliding under it. Padding keeps focus
+     rings inside the scroll box. */
+  .composer-toolbar [data-slot="prompt-input-toolbar-start"] {
+    overflow-x: auto;
+    scrollbar-width: none;
+    padding-block: 2px;
+    margin-block: -2px;
+  }
+
+  .composer-toolbar [data-slot="prompt-input-toolbar-start"]::-webkit-scrollbar {
+    display: none;
+  }
+
   .composer-control {
     width: 2.25rem;
     min-width: 2.25rem;

@@ -1,7 +1,7 @@
 import { RiPushpin2Fill, RiAddLine, RiPencilLine, RiEdit2Line, RiErrorWarningLine, RiGitBranchLine, RiDeleteBinLine, RiArrowDownSLine, RiBarChartBoxLine, RiFolder3Line, RiInformationLine, RiKanbanView2, RiPriceTag3Line, RiPuzzle2Line, RiSettings3Line, RiTerminalBoxLine, RiUserSettingsLine } from '@remixicon/react';
 import { Badge, Button, Chip, ColorSwatchPicker, Dropdown, Label, Tooltip } from '@heroui/react';
 import { useEffect, useMemo, useState } from 'react';
-import type { DragEvent, MouseEvent } from 'react';
+import type { DragEvent, MouseEvent, ReactNode } from 'react';
 import { ContextMenu as HeroContextMenu, ChatListView, Sidebar, useSidebar } from '@heroui-pro/react';
 import { useSidebarPins } from '../session/useSidebarPins';
 import { useKanbanTasks } from '../session/kanbanTasks';
@@ -27,6 +27,11 @@ type Props = {
 };
 
 type ContextMenu = { kind: 'workspace' | 'conversation'; id: string; x: number; y: number } | null;
+
+/** AppLayout hides the inline sidebar on phones; there the same content lives in the sheet the menu toggle opens. */
+function SidebarShell({ isMobile, children }: { isMobile: boolean; children: ReactNode }) {
+  return isMobile ? <Sidebar.Mobile>{children}</Sidebar.Mobile> : <Sidebar>{children}</Sidebar>;
+}
 
 export function AppSidebar({
   session,
@@ -215,11 +220,11 @@ export function AppSidebar({
   // Cached data renders immediately; the directory sync only blocks an
   // entirely empty sidebar (first run or cleared storage).
   if (session.directorySyncStatus === 'loading' && session.workspaces.length === 0) {
-    return <Sidebar><Sidebar.Content><p className="text-muted px-3 py-4 text-sm">{t('sidebar.syncing')}</p></Sidebar.Content></Sidebar>;
+    return <SidebarShell isMobile={isMobile}><Sidebar.Content><p className="text-muted px-3 py-4 text-sm">{t('sidebar.syncing')}</p></Sidebar.Content></SidebarShell>;
   }
 
   return (
-    <Sidebar>
+    <SidebarShell isMobile={isMobile}>
       <Sidebar.Header>
         <Dropdown>
           <Dropdown.Trigger
@@ -263,7 +268,10 @@ export function AppSidebar({
           className="connection-create-button mt-1 w-full justify-start"
           variant="secondary"
           isDisabled={!session.activeWorkspaceId}
-          onPress={onCreateConversation}
+          onPress={() => {
+            onCreateConversation();
+            if (isMobile) setMobileOpen(false);
+          }}
         >
           <RiAddLine className="size-4" />
           <span data-sidebar="label">{t('sidebar.newConversation')}</span>
@@ -465,6 +473,7 @@ export function AppSidebar({
                     const conversation = workspaceConversations.find((item) => item.id === String(key));
                     if (conversation) {
                       session.selectConversation(conversation.workspaceId, conversation.id);
+                      if (isMobile) setMobileOpen(false);
                     }
                   }}
                 >
@@ -603,6 +612,6 @@ export function AppSidebar({
           </div>
         </HeroContextMenu>
       ) : null}
-    </Sidebar>
+    </SidebarShell>
   );
 }

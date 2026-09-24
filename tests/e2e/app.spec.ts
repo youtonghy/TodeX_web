@@ -12,11 +12,8 @@ test('renders the responsive three-pane workbench without horizontal overflow', 
     await expect(page.getByRole('dialog').getByText('TodeX', { exact: true })).toBeVisible();
     await page.keyboard.press('Escape');
   }
-  if (viewport && viewport.width <= 1024) {
-    await page.getByRole('button', { name: '打开工作台' }).click();
-    await expect(page.getByRole('dialog').getByText(/等待连接到 todex-agentd/)).toBeVisible();
-    await page.keyboard.press('Escape');
-  }
+  // Without a workspace there is no workbench scope, so the aside toggle stays disabled.
+  await expect(page.getByRole('button', { name: '打开右侧面板' })).toBeDisabled();
 
   await page.screenshot({ path: testInfo.outputPath(`${testInfo.project.name}.png`), fullPage: true });
 });
