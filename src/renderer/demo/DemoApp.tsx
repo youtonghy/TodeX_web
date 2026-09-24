@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { Dispatch, SetStateAction } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { Dispatch, RefObject, SetStateAction } from 'react';
 import { Button, Chip, Label, ListBox, Modal, Select } from '@heroui/react';
-import { AppLayout, Navbar } from '@heroui-pro/react';
+import { AppLayout, Navbar, useSidebar } from '@heroui-pro/react';
 import { RiAddLine, RiGithubLine, RiLayoutLeftLine, RiLayoutRightLine, RiShieldLine } from '@remixicon/react';
 import { providerDisplayName } from '@todex/protocol/v2';
 import { AppSidebar } from '../components/AppSidebar';
@@ -26,8 +26,21 @@ type CursorState = { x: number; y: number; visible: boolean; pressed: boolean };
 
 class DemoAborted extends Error {}
 
+type SidebarControl = Pick<ReturnType<typeof useSidebar>, 'isMobile' | 'setMobileOpen'>;
+
+/** Hands AppLayout's sidebar state to the script, which lives outside the layout. */
+function SidebarBridge({ controlRef }: { controlRef: RefObject<SidebarControl | null> }) {
+  const { isMobile, setMobileOpen } = useSidebar();
+  useEffect(() => {
+    controlRef.current = { isMobile, setMobileOpen };
+  }, [controlRef, isMobile, setMobileOpen]);
+  return null;
+}
+
 function targetElement(target: DemoTarget): Element | null {
   switch (target) {
+    case 'menu':
+      return [...document.querySelectorAll('button[aria-label]')].find((element) => element.getAttribute('aria-label') === t('app.openSidebar')) ?? null;
     case 'new-workspace':
       return [...document.querySelectorAll('button[aria-label]')].find((element) => element.getAttribute('aria-label') === t('sidebar.newWorkspace')) ?? null;
     case 'new-conversation':
@@ -48,7 +61,7 @@ function targetPoint(target: DemoTarget): { x: number; y: number } | null {
 }
 
 /** Drives the scripted walkthrough, pausing while the host page hides the frame. */
-function useDemoPlayback(setState: Dispatch<SetStateAction<DemoState>>, setCursor: Dispatch<SetStateAction<CursorState>>) {
+function useDemoPlayback(setState: Dispatch<SetStateAction<DemoState>>, setCursor: Dispatch<SetStateAction<CursorState>>, sidebarRef: RefObject<SidebarControl | null>) {
   useEffect(() => {
     const controller = new AbortController();
     // Reduced motion renders the finished walkthrough once, without the pointer.
@@ -69,24 +82,40 @@ function useDemoPlayback(setState: Dispatch<SetStateAction<DemoState>>, setCurso
         if (hostVisible && document.visibilityState === 'visible') remaining -= slice;
       } while (remaining > 0);
     };
+    const point = async (target: DemoTarget) => {
+      if (instant) return;
+      const next = targetPoint(target);
+      if (next) setCursor({ ...next, visible: true, pressed: false });
+      await wait(800);
+    };
+    const click = async () => {
+      if (instant) return;
+      setCursor((cursor) => ({ ...cursor, pressed: true }));
+      await wait(180);
+      setCursor((cursor) => ({ ...cursor, pressed: false }));
+      await wait(160);
+    };
     const context: DemoScriptContext = {
       update: setState,
       wait,
       now: Date.now,
-      point: async (target) => {
-        if (instant) return;
-        const point = targetPoint(target);
-        if (point) setCursor({ ...point, visible: true, pressed: false });
-        await wait(800);
-      },
-      click: async () => {
-        if (instant) return;
-        setCursor((cursor) => ({ ...cursor, pressed: true }));
-        await wait(180);
-        setCursor((cursor) => ({ ...cursor, pressed: false }));
-        await wait(160);
-      },
+      point,
+      click,
       hideCursor: () => setCursor((cursor) => ({ ...cursor, visible: false })),
+      revealSidebar: async () => {
+        const sidebar = sidebarRef.current;
+        if (!sidebar?.isMobile) return;
+        await point('menu');
+        await click();
+        sidebar.setMobileOpen(true);
+        await wait(600);
+      },
+      hideSidebar: async () => {
+        const sidebar = sidebarRef.current;
+        if (!sidebar?.isMobile) return;
+        sidebar.setMobileOpen(false);
+        await wait(500);
+      },
     };
 
     void (async () => {
@@ -103,7 +132,7 @@ function useDemoPlayback(setState: Dispatch<SetStateAction<DemoState>>, setCurso
       controller.abort();
       window.removeEventListener('message', onMessage);
     };
-  }, [setCursor, setState]);
+  }, [setCursor, setState, sidebarRef]);
 }
 
 function diffStats(diff: string) {
@@ -127,14 +156,15 @@ function DemoHeaderDetails({ session }: { session: TodeXSession }) {
   };
   return (
     <div className="relative flex min-w-0 flex-1 items-center gap-3 overflow-hidden">
-      <span className="max-w-64 shrink-0 truncate text-sm font-medium">{conversation?.title ?? t('app.conversation')}</span>
+      <span className="min-w-0 max-w-64 truncate text-sm font-medium sm:shrink-0">{conversation?.title ?? t('app.conversation')}</span>
       {conversation ? (
         <Chip size="sm" variant="soft" className="shrink-0 whitespace-nowrap">
           <ProviderIcon provider={conversation.provider} />
           {providerDisplayName(conversation.provider || '', 'Agent')}
         </Chip>
       ) : null}
-      <GitStatusDisplay state={git} onOpenGit={noop} wrap={false} />
+      {/* Phones leave no room for the Git summary; the real header folds it into a popover there. */}
+      <div className="hidden min-w-0 sm:block"><GitStatusDisplay state={git} onOpenGit={noop} wrap={false} /></div>
     </div>
   );
 }
@@ -193,7 +223,8 @@ export function DemoApp() {
   const [backend] = useState(() => demoBackend(Date.now()));
   const [cursor, setCursor] = useState<CursorState>({ x: -40, y: -40, visible: false, pressed: false });
   const session = useMemo(() => buildDemoSession(state, backend), [state, backend]);
-  useDemoPlayback(setState, setCursor);
+  const sidebarRef = useRef<SidebarControl | null>(null);
+  useDemoPlayback(setState, setCursor, sidebarRef);
   const changeWorkbenchTab = useCallback((tab: WorkbenchTab) => setState((current) => current.workbenchTab === tab ? current : { ...current, workbenchTab: tab }), []);
   const scopeKey = state.activeConversationId || state.activeWorkspaceId;
 
@@ -237,7 +268,11 @@ export function DemoApp() {
         navbar={
           <Navbar maxWidth="full">
             <Navbar.Header className="flex-nowrap gap-2 px-3 sm:px-6 [&>button]:shrink-0">
-              <Button isIconOnly size="sm" variant="ghost" aria-label={t('app.collapseSidebar')}>
+              <SidebarBridge controlRef={sidebarRef} />
+              <AppLayout.MenuToggle className="inline-flex min-[769px]:hidden" aria-label={t('app.openSidebar')}>
+                <RiLayoutLeftLine className="size-4" />
+              </AppLayout.MenuToggle>
+              <Button className="hidden min-[769px]:inline-flex" isIconOnly size="sm" variant="ghost" aria-label={t('app.collapseSidebar')}>
                 <RiLayoutLeftLine className="size-4" />
               </Button>
               <DemoHeaderDetails session={session} />

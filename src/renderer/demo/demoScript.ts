@@ -26,7 +26,7 @@ import {
 } from './demoState';
 
 /** Elements the pointer visits; DemoApp resolves them to on-screen rects. */
-export type DemoTarget = 'new-workspace' | 'workspace-name' | 'create-workspace' | 'new-conversation' | 'composer';
+export type DemoTarget = 'menu' | 'new-workspace' | 'workspace-name' | 'create-workspace' | 'new-conversation' | 'composer';
 
 export type DemoScriptContext = {
   update: (next: (state: DemoState) => DemoState) => void;
@@ -35,6 +35,9 @@ export type DemoScriptContext = {
   point: (target: DemoTarget) => Promise<void>;
   click: () => Promise<void>;
   hideCursor: () => void;
+  /** Phone layouts keep the sidebar in a sheet; these open and close it (no-ops on desktop). */
+  revealSidebar: () => Promise<void>;
+  hideSidebar: () => Promise<void>;
   now: () => number;
 };
 
@@ -66,6 +69,7 @@ export async function playDemoOnce(ctx: DemoScriptContext): Promise<void> {
   await ctx.wait(2200);
 
   // 1. New workspace
+  await ctx.revealSidebar();
   await ctx.point('new-workspace');
   await ctx.click();
   ctx.update((state) => openWorkspaceModal(state, '~/code/'));
@@ -83,6 +87,7 @@ export async function playDemoOnce(ctx: DemoScriptContext): Promise<void> {
   await ctx.click();
   ctx.update((state) => createDemoConversation(state, ctx.now()));
   await ctx.wait(700);
+  await ctx.hideSidebar();
 
   // 3. Send a message
   await ctx.point('composer');

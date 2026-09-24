@@ -137,3 +137,24 @@ button, a { -webkit-tap-highlight-color: transparent; }
   .website *, .website *::before, .website *::after { animation: none !important; transition-duration: 0ms !important; }
   .provider-marquee { mask-image: none; }.provider-track { width: auto; }.provider-group { flex: 1; flex-wrap: wrap; justify-content: center; row-gap: 20px; padding-inline-end: 0; }.provider-group[aria-hidden] { display: none; }
 }
+/* Phones: the decorative mono labels above are sized for wide screens and drop
+   to 6-8px here; keep them legible and give every tap target ~40px or more. */
+@media (max-width: 600px) {
+  .hero-badge, .hero-footnotes, .hero-footnotes a { font-size: 11px; }
+  .preview-titlebar { height: 36px; }.preview-titlebar > span { font-size: 11px; gap: 6px; }.preview-titlebar .preview-demo-label { font-size: 10px; }.preview-title-slash, .preview-title-project { display: none; }
+  .preview-caption > span, .providers > p { font-size: 10px; }
+  .eyebrow, .how-intro .eyebrow, .privacy-tag, .download-card-top > .mono, .feature-number, .download-extras > span, .coming-soon, .tool-key, .tool-diff { font-size: 10px; }
+  .connection-backend small { font-size: 11px; }
+  .step-note, .release-status { font-size: 12px; }
+  .closing-coordinate { display: none; }
+  .footer-top > div:first-child > p > span, .footer-links > div > span:first-child { font-size: 10px; }
+  .footer-bottom, .footer-bottom a, .footer-mobile-status, .footer-license { font-size: 11px; }
+  .mobile-menu-button { min-width: 40px; width: 40px; height: 40px; }
+  .site-nav .language-select button, .site-nav .language-select [data-slot="select-trigger"] { min-height: 40px; height: 40px; width: 40px; }
+  .setup-command button { width: 40px; height: 40px; min-width: 40px; }
+  .platform-button { height: 44px; }
+  .release-select [data-slot="select-trigger"], .release-select button { min-height: 40px; height: 40px; }
+  .hero-footnotes a, .feature-copy a, .text-link, .download-card-footer a, .browser-alternative a, .footer-links > div > a, .footer-bottom a { display: inline-flex; align-items: center; min-height: 40px; }
+  .feature-copy a, .text-link { margin-top: 8px; }
+  .footer-links > div { gap: 0; }
+}

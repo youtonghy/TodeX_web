@@ -16,6 +16,8 @@ async function runOnce() {
     point: async (target) => { pointed.push(target); },
     click: async () => {},
     hideCursor: () => {},
+    revealSidebar: async () => {},
+    hideSidebar: async () => {},
     now: () => 1_000,
   };
   await playDemoOnce(context);

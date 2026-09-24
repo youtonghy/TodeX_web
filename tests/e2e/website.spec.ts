@@ -38,9 +38,13 @@ test.describe('live workbench demo', () => {
 });
 
 test('plays the workspace → conversation → message → answer walkthrough', async ({ page }, testInfo) => {
-  test.skip(testInfo.project.name !== 'desktop', 'The full animation is viewport-independent; run it once.');
+  // Desktop and phone layouts take different paths (inline sidebar vs. sheet); tablet adds nothing new.
+  test.skip(testInfo.project.name === 'tablet', 'Covered by the desktop and mobile layouts.');
   test.setTimeout(90_000);
   await page.goto('/demo?lang=en');
+  if (testInfo.project.name === 'mobile') {
+    await expect(page.getByRole('dialog').getByRole('button', { name: 'New workspace' })).toBeVisible({ timeout: 15_000 });
+  }
   await expect(page.getByRole('heading', { name: 'New workspace' })).toBeVisible({ timeout: 15_000 });
   await expect(page.getByRole('textbox', { name: 'Name' })).toHaveValue('weather-app');
   await expect(page.getByText('Build a weather dashboard: current conditions on top, a 7-day forecast below.').last()).toBeVisible({ timeout: 30_000 });

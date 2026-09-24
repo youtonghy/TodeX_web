@@ -36,10 +36,11 @@ function Navigation() {
 }
 
 // The preview is the real workbench (/demo) replaying a scripted session.
-// It renders at desktop size and is scaled down so the three panes keep
-// their real proportions at any page width.
+// Wide pages get the desktop layout scaled down so the three panes keep their
+// real proportions; phones get the workbench's own phone layout at close to
+// 1:1, which stays readable instead of shrinking a desktop to ~6px text.
 function demoFrameSize(containerWidth: number) {
-  return containerWidth < 640 ? { width: 900, height: 1000 } : { width: Math.max(containerWidth, 1440), height: 880 };
+  return containerWidth < 640 ? { width: 390, height: 700 } : { width: Math.max(containerWidth, 1440), height: 880 };
 }
 
 function DemoFrame({ width }: { width: number }) {
@@ -75,7 +76,7 @@ function WorkbenchPreview() {
   }, []);
   const size = demoFrameSize(width);
   return <div className="workbench-preview">
-    <div className="preview-titlebar"><div className="window-dots"><i /><i /><i /></div><span><img src={brand} alt="" /> TodeX <span className="preview-title-slash">/</span> your next big idea</span><span className="preview-demo-label">{t('site.preview.demoLabel')}</span></div>
+    <div className="preview-titlebar"><div className="window-dots"><i /><i /><i /></div><span><img src={brand} alt="" /> TodeX <span className="preview-title-slash">/</span> <span className="preview-title-project">your next big idea</span></span><span className="preview-demo-label">{t('site.preview.demoLabel')}</span></div>
     <div ref={stageRef} className="preview-stage" role="img" aria-label={t('site.preview.ariaLabel')} style={width ? { height: Math.round(size.height * width / size.width) } : undefined}>
       {width ? <DemoFrame key={locale} width={width} /> : null}
     </div>
