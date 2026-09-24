@@ -153,6 +153,7 @@ function DemoHeaderDetails({ session }: { session: TodeXSession }) {
   const git = {
     workspace, connected: true, error: '', loading: false, refresh: noop,
     data: workspace ? { repositoryPath: workspace.path, initialized: true, branch: 'main', worktreeKind: 'main' as const, statsTruncated: false, ...diffStats(diff) } : null,
+    repoOptions: [], dirtyRepos: [], selectedPath: workspace?.path ?? '', containingRepo: workspace?.path ?? '', selectRepo: noop,
   };
   return (
     <div className="relative flex min-w-0 flex-1 items-center gap-3 overflow-hidden">
