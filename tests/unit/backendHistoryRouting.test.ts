@@ -50,18 +50,20 @@ let root: Root;
 let container: HTMLDivElement;
 let session: TodeXSession;
 let requests: URL[];
+let storedConversations: ReturnType<typeof conversation>[];
 beforeAll(() => { Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true, React }); });
 beforeEach(() => {
   vi.useFakeTimers();
   TestSocket.instances = [];
   requests = [];
+  storedConversations = [conversation('ca', 'wa'), conversation('cb', 'wb')];
   vi.stubGlobal('WebSocket', TestSocket);
   for (const kind of ['warning', 'danger', 'info'] as const) vi.spyOn(toast, kind).mockReturnValue(`toast-${kind}`);
   vi.mocked(loadJson).mockImplementation(async (key, fallback) => ({
     [SETTINGS_STORAGE_KEY]: { ...defaultSettings, serverUrl: 'http://a.test' },
     [BACKEND_CONNECTIONS_STORAGE_KEY]: [profile('a'), profile('b')],
     [WORKSPACES_STORAGE_KEY]: [workspace('wa', 'a'), workspace('wb', 'b')],
-    [CONVERSATIONS_STORAGE_KEY]: [conversation('ca', 'wa'), conversation('cb', 'wb')],
+    [CONVERSATIONS_STORAGE_KEY]: storedConversations,
     [ACTIVE_SELECTION_STORAGE_KEY]: { workspaceId: 'wa', conversationId: 'ca' },
   }[key] ?? fallback) as never);
   vi.stubGlobal('fetch', vi.fn(async (input: string | URL) => {
@@ -70,9 +72,10 @@ beforeEach(() => {
     let result: unknown;
     if (url.pathname === '/v2/providers') result = { providers: [] };
     else if (url.pathname === '/v2/conversations') {
-      const id = url.host === 'a.test' ? 'ca' : 'cb';
-      result = { conversations: [{ schemaVersion: 2, id: `v2-${id}`, provider: 'codex', ownerId: 'o', workspace: `/w${id[1]}`,
-        workspaceId: `w${id[1]}`, title: id, status: 'idle', lastSequence: 0, createdAt: '2026-09-24T00:00:00Z', updatedAt: '2026-09-24T00:00:00Z' }] };
+      const workspaceId = url.host === 'a.test' ? 'wa' : 'wb';
+      result = { conversations: storedConversations.filter((item) => item.workspaceId === workspaceId).map((item) => ({
+        schemaVersion: 2, id: item.v2ConversationId, provider: 'codex', ownerId: 'o', workspace: `/${workspaceId}`, workspaceId,
+        title: item.title, status: 'idle', lastSequence: 0, createdAt: '2026-09-24T00:00:00Z', updatedAt: '2026-09-24T00:00:00Z' })) };
     }
     else if (url.pathname === '/v2/workspaces') result = { workspaces: [] };
     else if (url.pathname.endsWith('/events')) result = { events: [], hasMore: false };
@@ -124,4 +127,12 @@ it('closes the connection when leaving a backend and continues its history when 
   expect(session.activeConversation?.id).toBe('ca');
   expect(historyRequests('a.test', 'v2-ca').length).toBeGreaterThan(0);
   expect(historyRequests('b.test', 'v2-ca')).toHaveLength(0);
+});
+
+it('keeps backend conversations whose history is not loaded out of the unused-conversation sweep', async () => {
+  // Never opened here, so no preview and no loaded timeline rows.
+  storedConversations.push({ ...conversation('cd', 'wa'), preview: '' });
+  await mount();
+  await act(async () => { await vi.advanceTimersByTimeAsync(16_000); });
+  expect(session.conversations.some((item) => item.id === 'cd')).toBe(true);
 });

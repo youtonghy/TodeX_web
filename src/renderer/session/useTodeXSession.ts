@@ -5772,6 +5772,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   // represent history that has not been loaded yet.
   const isUnusedConversation = useCallback((conversation: ConversationRecord) => (
     !conversation.archived
+    && !conversation.v2ConversationId
     && !conversation.preview?.trim()
     && !turnIdsRef.current[conversation.id]
     && !pendingV2ConversationCreatesRef.current.has(conversation.id)
