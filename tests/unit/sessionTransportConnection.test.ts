@@ -165,3 +165,16 @@ it('explains public-key verification failure when local crypto initialization re
   expect(session.lastError).toContain('尚未通过加密密钥传输验证');
   expect(session.lastError).toContain('invalid key length');
 });
+
+it('moves the socket to the newly active backend profile', async () => {
+  vi.mocked(loadJson).mockImplementation((_key, fallback) => Promise.resolve(fallback));
+  vi.mocked(loadSecret).mockResolvedValue('');
+  render(); await act(async () => {});
+  await connect();
+  expect(TestSocket.instances).toHaveLength(1);
+  expect(TestSocket.instances[0].url).not.toContain('other.test');
+  await act(async () => { session.addBackendConnection({ serverUrl: 'https://other.test', deviceSecret: 'other-secret' }); });
+  expect(TestSocket.instances).toHaveLength(2);
+  expect(TestSocket.instances[0].close).toHaveBeenCalled();
+  expect(TestSocket.instances[1].url).toContain('other.test');
+});
