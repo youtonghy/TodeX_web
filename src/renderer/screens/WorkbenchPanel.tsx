@@ -549,7 +549,12 @@ function BrowserPane({ workspacePath, session, target, onTargetChange }: { works
   const [srcDoc, setSrcDoc] = useState('');
   const [error, setError] = useState('');
   const [inspect, setInspect] = useState(false);
-  const frameRef = useRef<HTMLIFrameElement>(null);
+  // The page currently shown; loading reports it back as the tab target, and
+  // that echo must not fetch (and remount) the same page a second time.
+  const loadedUrlRef = useRef('');
+  // State rather than a ref: the iframe is recreated whenever the page is
+  // (re)loaded, and the element picker has to re-attach to the new one.
+  const [frame, setFrame] = useState<HTMLIFrameElement | null>(null);
   const selectedRef = useRef<HTMLElement | null>(null);
   const selectionAnchorRef = useRef<HTMLElement | null>(null);
   useNoticeToast(error, { variant: 'danger', scope: workspacePath });
@@ -567,6 +572,7 @@ function BrowserPane({ workspacePath, session, target, onTargetChange }: { works
         throw new Error(t('workbench.cannotPreview', { contentType: result.contentType || t('workbench.nonHtml') }));
       }
       setUrl(result.url);
+      loadedUrlRef.current = result.url;
       targetChangeRef.current?.({ url: result.url });
       setSrcDoc(prepareBrowserSnapshot(result.body, result.url));
     } catch (reason) {
@@ -577,6 +583,7 @@ function BrowserPane({ workspacePath, session, target, onTargetChange }: { works
 
   useEffect(() => {
     if (target?.url) {
+      if (target.url === loadedUrlRef.current) return;
       targetChangeRef.current?.(target);
       setDraft(target.url);
       void loadSnapshot(target.url);
@@ -609,7 +616,6 @@ function BrowserPane({ workspacePath, session, target, onTargetChange }: { works
   }, [session.activeConversation?.id, session.setConversationChatDraft]);
 
   useEffect(() => {
-    const frame = frameRef.current;
     if (!frame || !inspect) return;
     const bind = () => {
       try {
@@ -715,19 +721,30 @@ function BrowserPane({ workspacePath, session, target, onTargetChange }: { works
       } catch { toast.danger(t('workbench.inspectBlocked')); }
       return undefined;
     };
-    let cleanup = bind();
+    // A cross-origin page leaves contentDocument null; say so instead of
+    // leaving a picker that silently selects nothing. A detached frame (one
+    // being replaced by a reload) is also null and is not a blocked page.
+    const bindOrReportBlocked = () => {
+      const unbind = bind();
+      if (frame.isConnected && frame.contentDocument === null) {
+        toast.danger(t('workbench.inspectBlocked'));
+        setInspect(false);
+      }
+      return unbind;
+    };
+    let cleanup = bindOrReportBlocked();
     const handleLoad = () => {
       cleanup?.();
       selectedRef.current = null;
       selectionAnchorRef.current = null;
-      cleanup = bind();
+      cleanup = bindOrReportBlocked();
     };
     frame.addEventListener('load', handleLoad);
     return () => {
       frame.removeEventListener('load', handleLoad);
       cleanup?.();
     };
-  }, [appendReference, inspect]);
+  }, [appendReference, frame, inspect]);
 
   return (
     <div className="flex h-full min-h-0 flex-col px-4 pb-4 pt-3">
@@ -785,7 +802,7 @@ function BrowserPane({ workspacePath, session, target, onTargetChange }: { works
       </div>
       {srcDoc ? (
         <div className="bg-surface min-h-0 flex-1 overflow-hidden rounded-xl">
-          <iframe ref={frameRef} title={t('workbench.webPreview')} srcDoc={srcDoc} className="size-full border-0" sandbox="allow-same-origin" />
+          <iframe ref={setFrame} title={t('workbench.webPreview')} srcDoc={srcDoc} className="size-full border-0" sandbox="allow-same-origin" />
         </div>
       ) : (
         <div className="bg-surface-secondary flex min-h-0 flex-1 flex-col items-center justify-center gap-2 rounded-xl px-6 text-center">
