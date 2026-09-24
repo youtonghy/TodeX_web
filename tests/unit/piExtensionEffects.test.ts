@@ -29,18 +29,22 @@ describe('Pi one-shot effects', () => {
   });
   it('preserves live delivery identity while a journal gap is filled by HTTP', async () => {
     const effects = new PiExtensionEffects(); const seen: string[] = [];
-    const old = event(1, 'notify', { message: 'history' }); const live = event(2, 'notify', { message: 'new' });
+    // The gap sits inside an already loaded runtime; history below the first
+    // live event of an unopened conversation is unloaded, not a gap.
+    const loaded = event(1, 'notify', { message: 'loaded' });
+    const old = event(2, 'notify', { message: 'history' }); const live = event(3, 'notify', { message: 'new' });
     const recovery = new ConversationRecovery(async () => page([old, live]), (state, applied) => {
       for (const item of applied) {
         const effect = effects.consume(item, state);
         if (effect?.kind === 'notice') seen.push(effect.notice.message);
       }
     }, error => { throw new Error(error); });
+    recovery.receive('c', 'w', [loaded]);
     effects.markLive(live);
     recovery.receive('c', 'w', [live]);
     await recovery.recover('c', 'w');
     expect(seen).toEqual(['new']);
-    expect(recovery.get('c')?.extensionUi.notices).toHaveLength(2);
+    expect(recovery.get('c')?.extensionUi.notices).toHaveLength(3);
   });
   it('ignores drafts and notifications from a stopped or replaced instance', () => {
     const effects = new PiExtensionEffects(); const draft = event(1, 'set_editor_text', { text: 'suggestion' });

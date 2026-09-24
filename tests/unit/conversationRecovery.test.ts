@@ -37,13 +37,42 @@ describe('shared conversation recovery', () => {
   });
 
   it('buffers a higher sequence and recovers a gap with one in-flight request', async () => {
-    const replay = vi.fn(async () => page([start, hello]));
+    const replay = vi.fn(async () => page([hello]));
     const recovery = new ConversationRecovery(replay, () => {}, () => {});
+    recovery.receive('c', 'w', [start]);
     recovery.receive('c', 'w', [world]);
-    expect(recovery.get('c')?.appliedSequence).toBe(0);
+    expect(recovery.get('c')?.appliedSequence).toBe(1);
     await recovery.recover('c', 'w');
     expect(replay).toHaveBeenCalledTimes(1);
     expect(recovery.get('c')?.appliedSequence).toBe(3);
+  });
+
+  it('releases a loaded conversation so the next open pages in from the tail again', async () => {
+    const replayBefore = vi.fn(async () => page([hello, world], true));
+    const recovery = new ConversationRecovery(async () => page([]), () => {}, () => {}, replayBefore);
+    await recovery.open('c', 'w', { highWater: 3 });
+    expect(recovery.release('c')).toBe(true);
+    expect(recovery.get('c')).toBeUndefined();
+    await recovery.open('c', 'w', { highWater: 3 });
+    expect(replayBefore).toHaveBeenCalledTimes(2);
+    expect(recovery.hasEarlierHistory('c')).toBe(true);
+  });
+
+  it('refuses to release a conversation while its history is loading', () => {
+    const recovery = new ConversationRecovery(() => new Promise<ConversationReplay>(() => {}), () => {}, () => {});
+    void recovery.recover('c', 'w');
+    expect(recovery.release('c')).toBe(false);
+  });
+
+  it('treats history below the first live event of an unopened conversation as unloaded, not a gap', async () => {
+    const replay = vi.fn(async () => page([]));
+    const recovery = new ConversationRecovery(replay, () => {}, () => {});
+    recovery.receive('c', 'w', [world]);
+    await Promise.resolve();
+    expect(replay).not.toHaveBeenCalled();
+    expect(recovery.get('c')?.appliedSequence).toBe(3);
+    expect(recovery.isRecovering('c')).toBe(false);
+    expect(recovery.hasEarlierHistory('c')).toBe(true);
   });
 
   it('does not expose an already resolved historical approval as a live action', async () => {
