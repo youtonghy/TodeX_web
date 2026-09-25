@@ -527,6 +527,7 @@ export function ChatPanel({ session }: Props) {
   const mentionActive = Boolean(mention && (!capability || mention.start > capability.start));
   const capabilityActive = Boolean(capability && !mentionActive);
   const [mentionSuggestions, setMentionSuggestions] = useState<Array<{ id: string; title: string; description: string; insertText: string }>>([]);
+  const [mentionSearchPending, setMentionSearchPending] = useState(false);
   const [suggestionIndex, setSuggestionIndex] = useState(0);
   const [isDraggingAttachment, setIsDraggingAttachment] = useState(false);
   const [previewAttachment, setPreviewAttachment] = useState<ComposerAttachmentDraft | null>(null);
@@ -538,14 +539,20 @@ export function ChatPanel({ session }: Props) {
     let active = true;
     if (!mention || !workspace) {
       setMentionSuggestions([]);
+      setMentionSearchPending(false);
       return () => { active = false; };
     }
+    setMentionSearchPending(true);
     void session.fetchWorkspaceEntries(workspace.path, mention.query)
       .then((result) => {
-        if (active) setMentionSuggestions(buildMentionSuggestions(mention, result.entries));
+        if (!active) return;
+        setMentionSuggestions(buildMentionSuggestions(mention, result.entries));
+        setMentionSearchPending(false);
       })
       .catch(() => {
-        if (active) setMentionSuggestions([]);
+        if (!active) return;
+        setMentionSuggestions([]);
+        setMentionSearchPending(false);
       });
     return () => { active = false; };
   }, [mention?.query, mention?.start, workspace?.path, session.fetchWorkspaceEntries]);
@@ -1201,7 +1208,7 @@ export function ChatPanel({ session }: Props) {
                     </ListBox.Item>
                   ))}
                 </ListBox>
-              ) : mention ? <p className="text-muted px-2 py-1 text-xs">{t('chat.searchingFiles')}</p> : null}
+              ) : mention ? <p className="text-muted px-2 py-1 text-xs">{mentionSearchPending ? t('chat.searchingFiles') : t('chat.noFileSuggestions')}</p> : null}
             </div>
           ) : null}
           {(session.selectedSkills[conversation.id] ?? []).length > 0 ? (
