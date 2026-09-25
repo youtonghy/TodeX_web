@@ -1798,8 +1798,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       }
       if (['turn.completed', 'turn.cancelled', 'turn.failed', 'turn.interrupted'].includes(type)) {
         completedAt = Math.max(completedAt, Date.parse(event.time) || Date.now());
-        // Extensions can change their catalog or native session during a turn.
-        if (conversation.provider === 'pi') setCommandEpochs(current => (current[localId] ?? 0) >= event.sequence
+        // Extensions can change their catalog or native session during a turn;
+        // Claude's slash-command catalog likewise only arrives once a turn's
+        // initialize exchange has run.
+        if (conversation.provider === 'pi' || conversation.provider === 'claude-code') setCommandEpochs(current => (current[localId] ?? 0) >= event.sequence
           ? current : { ...current, [localId]: event.sequence });
         const settledKey = turnId ? `${state.conversationId}:${turnId}` : '';
         const firstSettle = Boolean(settledKey) && !settledV2TurnsRef.current.has(settledKey);
@@ -7023,8 +7025,17 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         }
         if (lower === 'compact' || lower === 'retry' || lower === 'resume') {
           const provider = v2ProvidersRef.current.find((item) => item.id === conversation.provider);
-          if (!conversation.v2ConversationId || !provider?.capabilities.controlActions?.includes(lower)) {
+          const nativeAction = provider?.capabilities.controlActions?.includes(lower) === true;
+          // Some providers expose these as catalog commands instead of control
+          // actions (e.g. Claude /compact runs as a literal prompt).
+          const promptCommand = getProviderCommandCatalog(conversation.id)?.commands.find(
+            item => item.name.toLowerCase() === lower && item.invocation === 'prompt');
+          if (!conversation.v2ConversationId || (!nativeAction && !promptCommand)) {
             setLastError(lower === 'resume' ? t('sess.resumeNeedsMessage') : t('sess.operationUnsupported'));
+            return;
+          }
+          if (!nativeAction) {
+            void sendV2Prompt(trimmed, conversation.id);
             return;
           }
           void sendProtocolCommand({ id: createRequestId(lower), type: `conversation.${lower}`, payload: {
