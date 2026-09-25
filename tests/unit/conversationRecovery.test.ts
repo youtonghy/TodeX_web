@@ -11,6 +11,15 @@ const world = event(3, 'message.delta', { turnId: 't', content: 'world' });
 const page = (events: ConversationEvent[], hasMore = false): ConversationReplay => ({
   conversationId: 'c', fromSequence: 0, nextSequence: events.at(-1)?.sequence ?? 0, events, hasMore,
 });
+/** A journal of `length` events whose turn 't' starts at `startAt`. */
+const journal = (length: number, startAt = 1) => Array.from({ length }, (_, index) => index + 1 === startAt
+  ? event(index + 1, 'turn.started', { turnId: 't' })
+  : event(index + 1, 'message.delta', { turnId: 't', content: 'x' }));
+/** Reverse paging over a fixed journal, like the backend's `beforeSequence`. */
+const pagesBefore = (events: ConversationEvent[]) => vi.fn(async (_id: string, before: number, limit: number) => {
+  const slice = events.filter((item) => item.sequence <= before).slice(-limit);
+  return page(slice, (slice[0]?.sequence ?? 1) > 1);
+});
 
 describe('shared conversation recovery', () => {
   it('does not commit a cursor when the consumer throws', () => {
@@ -94,6 +103,88 @@ describe('shared conversation recovery', () => {
     expect(replayBefore).not.toHaveBeenCalled();
     expect(recovery.get('c')).toMatchObject({ appliedSequence: 4, activeTurnId: '' });
     expect(recovery.hasEarlierHistory('c')).toBe(true);
+  });
+
+  it('adopts a running turn whose start lies beyond the projected window', async () => {
+    const events = journal(5000);
+    const replayBefore = pagesBefore(events);
+    const replay = vi.fn(async () => page([]));
+    const recovery = new ConversationRecovery(replay, () => {}, () => {}, replayBefore);
+    recovery.receive('c', 'w', [event(5001, 'message.delta', { turnId: 't', content: 'live' })]);
+    await vi.waitFor(() => expect(recovery.get('c')?.activeTurnId).toBe('t'));
+    expect(replay).not.toHaveBeenCalled();
+    expect(recovery.isRecovering('c')).toBe(false);
+    expect(recovery.get('c')).toMatchObject({ appliedSequence: 5001, status: 'running' });
+    // Only the bounded window projects; the rest was searched, not loaded.
+    expect(recovery.hasEarlierHistory('c')).toBe(true);
+  });
+
+  it('keeps live frames on their own floor when the turn search fails, then retries on demand', async () => {
+    const errors: string[] = [];
+    let offline = true;
+    const events = journal(40, 10);
+    const history = pagesBefore(events);
+    const replayBefore = vi.fn(async (id: string, before: number, limit: number) => {
+      if (offline) throw new Error('offline');
+      return history(id, before, limit);
+    });
+    const replay = vi.fn(async () => page([]));
+    const recovery = new ConversationRecovery(replay, () => {}, (message) => errors.push(message), replayBefore);
+    recovery.receive('c', 'w', [event(41, 'message.delta', { turnId: 't', content: 'a' })]);
+    await vi.waitFor(() => expect(errors).toEqual(['offline']));
+    recovery.receive('c', 'w', [event(42, 'message.delta', { turnId: 't', content: 'b' })]);
+    expect(replay).not.toHaveBeenCalled();
+    expect(recovery.isRecovering('c')).toBe(false);
+    expect(recovery.get('c')).toMatchObject({ appliedSequence: 42, activeTurnId: '' });
+    offline = false;
+    await recovery.resolveTurn('c');
+    expect(recovery.get('c')).toMatchObject({ activeTurnId: 't', status: 'running' });
+    const calls = replayBefore.mock.calls.length;
+    await recovery.resolveTurn('c');
+    expect(replayBefore).toHaveBeenCalledTimes(calls);
+  });
+
+  it('renders the window even when the search beyond it fails, and settles without a replay flag', async () => {
+    const errors: string[] = [];
+    const events = journal(5000);
+    const history = pagesBefore(events);
+    const replayBefore = vi.fn(async (id: string, before: number, limit: number) => {
+      if (limit > 300) throw new Error('search failed');
+      return history(id, before, limit);
+    });
+    const recovery = new ConversationRecovery(async () => page([]), () => {}, (message) => errors.push(message), replayBefore);
+    await recovery.open('c', 'w', { highWater: 5000, turnActive: true });
+    await vi.waitFor(() => expect(errors).toEqual(['search failed']));
+    expect(recovery.get('c')).toMatchObject({ appliedSequence: 5000, activeTurnId: '' });
+    expect(recovery.isRecovering('c')).toBe(false);
+  });
+
+  it('closes a gap between buffered frames after the window failed', async () => {
+    const replayBefore = vi.fn(async (): Promise<ConversationReplay> => { throw new Error('offline'); });
+    const replay = vi.fn(async () => page([event(42, 'message.delta', { turnId: 't', content: 'b' })]));
+    const recovery = new ConversationRecovery(replay, () => {}, () => {}, replayBefore);
+    recovery.receive('c', 'w', [event(41, 'message.delta', { turnId: 't', content: 'a' })]);
+    recovery.receive('c', 'w', [event(43, 'turn.completed', { turnId: 't' })]);
+    await vi.waitFor(() => expect(recovery.get('c')?.appliedSequence).toBe(43));
+    expect(replay).toHaveBeenCalledWith('c', 41, expect.any(Number));
+    expect(recovery.get('c')?.status).toBe('completed');
+  });
+
+  it('reports realtime frames that land during a history window as live', async () => {
+    const updates: { applied: number[]; recovering: boolean; live: number[] }[] = [];
+    let deliver!: (value: ConversationReplay) => void;
+    const replayBefore = vi.fn(() => new Promise<ConversationReplay>((resolve) => { deliver = resolve; }));
+    const recovery = new ConversationRecovery(async () => page([]), (_state, applied, recovering, live) => {
+      updates.push({ applied: applied.map((item) => item.sequence), recovering, live: [...live] });
+    }, () => {}, replayBefore);
+    recovery.receive('c', 'w', [world]);
+    await vi.waitFor(() => expect(replayBefore).toHaveBeenCalled());
+    recovery.receive('c', 'w', [event(4, 'turn.completed', { turnId: 't' })]);
+    deliver(page([start, hello]));
+    await vi.waitFor(() => expect(recovery.isRecovering('c')).toBe(false));
+    const applied = updates.find((update) => update.applied.length);
+    expect(applied).toEqual({ applied: [1, 2, 3, 4], recovering: true, live: [3, 4] });
+    expect(recovery.get('c')).toMatchObject({ activeTurnId: '', status: 'completed' });
   });
 
   it('does not expose an already resolved historical approval as a live action', async () => {
