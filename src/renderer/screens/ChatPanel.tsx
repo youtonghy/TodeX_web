@@ -10,6 +10,7 @@ import { ChainOfThought, ChatAttachment, ChatAttachmentGroup, ChatAttachmentInpu
 import { ChatMessageActions } from '@heroui-pro/react/chat-message-actions';
 import { ChatTool } from '@heroui-pro/react/chat-tool';
 import { Markdown, type MarkdownProps } from '@heroui-pro/react/markdown';
+import { baseMarkdownComponents } from '../components/markdownComponents';
 import { providerDisplayName, type ProviderKind, type PermissionMode } from '@todex/protocol/v2';
 import { ConversationPermissionActions, ConversationPromptInput, ConversationRunStatus, TurnUsageSummary } from '../components/ConversationRunStatus';
 import { ReferenceComposer, type ReferenceComposerHandle } from '../components/ReferenceComposer';
@@ -573,6 +574,7 @@ export function ChatPanel({ session }: Props) {
   }, []);
   const workspacePath = workspace?.path;
   const markdownComponents = useMemo<NonNullable<MarkdownProps['components']>>(() => ({
+    ...baseMarkdownComponents,
     a: ({ href, children, node: _node, ref: _ref, ...props }) => {
       const target = workspaceLinkTarget(href, workspacePath);
       return (
