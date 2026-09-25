@@ -69,6 +69,10 @@ export function initialDemoState(now: number): DemoState {
   const web = demoWorkspace('demo-ws-web', 'todex-web', now, 0);
   const gateway = demoWorkspace('demo-ws-gateway', 'api-gateway', now, 1);
   const design = demoWorkspace('demo-ws-design', 'design-system', now, 2);
+  gateway.icon = 'rocket';
+  gateway.iconColor = '#f97316';
+  design.icon = 'palette';
+  design.iconColor = '#8b5cf6';
   const hero = demoConversation('demo-conv-hero', web.id, t('demo.historyTitle'), 'codex', now - 60_000);
   const conversations = [
     hero,
@@ -84,7 +88,7 @@ export function initialDemoState(now: number): DemoState {
     timeline: historyTimeline(web.id, hero.id, now - 600_000),
     chatDrafts: {},
     thinkingConversations: {},
-    turnIds: {},
+    turnIds: { 'demo-conv-e2e': 'turn-demo' },
     submissionStatusByConversation: {},
     gitDiffByConversation: { [hero.id]: diffState(HERO_DIFF, now) },
     terminalById: withTerminal({ terminalById: {} }, hero, web, [

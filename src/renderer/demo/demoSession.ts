@@ -105,6 +105,7 @@ export function buildDemoSession(state: DemoState, backend: ReturnType<typeof de
     renameWorkspace: noop,
     removeWorkspace: noop,
     updateWorkspace: noop,
+    selectedGitRepoByWorkspace: {},
     renameConversation: noop,
     forkConversation: () => null,
     removeConversation: noop,
