@@ -75,6 +75,27 @@ describe('shared conversation recovery', () => {
     expect(recovery.hasEarlierHistory('c')).toBe(true);
   });
 
+  it('pages back to the running turn start when an unopened conversation receives a mid-turn frame', async () => {
+    const replay = vi.fn(async () => page([]));
+    const replayBefore = vi.fn(async () => page([start, hello]));
+    const recovery = new ConversationRecovery(replay, () => {}, () => {}, replayBefore);
+    recovery.receive('c', 'w', [world]);
+    await vi.waitFor(() => expect(recovery.isRecovering('c')).toBe(false));
+    expect(replayBefore).toHaveBeenCalledWith('c', 2, expect.any(Number));
+    expect(replay).not.toHaveBeenCalled();
+    expect(recovery.get('c')).toMatchObject({ appliedSequence: 3, activeTurnId: 't', status: 'running' });
+  });
+
+  it('seeds without fetching when the unopened frame settles the turn itself', async () => {
+    const replayBefore = vi.fn(async () => page([start, hello]));
+    const recovery = new ConversationRecovery(async () => page([]), () => {}, () => {}, replayBefore);
+    recovery.receive('c', 'w', [event(4, 'turn.completed', { turnId: 't' })]);
+    await Promise.resolve();
+    expect(replayBefore).not.toHaveBeenCalled();
+    expect(recovery.get('c')).toMatchObject({ appliedSequence: 4, activeTurnId: '' });
+    expect(recovery.hasEarlierHistory('c')).toBe(true);
+  });
+
   it('does not expose an already resolved historical approval as a live action', async () => {
     const states: { recovering: boolean; permissions: number }[] = [];
     const requested = event(2, 'permission.requested', { turnId: 't', permissionId: 'p' });
