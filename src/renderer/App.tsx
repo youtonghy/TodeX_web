@@ -273,15 +273,10 @@ export function App() {
         <AppLayout
           className="h-full min-h-0"
           scrollMode="content"
-          sidebarCollapsible="offcanvas"
+          sidebarCollapsible="icon"
           asideMobile="sheet"
           sidebarOpen={sidebarOpen}
           onSidebarOpenChange={persistSidebarOpen}
-          sidebarResizable
-          sidebarDefaultSize="248px"
-          sidebarMinSize="200px"
-          sidebarMaxSize="320px"
-          sidebarResizeBehavior="preserve-pixel-size"
           asideResizable
           asideDefaultSize="420px"
           asideMinSize="320px"

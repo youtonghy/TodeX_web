@@ -223,6 +223,7 @@ export function DemoApp() {
   const [state, setState] = useState(() => initialDemoState(Date.now()));
   const [backend] = useState(() => demoBackend(Date.now()));
   const [cursor, setCursor] = useState<CursorState>({ x: -40, y: -40, visible: false, pressed: false });
+  const [sidebarOpen, setSidebarOpen] = useState(true);
   const session = useMemo(() => buildDemoSession(state, backend), [state, backend]);
   const sidebarRef = useRef<SidebarControl | null>(null);
   useDemoPlayback(setState, setCursor, sidebarRef);
@@ -234,15 +235,10 @@ export function DemoApp() {
       <AppLayout
         className="h-full min-h-0"
         scrollMode="content"
-        sidebarCollapsible="offcanvas"
+        sidebarCollapsible="icon"
         asideMobile="hidden"
-        sidebarOpen
-        onSidebarOpenChange={noop}
-        sidebarResizable
-        sidebarDefaultSize="248px"
-        sidebarMinSize="200px"
-        sidebarMaxSize="320px"
-        sidebarResizeBehavior="preserve-pixel-size"
+        sidebarOpen={sidebarOpen}
+        onSidebarOpenChange={setSidebarOpen}
         asideResizable
         asideDefaultSize="420px"
         asideMinSize="320px"
