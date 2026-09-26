@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { ConversationRecovery } from '../../src/renderer/session/conversationRecovery';
+import { ConversationRecovery, REOPEN_GAP_EVENTS } from '../../src/renderer/session/conversationRecovery';
 import { canAutoLoadEarlierHistory, capTimelinePerConversation, MAX_CONVERSATION_TIMELINE_ITEMS, mergeSequenceRanges } from '../../src/renderer/session/helpers';
 import type { ConversationEvent, ConversationReplay } from '@todex/protocol/v2';
 
@@ -340,6 +340,73 @@ describe('shared conversation recovery', () => {
     expect(kept).toHaveLength(MAX_CONVERSATION_TIMELINE_ITEMS);
     expect(kept[0].id).toBe('bg-5999');
     expect(kept.at(-1)?.id).toBe(`bg-${6000 - MAX_CONVERSATION_TIMELINE_ITEMS}`);
+  });
+
+  /** Settled turns of 100 events each; `open` leaves turn 't<n>' running. */
+  const settledJournal = (length: number, open?: number) => Array.from({ length }, (_, index) => {
+    const sequence = index + 1;
+    const turnId = `t${Math.floor(index / 100)}`;
+    if (sequence % 100 === 1) return event(sequence, 'turn.started', { turnId });
+    if (sequence % 100 === 0 && Math.floor(index / 100) !== open) return event(sequence, 'turn.completed', { turnId });
+    return event(sequence, 'message.delta', { turnId, content: 'x' });
+  });
+  const forwardPages = (events: ConversationEvent[]) => vi.fn(async (_id: string, after: number, limit: number) => {
+    const slice = events.filter((item) => item.sequence > after).slice(0, limit);
+    return page(slice, (slice.at(-1)?.sequence ?? after) < events.length);
+  });
+
+  it('reopens an idle lazy conversation from the tail instead of replaying a long gap', async () => {
+    const events = settledJournal(1000 + REOPEN_GAP_EVENTS + 1000);
+    const replay = forwardPages(events);
+    const replayBefore = pagesBefore(events);
+    const recovery = new ConversationRecovery(replay, () => {}, () => {}, replayBefore);
+    await recovery.open('c', 'w', { highWater: 1000 });
+    expect(recovery.get('c')?.appliedSequence).toBe(1000);
+    // A live frame far past the cursor reveals the gap.
+    recovery.receive('c', 'w', [events.at(-1)!]);
+    await recovery.recover('c', 'w');
+    expect(replay).not.toHaveBeenCalled();
+    expect(replayBefore.mock.calls.map(([, before]) => before)).toEqual([1000, events.length]);
+    const state = recovery.get('c')!;
+    expect(state.appliedSequence).toBe(events.length);
+    expect(state.timeline.every((entry) => (entry.sequence ?? 0) > events.length - 300)).toBe(true);
+    expect(recovery.hasEarlierHistory('c')).toBe(true);
+    expect(recovery.isRecovering('c')).toBe(false);
+  });
+
+  it('adopts a turn that started inside the skipped gap', async () => {
+    // Turn t35 starts at 3501 and is still running at the tail (3900).
+    const events = settledJournal(3900, 35).map((item) => item.sequence > 3501 && item.type !== 'message.delta'
+      ? event(item.sequence, 'message.delta', { turnId: 't35', content: 'x' }) : item);
+    const replayBefore = pagesBefore(events);
+    const recovery = new ConversationRecovery(forwardPages(events), () => {}, () => {}, replayBefore);
+    await recovery.open('c', 'w', { highWater: 1000 });
+    await recovery.recover('c', 'w', events.length);
+    await vi.waitFor(() => expect(recovery.get('c')?.activeTurnId).toBe('t35'));
+    expect(recovery.get('c')?.status).toBe('running');
+  });
+
+  it('replays a long gap forward while a turn runs or the consumer has pending work', async () => {
+    const events = settledJournal(1000 + REOPEN_GAP_EVENTS + 1000);
+    let pending = true;
+    const replay = forwardPages(events);
+    const replayBefore = pagesBefore(events);
+    const recovery = new ConversationRecovery(replay, () => {}, () => {}, replayBefore, undefined, () => pending);
+    await recovery.open('c', 'w', { highWater: 1000 });
+    await recovery.recover('c', 'w', events.length);
+    expect(replayBefore).toHaveBeenCalledTimes(1);
+    expect(replay).toHaveBeenCalled();
+    expect(recovery.get('c')?.appliedSequence).toBe(events.length);
+
+    // A running turn keeps its projection too.
+    pending = false;
+    const running = settledJournal(1000 + REOPEN_GAP_EVENTS + 1000, 9);
+    const replayRunning = forwardPages(running);
+    const busy = new ConversationRecovery(replayRunning, () => {}, () => {}, pagesBefore(running));
+    await busy.open('c', 'w', { highWater: 950 });
+    expect(busy.get('c')?.activeTurnId).toBe('t9');
+    await busy.recover('c', 'w', running.length);
+    expect(replayRunning).toHaveBeenCalled();
   });
 
   it('merges folded row ranges so each event is fetched once', () => {
