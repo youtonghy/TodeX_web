@@ -131,7 +131,7 @@ import {
   SOCKET_FRAME_DECODE_BUDGET_MS,
   MAX_TRANSPORT_HELLO_SESSION_CURSORS,
   MAX_TIMELINE_ITEMS,
-  MAX_TIMELINE_ITEMS_LIVE,
+  capTimelinePerConversation,
   type EarlierHistoryStatus,
   mergeSequenceRanges,
   MAX_USAGE_RECORDS,
@@ -1760,10 +1760,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     setRecoveringConversations((current) => (current[localId] === recovering ? current : { ...current, [localId]: recovering }));
     const boundAttachments = bindSentAttachmentEvents(sentAttachmentRecordsRef.current, localId, appliedEvents);
     if (boundAttachments !== sentAttachmentRecordsRef.current) updateSentAttachmentRecords(boundAttachments);
-    setTimeline((current) => [
+    setTimeline((current) => capTimelinePerConversation([
       ...state.timeline.map((entry) => stampTimelineEntry(entry, localId)),
       ...current.filter((entry) => entry.conversationId !== localId),
-    ].slice(0, MAX_TIMELINE_ITEMS_LIVE));
+    ]));
     const hasEarlier = conversationRecoveryRef.current?.hasEarlierHistory(state.conversationId) ?? false;
     setEarlierHistory((current) => {
       const existing = current[localId];
@@ -1912,7 +1912,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       const failed = !result || result.failed === true;
       setEarlierHistory((current) => ({
         ...current,
-        [conversation.id]: { hasMore: recovery.hasEarlierHistory(v2Id), loading: false, ...(failed ? { failed } : {}) },
+        [conversation.id]: { hasMore: recovery.hasEarlierHistory(v2Id), loading: false,
+          ...(failed ? { failed } : {}), ...(result?.capped ? { capped: true } : {}) },
       }));
     }
   }, []);
@@ -2249,7 +2250,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   );
 
   const appendTimeline = useCallback((entry: TimelineEntry) => {
-    setTimeline((current) => [entry, ...current].slice(0, MAX_TIMELINE_ITEMS_LIVE));
+    setTimeline((current) => capTimelinePerConversation([entry, ...current]));
   }, []);
 
   const rememberMentionReferences = useCallback((workspaceId: string, references: MentionReference[]) => {
@@ -2314,7 +2315,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       );
 
       if (index === -1) {
-        return [entry, ...current].slice(0, MAX_TIMELINE_ITEMS_LIVE);
+        return capTimelinePerConversation([entry, ...current]);
       }
 
       const next = current.slice();
@@ -2986,7 +2987,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
               .reverse();
             setTimeline((current) => {
               const remaining = current.filter((entry) => entry.conversationId !== pendingThreadAction.conversationId);
-              return [...restored, ...remaining].slice(0, MAX_TIMELINE_ITEMS_LIVE);
+              return capTimelinePerConversation([...restored, ...remaining]);
             });
             loadedNativeThreadHistoryRef.current.set(
               nativeThreadRead.thread.id,

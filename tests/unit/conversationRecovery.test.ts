@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ConversationRecovery } from '../../src/renderer/session/conversationRecovery';
-import { mergeSequenceRanges } from '../../src/renderer/session/helpers';
+import { canAutoLoadEarlierHistory, capTimelinePerConversation, MAX_CONVERSATION_TIMELINE_ITEMS, mergeSequenceRanges } from '../../src/renderer/session/helpers';
 import type { ConversationEvent, ConversationReplay } from '@todex/protocol/v2';
 
 function event(sequence: number, type: string, payload: Record<string, unknown>): ConversationEvent {
@@ -272,6 +272,35 @@ describe('shared conversation recovery', () => {
     const row = recovery.get('c')?.timeline.find((item) => item.category === 'reasoning');
     expect(row?.detailStub).toBeUndefined();
     expect(row?.subtitle).toBe('r2 r3 r4 ');
+  });
+
+  it('stops paging earlier history once a conversation holds the row cap', async () => {
+    const rows = Array.from({ length: MAX_CONVERSATION_TIMELINE_ITEMS + 10 }, (_, index) =>
+      event(index + 1, 'message.delta', { turnId: `t${index + 1}`, content: 'x' }));
+    const replayBefore = pagesBefore(rows);
+    const recovery = new ConversationRecovery(async () => page([]), () => {}, () => {}, replayBefore);
+    await recovery.open('c', 'w', { highWater: rows.length, pageLimit: MAX_CONVERSATION_TIMELINE_ITEMS });
+    expect(recovery.get('c')?.timeline).toHaveLength(MAX_CONVERSATION_TIMELINE_ITEMS);
+    await expect(recovery.loadEarlier('c', 'w')).resolves.toEqual({ hasMore: true, capped: true });
+    expect(replayBefore).toHaveBeenCalledTimes(1);
+    expect(canAutoLoadEarlierHistory({ hasMore: true, loading: false, capped: true })).toBe(false);
+  });
+
+  it('keeps the active conversation rows while a background conversation streams past the cap', () => {
+    const row = (conversationId: string, index: number) => ({ id: `${conversationId}-${index}`, conversationId });
+    let timeline = capTimelinePerConversation(Array.from({ length: 100 }, (_, index) => row('active', 99 - index)));
+    let background: ReturnType<typeof row>[] = [];
+    for (let batch = 0; batch < 60; batch++) {
+      // Each runtime update replaces the background rows with its newest-first projection.
+      background = [...Array.from({ length: 100 }, (_, index) => row('bg', batch * 100 + 99 - index)), ...background];
+      const others = timeline.filter((entry) => entry.conversationId !== 'bg');
+      timeline = capTimelinePerConversation([...background, ...others]);
+    }
+    expect(timeline.filter((entry) => entry.conversationId === 'active')).toHaveLength(100);
+    const kept = timeline.filter((entry) => entry.conversationId === 'bg');
+    expect(kept).toHaveLength(MAX_CONVERSATION_TIMELINE_ITEMS);
+    expect(kept[0].id).toBe('bg-5999');
+    expect(kept.at(-1)?.id).toBe(`bg-${6000 - MAX_CONVERSATION_TIMELINE_ITEMS}`);
   });
 
   it('merges folded row ranges so each event is fetched once', () => {
