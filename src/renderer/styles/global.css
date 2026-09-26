@@ -1022,6 +1022,65 @@ body {
   }
 }
 
+/* Sidebar list item selection highlight */
+.sidebar-chat-list .list-view__item {
+  border-radius: 0.5rem;
+  transition: background-color 0.15s ease, color 0.15s ease;
+  margin-block: 1px;
+  position: relative;
+}
+
+.sidebar-chat-list .list-view__item[data-selected="true"],
+.sidebar-chat-list .list-view__item.is-selected {
+  background-color: color-mix(in oklab, var(--accent) 12%, var(--surface)) !important;
+}
+
+.dark .sidebar-chat-list .list-view__item[data-selected="true"],
+.dark .sidebar-chat-list .list-view__item.is-selected,
+[data-theme="dark"] .sidebar-chat-list .list-view__item[data-selected="true"],
+[data-theme="dark"] .sidebar-chat-list .list-view__item.is-selected {
+  background-color: color-mix(in oklab, var(--accent) 18%, var(--surface-secondary)) !important;
+}
+
+.sidebar-chat-list .list-view__item[data-selected="true"]::before,
+.sidebar-chat-list .list-view__item.is-selected::before {
+  content: '';
+  position: absolute;
+  left: 3px;
+  top: 18%;
+  bottom: 18%;
+  width: 3px;
+  border-radius: 9999px;
+  background-color: var(--accent);
+}
+
+.sidebar-chat-list .list-view__item[data-selected="true"] .chat-list-view__title,
+.sidebar-chat-list .list-view__item.is-selected .chat-list-view__title {
+  color: var(--accent) !important;
+  font-weight: 600 !important;
+}
+
+.sidebar-chat-list .list-view__item[data-selected="true"] .chat-list-view__icon,
+.sidebar-chat-list .list-view__item.is-selected .chat-list-view__icon {
+  color: var(--accent) !important;
+}
+
+/* Drag-drop indicator lines for sidebar reorder */
+.sidebar-chat-list .list-view__item.drop-before::after,
+.sidebar-chat-list .list-view__item.drop-after::after {
+  content: '';
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  height: 3px;
+  border-radius: 999px;
+  background: var(--accent);
+  pointer-events: none;
+  z-index: 3;
+}
+.sidebar-chat-list .list-view__item.drop-before::after { top: -3px; }
+.sidebar-chat-list .list-view__item.drop-after::after { bottom: -3px; }
+
 /* Collapsed icon rail + hover peek: AppSidebar sets data-peek while the
    sidebar is logically collapsed, and flips data-state back to expanded while
    the pointer/focus is inside. The negative margin keeps the rail's 48px
@@ -1045,7 +1104,7 @@ body {
     box-shadow 0.15s var(--ease-out);
 }
 
-[data-app-layout][data-resizable] [data-slot='sidebar'].sidebar[data-collapsible='icon'][data-state='expanded'] {
+[data-app-layout][data-resizable] [data-slot='sidebar'].sidebar[data-collapsible='icon']:not([data-state='collapsed']) {
   width: var(--sidebar-width);
 }
 
@@ -1086,6 +1145,28 @@ body {
 
 .sidebar[data-peek='true'][data-state='collapsed'] .sidebar-chat-list .list-view__item-content > :not([data-slot='chat-list-view-icon']) {
   display: none;
+}
+
+/* Secondary list items carry a bottom separator hairline that renders as stray
+   dashes between rail icons — drop it. And pin the selection bar flush to the
+   rail's left edge instead of floating inside the inset row. */
+.sidebar[data-peek='true'][data-state='collapsed'] .sidebar-chat-list .list-view__item {
+  border-bottom-width: 0;
+}
+
+.sidebar[data-peek='true'][data-state='collapsed'] .sidebar-chat-list .list-view__item:is([data-selected='true'], .is-selected)::before {
+  left: -6px;
+  top: 8px;
+  bottom: 8px;
+}
+
+/* Give the rail glyphs a bit more presence (16px icon -> ~19px visual). */
+.sidebar[data-peek='true'][data-state='collapsed'] .chat-list-view__icon {
+  transform: scale(1.2);
+}
+
+.sidebar[data-peek='true'][data-state='collapsed'] [data-slot='sidebar-header'] > .button svg {
+  transform: scale(1.15);
 }
 
 .sidebar[data-peek='true'][data-state='collapsed'] [data-slot='sidebar-header'] > * {
