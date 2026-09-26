@@ -68,6 +68,7 @@ export function buildDemoSession(state: DemoState, backend: ReturnType<typeof de
     subagentsByConversation: {},
     conversationRuntimeById: {},
     recoveringConversations: {},
+    openStatusByConversation: {},
     earlierHistory: {},
     submissionStatusByConversation: state.submissionStatusByConversation,
     usageRecords: [],

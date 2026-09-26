@@ -160,6 +160,45 @@ describe('shared conversation recovery', () => {
     expect(recovery.isRecovering('c')).toBe(false);
   });
 
+  it('projects the first page of a running conversation before searching for its turn start', async () => {
+    const events = journal(5000);
+    const replayBefore = pagesBefore(events);
+    let requestsAtFirstPaint = -1;
+    const recovery = new ConversationRecovery(async () => page([]), (state) => {
+      if (requestsAtFirstPaint < 0 && state.timeline.length) requestsAtFirstPaint = replayBefore.mock.calls.length;
+    }, () => {}, replayBefore);
+    await recovery.open('c', 'w', { highWater: 5000, turnActive: true });
+    expect(requestsAtFirstPaint).toBe(1);
+    expect(recovery.hasEarlierHistory('c')).toBe(true);
+    // The running turn is still adopted, by the search that follows.
+    await vi.waitFor(() => expect(recovery.get('c')).toMatchObject({ activeTurnId: 't', status: 'running' }));
+    expect(recovery.get('c')?.appliedSequence).toBe(5000);
+  });
+
+  it('reports an open as opening, then failed, and settles it on a successful retry', async () => {
+    const statuses: (string | undefined)[] = [];
+    let offline = true;
+    const history = pagesBefore([start, hello, world]);
+    const replayBefore = vi.fn(async (id: string, before: number, limit: number) => {
+      if (offline) throw new Error('offline');
+      return history(id, before, limit);
+    });
+    const errors: string[] = [];
+    const recovery = new ConversationRecovery(async () => page([]), () => {}, (message) => errors.push(message), replayBefore,
+      (_id, status) => statuses.push(status));
+    const opening = recovery.open('c', 'w', { highWater: 3 });
+    expect(recovery.openStatus('c')).toBe('opening');
+    await opening;
+    expect(recovery.get('c')).toBeUndefined();
+    expect(recovery.openStatus('c')).toBe('failed');
+    expect(errors).toEqual(['offline']);
+    offline = false;
+    await recovery.open('c', 'w', { highWater: 3 });
+    expect(recovery.openStatus('c')).toBeUndefined();
+    expect(recovery.get('c')?.timeline.map((item) => item.subtitle)).toEqual(['Hello world']);
+    expect(statuses).toEqual(['opening', 'failed', 'opening', undefined]);
+  });
+
   it('closes a gap between buffered frames after the window failed', async () => {
     const replayBefore = vi.fn(async (): Promise<ConversationReplay> => { throw new Error('offline'); });
     const replay = vi.fn(async () => page([event(42, 'message.delta', { turnId: 't', content: 'b' })]));

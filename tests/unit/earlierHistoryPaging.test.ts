@@ -42,11 +42,13 @@ let session: TodeXSession;
 let requests: URL[];
 /** The window page loads; every older page fails. */
 let failOlderPages: boolean;
+let failWindow: boolean;
 beforeAll(() => { Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true, React }); });
 beforeEach(() => {
   vi.useFakeTimers();
   requests = [];
   failOlderPages = true;
+  failWindow = false;
   vi.stubGlobal('WebSocket', class { readyState = 0; send = vi.fn(); close = vi.fn(); });
   for (const kind of ['warning', 'danger', 'info'] as const) vi.spyOn(toast, kind).mockReturnValue(`toast-${kind}`);
   vi.mocked(loadJson).mockImplementation(async (key, fallback) => ({
@@ -70,7 +72,7 @@ beforeEach(() => {
     else if (url.pathname === '/v2/workspaces') result = { workspaces: [] };
     else if (events && url.searchParams.has('beforeSequence')) {
       const before = Number(url.searchParams.get('beforeSequence'));
-      if (before < HIGH_WATER && failOlderPages) return new Response(JSON.stringify({ error: 'offline' }), { status: 503 });
+      if (before < HIGH_WATER ? failOlderPages : failWindow) return new Response(JSON.stringify({ error: 'offline' }), { status: 503 });
       const page = journal(decodeURIComponent(events[1])).filter((item) => item.sequence <= before)
         .slice(-Number(url.searchParams.get('limit')));
       result = { conversationId: events[1], fromSequence: 0, nextSequence: before, events: page, hasMore: (page[0]?.sequence ?? 1) > 1 };
@@ -86,12 +88,12 @@ afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
 });
-async function mount() {
+async function mount(expectWindow = true) {
   function Harness() { session = useTodeXSession(() => {}); return null; }
   container = document.createElement('div'); document.body.append(container); root = createRoot(container);
   await act(async () => { root.render(createElement(Harness)); });
   await act(async () => { await vi.advanceTimersByTimeAsync(200); });
-  expect(session.earlierHistory.ca).toMatchObject({ hasMore: true, loading: false });
+  if (expectWindow) expect(session.earlierHistory.ca).toMatchObject({ hasMore: true, loading: false });
 }
 const olderPageRequests = () => requests.filter((url) => url.pathname === '/v2/conversations/v2-ca/events'
   && url.searchParams.has('beforeSequence') && Number(url.searchParams.get('beforeSequence')) < HIGH_WATER);
@@ -131,4 +133,18 @@ it('clears a failed page when the conversation is opened again', async () => {
   expect(session.earlierHistory.ca?.failed).toBeUndefined();
   await autoTrigger(1);
   expect(olderPageRequests()).toHaveLength(2);
+});
+
+it('exposes a failed history open and retries it as an open', async () => {
+  failWindow = true;
+  await mount(false);
+  expect(session.openStatusByConversation.ca).toBe('failed');
+  expect(session.conversationRuntimeById.ca).toBeUndefined();
+  failWindow = false;
+  let retry!: Promise<void>;
+  act(() => { retry = session.recoverConversation('ca'); });
+  expect(session.openStatusByConversation.ca).toBe('opening');
+  await act(async () => { await retry; await vi.advanceTimersByTimeAsync(200); });
+  expect(session.openStatusByConversation.ca).toBeUndefined();
+  expect(session.timeline.some((entry) => entry.conversationId === 'ca')).toBe(true);
 });
