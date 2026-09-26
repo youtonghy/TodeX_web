@@ -101,7 +101,7 @@ const historyRequests = (host: string, v2Id: string) =>
 
 it('reads a conversation history from the backend that owns it', async () => {
   await mount();
-  await act(async () => { void session.hydrateProcessGroup('cb', [1, 2]).catch(() => undefined); });
+  await act(async () => { void session.hydrateProcessGroup('cb', [[1, 2]]).catch(() => undefined); });
   expect(historyRequests('b.test', 'v2-cb')).toHaveLength(1);
   expect(historyRequests('a.test', 'v2-cb')).toHaveLength(0);
 });

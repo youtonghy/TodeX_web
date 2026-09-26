@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ConversationRecovery } from '../../src/renderer/session/conversationRecovery';
+import { mergeSequenceRanges } from '../../src/renderer/session/helpers';
 import type { ConversationEvent, ConversationReplay } from '@todex/protocol/v2';
 
 function event(sequence: number, type: string, payload: Record<string, unknown>): ConversationEvent {
@@ -254,6 +255,28 @@ describe('shared conversation recovery', () => {
     expect(entry?.detailStub).toBeUndefined();
     expect(entry?.subtitle).toContain('ok');
     expect(update).toHaveBeenCalled();
+  });
+
+  it('hydrates a folded reasoning row from every summary stub it merged', () => {
+    const reasoning = (sequence: number, thinking?: string) => event(sequence, 'provider.event', {
+      turnId: 't', ...(thinking === undefined ? { detailStub: true } : { thinking }),
+      block: { id: 'r', category: 'reasoning', phase: 'delta', turnId: 't' },
+    });
+    const journalEvents = [start, reasoning(2, 'r2 '), reasoning(3, 'r3 '), reasoning(4, 'r4 ')];
+    const recovery = new ConversationRecovery(async () => page([]), () => {}, () => {});
+    recovery.receive('c', 'w', [start, reasoning(2), reasoning(3), reasoning(4)]);
+    const stub = recovery.get('c')?.timeline.find((item) => item.detailStub);
+    expect(stub).toMatchObject({ firstSequence: 2, sequence: 4 });
+    const [[from, to]] = mergeSequenceRanges([[stub!.firstSequence!, stub!.sequence!]]);
+    expect(recovery.hydrate('c', 'w', journalEvents.filter((item) => item.sequence >= from && item.sequence <= to))).toBe(true);
+    const row = recovery.get('c')?.timeline.find((item) => item.category === 'reasoning');
+    expect(row?.detailStub).toBeUndefined();
+    expect(row?.subtitle).toBe('r2 r3 r4 ');
+  });
+
+  it('merges folded row ranges so each event is fetched once', () => {
+    expect(mergeSequenceRanges([[7, 9], [2, 4], [3, 5], [6, 6], [12, 12], [0, 3], [5, 1]]))
+      .toEqual([[2, 9], [12, 12]]);
   });
 
 });
