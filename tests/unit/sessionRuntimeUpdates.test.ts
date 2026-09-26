@@ -117,6 +117,18 @@ async function deliver(socket: TestSocket, event: ReturnType<typeof frame>) {
     await vi.advanceTimersByTimeAsync(25);
   });
 }
+const conversationListRequests = () => requests.filter((url) => url.pathname === '/v2/conversations').length;
+
+it('lists conversations once per refresh interval while connected', async () => {
+  await mount();
+  const before = conversationListRequests();
+  await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+  // The manifest refresh polls every 15 s; the workspace sync timer no longer
+  // lists conversations again on its own.
+  expect(conversationListRequests() - before).toBe(4);
+  expect(requests.filter((url) => url.pathname === '/v2/workspaces').length).toBeGreaterThanOrEqual(4);
+});
+
 it('keeps subagent and usage state untouched by deltas that do not change them', async () => {
   const socket = await mount();
   await deliver(socket, frame('ca', HIGH_WATER + 1, 'turn.started', { turnId: 'live' }));
