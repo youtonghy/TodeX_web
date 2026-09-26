@@ -21,7 +21,7 @@ function render(provider = 'codex', readonly = false, missingCapabilities = fals
   const session = {
     activeConversation: { id: 'c', workspaceId: 'w', provider, title: 'Test', mode: 'implement' },
     activeWorkspace: { id: 'w', path: '/tmp', ...(readonly ? { sandboxMode: 'read-only' } : {}) },
-    connectionState: 'open', recoveringConversations: {}, settings: {}, timeline: [], pendingRequests: [], conversations: [], usageRecords: [], modelCatalog: [],
+    connectionState: 'open', recoveringConversations: {}, openStatusByConversation: {}, settings: {}, timeline: [], pendingRequests: [], conversations: [], usageRecords: [], modelCatalog: [],
     v2Providers: [{ id: provider, available: true, profiles: [], models: [], capabilities: { permissionConfig: { modes: provider === 'pi' ? ['full-access'] : ['ask', 'auto', 'full-access'], defaultMode: provider === 'pi' ? 'full-access' : 'ask', supportsPlan: provider === 'codex' } } }],
     applyConversationPermissionMode: vi.fn(async () => true), applyConversationWorkMode: vi.fn(async () => true),
     chatDrafts: {}, composerSelections: {}, composerAttachments: {}, getProviderCommandCatalog: vi.fn(), refreshProviderCommands: vi.fn(), pendingPluginDrafts: {}, stoppingProviderRuntimes: {}, thinkingConversations: {}, submissionStatusByConversation: {}, conversationRuntimeById: {}, compactionByConversation: {}, providerModels: {}, providerImageInput: {}, contextUsageByConversation: {}, selectedSkills: {}, queuedChatDrafts: {}, queuePausedByConversation: {}, controlStatusByConversation: {}, turnIds: {},
