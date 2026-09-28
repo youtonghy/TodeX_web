@@ -13,7 +13,7 @@ The website introduces the product, offers official Desktop packages and a one-l
 the mobile app is not available for download yet. Each workbench browser connects
 directly to its own user-managed `todex-agentd` over REST and WebSocket.
 
-The title menu includes CLI management for the active Backend, including installed/latest version status and managed one-click upgrades.
+The title menu includes CLI management for the active Backend, including installed/latest version status, one-click install of missing CLIs and managed one-click upgrades. Agent accounts can be exported and imported per agent as a JSON file to sync providers between hosts.
 The chat model picker includes a search field above the list, with case-insensitive model name matching, a clear button, and keyboard navigation.
 
 ## Requirements

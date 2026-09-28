@@ -1,7 +1,7 @@
 import { Kbd } from '@heroui/react';
 import { useEffect, useRef } from 'react';
 
-const isMacLike = navigator.userAgent.includes('Mac');
+export const isMacLike = navigator.userAgent.includes('Mac');
 
 export type ShortcutId =
   | 'newConversation'

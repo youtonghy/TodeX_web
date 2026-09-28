@@ -171,4 +171,127 @@ describe('permission decision rendering', () => {
     await act(async () => button.click());
     expect(select).toHaveBeenCalledWith(abort);
   });
+
+  const answerOption = { optionId: 'answer', name: 'Answer', kind: 'answer' };
+  const questionRequest = (questions: unknown[], options: unknown[] = [answerOption]) => classifyPendingRequest({
+    type: 'conversation.permission.request',
+    payload: { requestId: 'p', permissionId: 'p', kind: 'user_input', options, details: { questions } },
+  })!;
+  const typeInto = async (input: HTMLInputElement | HTMLTextAreaElement, text: string) => act(async () => {
+    const prototype = input instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+    Object.getOwnPropertyDescriptor(prototype, 'value')!.set!.call(input, text);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  const buttonNamed = (dom: HTMLElement, name: string) => [...dom.querySelectorAll('button')].find(item => item.textContent === name)!;
+  // Exiting cards stay mounted while they animate out; always read the current one.
+  const card = (dom: HTMLElement, index: number) => dom.querySelector<HTMLElement>(`[data-question-index="${index}"]`)!;
+
+  it('answers multi-select questions with every picked label', async () => {
+    const select = vi.fn();
+    const dom = render(createElement(ConversationPermissionActions, { request: questionRequest([{ id: 'q0', question: 'Which steps?', multiSelect: true,
+      options: [{ label: 'commit', description: 'Create a commit' }, { label: 'push' }, { label: 'tag' }] }]), onSelect: select }));
+    const boxes = [...dom.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')];
+    expect(boxes).toHaveLength(3);
+    expect(dom.textContent).toContain('Create a commit');
+    // A single question needs no step list or paging.
+    expect(dom.querySelector('nav')).toBeNull();
+    expect(buttonNamed(dom, '上一题')).toBeUndefined();
+    await act(async () => boxes[2].click());
+    await act(async () => boxes[0].click());
+    await act(async () => buttonNamed(dom, '提交回答').click());
+    expect(select).toHaveBeenCalledWith(answerOption, { answers: { q0: { answers: ['commit', 'tag'] } } });
+  });
+
+  it('accepts a free-text answer in place of the options when the question allows it', async () => {
+    const select = vi.fn();
+    const dom = render(createElement(ConversationPermissionActions, { request: questionRequest([
+      { id: 'q0', question: 'Which file?', isOther: true, options: [{ label: 'web' }, { label: 'desktop' }] }]), onSelect: select }));
+    expect(dom.querySelectorAll('input[type="radio"]')).toHaveLength(2);
+    expect(buttonNamed(dom, '提交回答').disabled).toBe(true);
+    await typeInto(dom.querySelector<HTMLInputElement>('input[type="text"]')!, 'both files');
+    await act(async () => buttonNamed(dom, '提交回答').click());
+    expect(select).toHaveBeenCalledWith(answerOption, { answers: { q0: { answers: ['both files'] } } });
+  });
+
+  it('keeps the custom answer and a single pick mutually exclusive', async () => {
+    const select = vi.fn();
+    const dom = render(createElement(ConversationPermissionActions, { request: questionRequest([
+      { id: 'q0', question: 'Where?', isOther: true, options: [{ label: 'SQLite' }, { label: 'Postgres' }] }]), onSelect: select }));
+    const [sqlite] = dom.querySelectorAll<HTMLInputElement>('input[type="radio"]');
+    const other = dom.querySelector<HTMLInputElement>('input[type="text"]')!;
+    await act(async () => sqlite.click());
+    await typeInto(other, 'Redis');
+    expect(sqlite.checked).toBe(false);
+    expect(other.closest('label')!.hasAttribute('data-selected')).toBe(true);
+    await act(async () => sqlite.click());
+    expect(other.closest('label')!.hasAttribute('data-selected')).toBe(false);
+    await act(async () => buttonNamed(dom, '提交回答').click());
+    expect(select).toHaveBeenCalledWith(answerOption, { answers: { q0: { answers: ['SQLite'] } } });
+  });
+
+  it('shows one question at a time and keeps answers while paging back and forth', async () => {
+    const select = vi.fn();
+    const dom = render(createElement(ConversationPermissionActions, { request: questionRequest([
+      { id: 'storage', header: '存储', question: 'Where?', options: [{ label: 'SQLite' }, { label: 'Postgres' }] },
+      { id: 'platforms', header: '平台', question: 'Which clients?', multiSelect: true, isOther: true, options: [{ label: 'Web' }, { label: 'iOS' }] },
+      { id: 'naming', question: 'What name?' },
+    ]), onSelect: select }));
+    expect(dom.textContent).toContain('Where?');
+    expect(dom.textContent).not.toContain('Which clients?');
+    expect(dom.textContent).toContain('1 / 3');
+    expect([...dom.querySelectorAll('nav button')].map(item => item.textContent)).toEqual(['存储', '平台', '问题 3']);
+    expect(buttonNamed(dom, '上一题').disabled).toBe(true);
+    const next = () => [...dom.querySelectorAll('button')].find(item => item.textContent?.startsWith('下一题'))!;
+    expect(next().disabled).toBe(true);
+
+    await act(async () => card(dom, 0).querySelectorAll<HTMLInputElement>('input')[1].click());
+    await act(async () => next().click());
+    expect(card(dom, 1).textContent).toContain('Which clients?');
+    await act(async () => card(dom, 1).querySelector<HTMLInputElement>('input[type="checkbox"]')!.click());
+    await typeInto(card(dom, 1).querySelector<HTMLInputElement>('input[type="text"]')!, 'Android');
+
+    await act(async () => buttonNamed(dom, '上一题').click());
+    expect(card(dom, 0).querySelectorAll<HTMLInputElement>('input')[1].checked).toBe(true);
+    // The step list jumps straight to any question.
+    await act(async () => [...dom.querySelectorAll<HTMLButtonElement>('nav button')][2].click());
+    expect(buttonNamed(dom, '提交回答').disabled).toBe(true);
+    await typeInto(card(dom, 2).querySelector('textarea')!, 'Retention days');
+    await act(async () => buttonNamed(dom, '提交回答').click());
+    expect(select).toHaveBeenCalledWith(answerOption, { answers: {
+      storage: { answers: ['Postgres'] },
+      platforms: { answers: ['Web', 'Android'] },
+      naming: { answers: ['Retention days'] },
+    } });
+  });
+
+  it('picks options with number keys and advances with Enter', async () => {
+    const select = vi.fn();
+    const dom = render(createElement(ConversationPermissionActions, { request: questionRequest([
+      { id: 'a', question: 'First?', options: [{ label: 'x' }, { label: 'y' }] },
+      { id: 'b', question: 'Second?', options: [{ label: 'z' }] },
+    ]), onSelect: select }));
+    const press = (target: Element, key: string) => act(async () => {
+      target.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+    });
+    const first = card(dom, 0).querySelector('input')!;
+    await press(first, 'Enter');
+    expect(card(dom, 1)).toBeNull();
+    await press(first, '2');
+    expect(card(dom, 0).querySelectorAll<HTMLInputElement>('input')[1].checked).toBe(true);
+    await press(first, 'Enter');
+    expect(card(dom, 1).textContent).toContain('Second?');
+    // Number keys keep working after focus moves to the step list.
+    await press(dom.querySelector('nav button')!, '1');
+    await press(card(dom, 1).querySelector('input')!, 'Enter');
+    expect(select).toHaveBeenCalledWith(answerOption, { answers: { a: { answers: ['y'] }, b: { answers: ['z'] } } });
+  });
+
+  it('still offers the advertised reject options next to the questions', async () => {
+    const abort = { optionId: 'abort_turn', name: 'Abort', kind: 'abort_turn' };
+    const select = vi.fn();
+    const dom = render(createElement(ConversationPermissionActions, { request: questionRequest([
+      { id: 'q0', question: 'Which?', options: [{ label: 'a' }] }], [answerOption, abort]), onSelect: select }));
+    await act(async () => buttonNamed(dom, '拒绝并停止本轮').click());
+    expect(select).toHaveBeenCalledWith(abort);
+  });
 });
