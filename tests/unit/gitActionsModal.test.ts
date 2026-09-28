@@ -53,6 +53,7 @@ function render({ active = true, outcome = 'sent', pending = false, busy = false
     settings: { serverUrl: 'http://localhost', deviceSecret: 'test-secret' }, thinkingConversations: busy ? { c: true } : {}, submissionStatusByConversation: {}, sendAgentMessage,
     chatDrafts: draft, composerAttachments: attachments, setChatDraft,
     openGitWorktree: openGitWorktree ?? vi.fn(() => null),
+    selectedGitRepoByWorkspace: {}, selectGitRepo: vi.fn(),
   } as unknown as TodeXSession;
   container = document.createElement('div');
   document.body.append(container);

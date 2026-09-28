@@ -3,14 +3,14 @@ import * as React from 'react';
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { ConversationHeaderDetails } from '../../src/renderer/components/ConversationHeaderDetails';
-import { readGitStatus } from '../../src/renderer/lib/gitWorkspace';
+import { readGitScan, readGitStatus } from '../../src/renderer/lib/gitWorkspace';
 import type { TodeXSession } from '../../src/renderer/session/useTodeXSession';
 
 vi.hoisted(() => {
   window.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false, media: '', onchange: null });
 });
 vi.mock('../../src/renderer/lib/gitWorkspace', async importOriginal => ({
-  ...await importOriginal<typeof import('../../src/renderer/lib/gitWorkspace')>(), readGitStatus: vi.fn(),
+  ...await importOriginal<typeof import('../../src/renderer/lib/gitWorkspace')>(), readGitStatus: vi.fn(), readGitScan: vi.fn(),
 }));
 let root: Root;
 let container: HTMLDivElement;
@@ -37,6 +37,7 @@ beforeEach(() => {
   });
   Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
   vi.mocked(readGitStatus).mockReset().mockResolvedValue({ repositoryPath: '/project', initialized: true, branch: 'feature/header', worktreeKind: 'linked', changedFiles: 5, additions: 23, deletions: 7, statsTruncated: false });
+  vi.mocked(readGitScan).mockReset().mockResolvedValue({ repositories: [] });
   container = document.createElement('div'); document.body.append(container); root = createRoot(container);
 });
 afterEach(() => { act(() => root.unmount()); container.remove(); observers.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
@@ -45,6 +46,7 @@ async function render() {
     settings: { serverUrl: 'http://localhost', deviceSecret: 'test-secret' }, connectionState: 'open', activeBackendConnectionId: 'backend',
     activeConversation: { id: 'c', workspaceId: 'w', provider: 'pi', version: 2 },
     workspaces: [{ id: 'w', name: 'Workspace title', path: '/project' }], thinkingConversations: {},
+    selectedGitRepoByWorkspace: {}, selectGitRepo: vi.fn(),
   } as unknown as TodeXSession;
   const onOpenGit = vi.fn();
   await act(async () => root.render(createElement(ConversationHeaderDetails, { session, title: 'Current task title', gitOpen: false, onOpenGit })));

@@ -3,14 +3,14 @@ import * as React from 'react';
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { GitStatusIndicator } from '../../src/renderer/components/GitStatusIndicator';
-import { readGitStatus, type GitStatusSummary } from '../../src/renderer/lib/gitWorkspace';
+import { readGitScan, readGitStatus, type GitStatusSummary } from '../../src/renderer/lib/gitWorkspace';
 import type { TodeXSession } from '../../src/renderer/session/useTodeXSession';
 
 vi.hoisted(() => {
   window.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false, media: '', onchange: null });
 });
 vi.mock('../../src/renderer/lib/gitWorkspace', async importOriginal => ({
-  ...await importOriginal<typeof import('../../src/renderer/lib/gitWorkspace')>(), readGitStatus: vi.fn(),
+  ...await importOriginal<typeof import('../../src/renderer/lib/gitWorkspace')>(), readGitStatus: vi.fn(), readGitScan: vi.fn(),
 }));
 const status: GitStatusSummary = { repositoryPath: '/one', initialized: true, branch: 'main', worktreeKind: 'main', changedFiles: 3, additions: 17, deletions: 4, statsTruncated: false };
 let root: Root;
@@ -24,11 +24,13 @@ beforeAll(() => {
 });
 beforeEach(() => {
   vi.mocked(readGitStatus).mockReset().mockResolvedValue(status);
+  vi.mocked(readGitScan).mockReset().mockResolvedValue({ repositories: [] });
   Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
   session = {
     settings: { serverUrl: 'http://localhost', deviceSecret: 'test-secret' }, connectionState: 'open', activeBackendConnectionId: 'backend',
     activeConversation: { id: 'c', workspaceId: 'one' },
     workspaces: [{ id: 'one', path: '/one' }, { id: 'two', path: '/two' }], thinkingConversations: {},
+    selectedGitRepoByWorkspace: {}, selectGitRepo: vi.fn(),
   } as unknown as TodeXSession;
   container = document.createElement('div'); document.body.append(container); root = createRoot(container);
 });
