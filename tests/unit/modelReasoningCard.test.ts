@@ -65,6 +65,10 @@ function renderCard({ items = models }: { items?: ProviderModelDescriptor[] } = 
 const trigger = () => document.querySelector<HTMLElement>('.composer-model-card__trigger')!;
 const searchInput = () => document.querySelector<HTMLInputElement>('input[aria-label="搜索模型"]');
 const options = () => [...document.querySelectorAll<HTMLElement>('.composer-model-card__listbox .composer-model-card__list-item')];
+const familyItems = () =>
+  [...document.querySelectorAll<HTMLElement>('.composer-model-card__families .composer-model-card__list-item')];
+const versionItems = () =>
+  [...document.querySelectorAll<HTMLElement>('.composer-model-card__versions .composer-model-card__list-item')];
 const dropdownOpen = () => document.querySelector('.composer-model-card__listbox') !== null;
 
 async function openPicker() {
@@ -163,11 +167,6 @@ it('renders the empty state for an empty catalog and keeps search usable', async
 
 it('groups family-tagged models into a two-pane family/version picker', async () => {
   const { onSelectModel } = renderCard({ items: groupedModels });
-  const familyItems = () =>
-    [...document.querySelectorAll<HTMLElement>('.composer-model-card__families .composer-model-card__list-item')];
-  const versionItems = () =>
-    [...document.querySelectorAll<HTMLElement>('.composer-model-card__versions .composer-model-card__list-item')];
-
   await openPicker();
   // Left pane: untagged entries plus one row per family.
   expect(familyItems().map(item => item.textContent)).toEqual(['default', 'Opus', 'Sonnet']);
@@ -196,4 +195,19 @@ it('groups family-tagged models into a two-pane family/version picker', async ()
   expect(document.querySelector('.composer-model-card__versions')).toBeNull();
   const flat = options();
   expect(flat.map(option => option.textContent)).toEqual(['opus', 'Opus 5.5', 'Opus 4.6']);
+});
+
+it('labels vendor families with display names and lists their models without a latest entry', async () => {
+  const vendorModels: ProviderModelDescriptor[] = [
+    { id: 'zai/glm-5.3', displayName: 'GLM 5.3', description: '', isDefault: true, supportedReasoningEfforts: [], family: 'zai' },
+    { id: 'zai/glm-5', displayName: 'GLM 5', description: '', isDefault: false, supportedReasoningEfforts: [], family: 'zai' },
+    { id: 'openai/gpt-6', displayName: 'GPT 6', description: '', isDefault: false, supportedReasoningEfforts: [], family: 'openai' },
+  ];
+  const { onSelectModel } = renderCard({ items: vendorModels });
+  await openPicker();
+  // Vendor ids render under their display names; zai is the current family.
+  expect(familyItems().map(item => item.textContent)).toEqual(['Z.ai', 'OpenAI']);
+  expect(versionItems().map(item => item.textContent)).toEqual(['GLM 5.3', 'GLM 5']);
+  await act(async () => { versionItems()[1].click(); });
+  expect(onSelectModel).toHaveBeenCalledExactlyOnceWith('zai/glm-5');
 });
