@@ -161,26 +161,39 @@ it('renders the empty state for an empty catalog and keeps search usable', async
   expect(onSelectModel).not.toHaveBeenCalled();
 });
 
-it('groups family-tagged models into sections with a latest entry', async () => {
+it('groups family-tagged models into a two-pane family/version picker', async () => {
   const { onSelectModel } = renderCard({ items: groupedModels });
+  const familyItems = () =>
+    [...document.querySelectorAll<HTMLElement>('.composer-model-card__families .composer-model-card__list-item')];
+  const versionItems = () =>
+    [...document.querySelectorAll<HTMLElement>('.composer-model-card__versions .composer-model-card__list-item')];
+
   await openPicker();
-  // One level of headers per family; versions sit nested beneath them.
-  const headers = [...document.querySelectorAll<HTMLElement>('.composer-model-card__section-header')];
-  expect(headers.map(header => header.textContent)).toEqual(['Opus', 'Sonnet']);
-  const all = options();
-  expect(all.map(option => option.textContent)).toEqual([
-    'default', '最新Opus 5.5', 'Opus 5.5', 'Opus 4.6', '最新Sonnet 5.5', 'Sonnet 5.5',
-  ]);
-  await act(async () => { all[2].click(); });
-  expect(onSelectModel).toHaveBeenCalledExactlyOnceWith('claude-opus-5-5');
+  // Left pane: untagged entries plus one row per family.
+  expect(familyItems().map(item => item.textContent)).toEqual(['default', 'Opus', 'Sonnet']);
+  // Right pane defaults to the first family, offering the alias then versions.
+  expect(versionItems().map(item => item.textContent)).toEqual(['最新Opus 5.5', 'Opus 5.5', 'Opus 4.6']);
+
+  // Picking a family row keeps the picker open and swaps the version pane.
+  await act(async () => { familyItems()[2].click(); });
+  expect(dropdownOpen()).toBe(true);
+  expect(versionItems().map(item => item.textContent)).toEqual(['最新Sonnet 5.5', 'Sonnet 5.5']);
+
+  // Clicking a version selects its concrete id and closes the picker.
+  await act(async () => { versionItems()[1].click(); });
+  expect(onSelectModel).toHaveBeenCalledExactlyOnceWith('claude-sonnet-5-5');
+  expect(dropdownOpen()).toBe(false);
+
   // The family alias selects as the "latest" entry.
   await openPicker();
-  await act(async () => { options()[1].click(); });
+  await act(async () => { versionItems()[0].click(); });
   expect(onSelectModel).toHaveBeenCalledTimes(2);
-  expect(onSelectModel).toHaveBeenLastCalledWith('opus');
-  // Searching flattens the hierarchy again.
+  expect(onSelectModel).toHaveBeenLastCalledWith('sonnet');
+
+  // Searching flattens the hierarchy into a single filtered list.
   await openPicker();
-  await search('sonnet');
+  await search('opus');
+  expect(document.querySelector('.composer-model-card__versions')).toBeNull();
   const flat = options();
-  expect(flat.map(option => option.textContent)).toEqual(['sonnet', 'Sonnet 5.5']);
+  expect(flat.map(option => option.textContent)).toEqual(['opus', 'Opus 5.5', 'Opus 4.6']);
 });
