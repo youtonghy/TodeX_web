@@ -29,6 +29,15 @@ const models: ProviderModelDescriptor[] = [
   { id: 'gpt-astra', displayName: 'GPT Astra', description: '', isDefault: false, supportedReasoningEfforts: [] },
 ];
 
+const groupedModels: ProviderModelDescriptor[] = [
+  { id: 'default', displayName: 'default', description: '', isDefault: true, supportedReasoningEfforts: [] },
+  { id: 'opus', displayName: 'opus', description: 'Opus 5.5', isDefault: false, supportedReasoningEfforts: [], family: 'opus' },
+  { id: 'claude-opus-5-5', displayName: 'Opus 5.5', description: '', isDefault: false, supportedReasoningEfforts: [], family: 'opus' },
+  { id: 'claude-opus-4-6', displayName: 'Opus 4.6', description: '', isDefault: false, supportedReasoningEfforts: [], family: 'opus' },
+  { id: 'sonnet', displayName: 'sonnet', description: 'Sonnet 5.5', isDefault: false, supportedReasoningEfforts: [], family: 'sonnet' },
+  { id: 'claude-sonnet-5-5', displayName: 'Sonnet 5.5', description: '', isDefault: false, supportedReasoningEfforts: [], family: 'sonnet' },
+];
+
 function Harness({ items, onSelectModel }: { items: ProviderModelDescriptor[]; onSelectModel: (id: string) => void }) {
   const [currentModel, setCurrentModel] = useState('claude-opus');
   return createElement(ModelReasoningCard, {
@@ -112,7 +121,7 @@ it('shows an empty state, supports clearing, selects by click, and resets on reo
   await openPicker();
   expect(searchInput()!.value).toBe('');
   expect(options()).toHaveLength(3);
-  const selected = options().find(option => option.getAttribute('aria-selected') === 'true');
+  const selected = options().find(option => option.getAttribute('data-selected') === 'true');
   expect(selected?.textContent).toContain('GPT Astra');
 });
 
@@ -150,4 +159,27 @@ it('renders the empty state for an empty catalog and keeps search usable', async
   expect(searchInput()!.value).toBe('claude');
   expect(options()).toHaveLength(0);
   expect(onSelectModel).not.toHaveBeenCalled();
+});
+
+it('groups family-tagged models into a two-level menu with a latest entry', async () => {
+  const { onSelectModel } = renderCard({ items: groupedModels });
+  await openPicker();
+  // Level one: ungrouped entries plus one row per family.
+  const topLevel = options();
+  expect(topLevel.map(option => option.textContent)).toEqual(['default', 'Opus', 'Sonnet']);
+  // Open the opus submenu via keyboard.
+  const opusRow = topLevel.find(option => option.textContent === 'Opus')!;
+  await act(async () => {
+    opusRow.focus();
+    pressKey(opusRow, 'ArrowRight');
+  });
+  const versions = options().filter(option => option.closest('.composer-model-card__submenu'));
+  expect(versions.map(option => option.textContent)).toEqual(['最新Opus 5.5', 'Opus 5.5', 'Opus 4.6']);
+  await act(async () => { versions[1].click(); });
+  expect(onSelectModel).toHaveBeenCalledExactlyOnceWith('claude-opus-5-5');
+  // Searching flattens the hierarchy again.
+  await openPicker();
+  await search('sonnet');
+  const flat = options().filter(option => option.closest('.composer-model-card__submenu') === null);
+  expect(flat.map(option => option.textContent)).toEqual(['sonnet', 'Sonnet 5.5']);
 });
