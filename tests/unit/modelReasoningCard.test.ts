@@ -161,25 +161,26 @@ it('renders the empty state for an empty catalog and keeps search usable', async
   expect(onSelectModel).not.toHaveBeenCalled();
 });
 
-it('groups family-tagged models into a two-level menu with a latest entry', async () => {
+it('groups family-tagged models into sections with a latest entry', async () => {
   const { onSelectModel } = renderCard({ items: groupedModels });
   await openPicker();
-  // Level one: ungrouped entries plus one row per family.
-  const topLevel = options();
-  expect(topLevel.map(option => option.textContent)).toEqual(['default', 'Opus', 'Sonnet']);
-  // Open the opus submenu via keyboard.
-  const opusRow = topLevel.find(option => option.textContent === 'Opus')!;
-  await act(async () => {
-    opusRow.focus();
-    pressKey(opusRow, 'ArrowRight');
-  });
-  const versions = options().filter(option => option.closest('.composer-model-card__submenu'));
-  expect(versions.map(option => option.textContent)).toEqual(['最新Opus 5.5', 'Opus 5.5', 'Opus 4.6']);
-  await act(async () => { versions[1].click(); });
+  // One level of headers per family; versions sit nested beneath them.
+  const headers = [...document.querySelectorAll<HTMLElement>('.composer-model-card__section-header')];
+  expect(headers.map(header => header.textContent)).toEqual(['Opus', 'Sonnet']);
+  const all = options();
+  expect(all.map(option => option.textContent)).toEqual([
+    'default', '最新Opus 5.5', 'Opus 5.5', 'Opus 4.6', '最新Sonnet 5.5', 'Sonnet 5.5',
+  ]);
+  await act(async () => { all[2].click(); });
   expect(onSelectModel).toHaveBeenCalledExactlyOnceWith('claude-opus-5-5');
+  // The family alias selects as the "latest" entry.
+  await openPicker();
+  await act(async () => { options()[1].click(); });
+  expect(onSelectModel).toHaveBeenCalledTimes(2);
+  expect(onSelectModel).toHaveBeenLastCalledWith('opus');
   // Searching flattens the hierarchy again.
   await openPicker();
   await search('sonnet');
-  const flat = options().filter(option => option.closest('.composer-model-card__submenu') === null);
+  const flat = options();
   expect(flat.map(option => option.textContent)).toEqual(['sonnet', 'Sonnet 5.5']);
 });
