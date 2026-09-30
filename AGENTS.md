@@ -15,6 +15,8 @@
 
 ## Git delivery
 
+- Do every complex task — anything beyond a parameter change or a few localized lines — in a dedicated Git worktree on its own branch, not in the main checkout, which may hold the user's uncommitted work. Install dependencies inside the worktree (`pnpm install`) before running builds or checks.
+- Hand the result back locally: bring the branch into the main checkout (fast-forward or cherry-pick) without modifying the user's uncommitted changes, rerun the relevant checks there, then remove the worktree and its branch.
 - After completing each task, create one or more Git commits for the changes made in that task.
 - Group commits by change category or repository responsibility when the task includes unrelated changes.
 - Run the relevant validation commands before committing whenever practical, and mention any validation that could not be run.
