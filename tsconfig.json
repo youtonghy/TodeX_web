@@ -1,0 +1,5 @@
+{
+  // Root config so editors and the shadcn CLI resolve project aliases; the
+  // build still typechecks via tsconfig.web.json / tsconfig.server.json.
+  "extends": "./tsconfig.web.json"
+}

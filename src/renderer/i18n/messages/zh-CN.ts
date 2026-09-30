@@ -21,6 +21,7 @@ export const zhCN = {
   'site.nav.possibilities': '产品能力',
   'site.nav.how': '工作方式',
   'site.nav.downloads': '下载',
+  'site.nav.docs': '文档',
   'site.nav.openApp': '打开网页版',
   'site.nav.openMenu': '打开导航菜单',
   'site.nav.closeMenu': '关闭导航菜单',
@@ -1416,5 +1417,15 @@ export const zhCN = {
   'ap.grokModelHint': '可选，写入 [models].default，如 grok-build',
   // xterm
   'xterm.interactive': '交互式终端',
+
+  // docs
+  'docs.meta.title': '{page} · TodeX 文档',
+  'docs.brand': '文档',
+  'docs.nav.main': '文档导航',
+  'docs.search.placeholder': '搜索文档',
+  'docs.nav.noResults': '没有匹配的页面',
+  'docs.toc.label': '本页目录',
+  'docs.pager.prev': '上一页',
+  'docs.pager.next': '下一页',
 
 } satisfies Record<string, string>;

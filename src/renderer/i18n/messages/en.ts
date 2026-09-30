@@ -21,6 +21,7 @@ export const en: Messages = {
   'site.nav.possibilities': 'Capabilities',
   'site.nav.how': 'How it works',
   'site.nav.downloads': 'Downloads',
+  'site.nav.docs': 'Docs',
   'site.nav.openApp': 'Open web app',
   'site.nav.openMenu': 'Open navigation menu',
   'site.nav.closeMenu': 'Close navigation menu',
@@ -1416,5 +1417,15 @@ export const en: Messages = {
   'ap.grokModelHint': 'Optional; written to [models].default, e.g. grok-build',
   // xterm
   'xterm.interactive': 'Interactive terminal',
+
+  // docs
+  'docs.meta.title': '{page} · TodeX Docs',
+  'docs.brand': 'Documentation',
+  'docs.nav.main': 'Documentation navigation',
+  'docs.search.placeholder': 'Search docs',
+  'docs.nav.noResults': 'No matching pages',
+  'docs.toc.label': 'On this page',
+  'docs.pager.prev': 'Previous',
+  'docs.pager.next': 'Next',
 
 };

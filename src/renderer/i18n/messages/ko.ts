@@ -21,6 +21,7 @@ export const ko: Messages = {
   'site.nav.possibilities': '기능',
   'site.nav.how': '사용 방법',
   'site.nav.downloads': '다운로드',
+  'site.nav.docs': '문서',
   'site.nav.openApp': '웹 버전 열기',
   'site.nav.openMenu': '탐색 메뉴 열기',
   'site.nav.closeMenu': '탐색 메뉴 닫기',
@@ -1416,5 +1417,15 @@ export const ko: Messages = {
   'ap.grokModelHint': '선택 사항이며 [models].default에 기록됩니다 (예: grok-build)',
   // xterm
   'xterm.interactive': '대화형 터미널',
+
+  // docs
+  'docs.meta.title': '{page} · TodeX 문서',
+  'docs.brand': '문서',
+  'docs.nav.main': '문서 탐색',
+  'docs.search.placeholder': '문서 검색',
+  'docs.nav.noResults': '일치하는 페이지가 없습니다',
+  'docs.toc.label': '이 페이지의 목차',
+  'docs.pager.prev': '이전',
+  'docs.pager.next': '다음',
 
 };

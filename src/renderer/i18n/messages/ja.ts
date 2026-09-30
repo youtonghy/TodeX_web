@@ -21,6 +21,7 @@ export const ja: Messages = {
   'site.nav.possibilities': '機能',
   'site.nav.how': '使い方',
   'site.nav.downloads': 'ダウンロード',
+  'site.nav.docs': 'ドキュメント',
   'site.nav.openApp': 'Web 版を開く',
   'site.nav.openMenu': 'ナビゲーションメニューを開く',
   'site.nav.closeMenu': 'ナビゲーションメニューを閉じる',
@@ -1416,5 +1417,15 @@ export const ja: Messages = {
   'ap.grokModelHint': '任意。[models].default に書き込まれます（例: grok-build）',
   // xterm
   'xterm.interactive': 'インタラクティブターミナル',
+
+  // docs
+  'docs.meta.title': '{page} · TodeX ドキュメント',
+  'docs.brand': 'ドキュメント',
+  'docs.nav.main': 'ドキュメントナビゲーション',
+  'docs.search.placeholder': 'ドキュメントを検索',
+  'docs.nav.noResults': '一致するページがありません',
+  'docs.toc.label': 'このページの目次',
+  'docs.pager.prev': '前へ',
+  'docs.pager.next': '次へ',
 
 };

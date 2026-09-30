@@ -1,0 +1,235 @@
+@import "@heroui-pro/react/css/components/markdown.css";
+@import "@heroui-pro/react/css/components/code-block.css";
+
+/* Docs page — same light palette as the marketing site (website.css loads
+   first and defines the :root tokens this file reuses). */
+
+.docs-page {
+  min-height: 100dvh;
+  background: var(--background);
+  color: var(--foreground);
+  display: flex;
+  flex-direction: column;
+}
+
+.docs-page * { box-sizing: border-box; }
+.docs-page a { text-decoration: none; color: inherit; }
+.docs-page button, .docs-page a { touch-action: manipulation; }
+.docs-page a:focus-visible, .docs-page button:focus-visible, .docs-page input:focus-visible { outline: 2px solid #b24d32; outline-offset: 3px; }
+
+/* ---------- Header ---------- */
+
+.docs-header {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  height: 57px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-inline: 22px;
+  border-bottom: 1px solid #e5e9e4;
+  background: #fcfcfacc;
+  backdrop-filter: blur(16px);
+}
+
+.docs-brand { display: inline-flex; align-items: center; gap: 7px; color: #18212b; font-size: 21px; font-weight: 550; letter-spacing: -.8px; }
+.docs-brand img { width: 25px; height: 25px; object-fit: contain; mix-blend-mode: multiply; }
+
+.docs-brand-divider { color: #b8bfc2; font-weight: 300; font-size: 19px; }
+
+.docs-section-link { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 500; color: #4a5560; padding: 5px 9px; border-radius: 7px; }
+.docs-section-link:hover { background: #eef1ec; }
+
+.docs-header-actions { margin-left: auto; display: flex; align-items: center; gap: 4px; }
+.docs-header-link { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; border-radius: 8px; color: #5c6571; }
+.docs-header-link:hover { background: #eef1ec; }
+.docs-open-app { display: inline-flex; align-items: center; gap: 9px; font-size: 12px; color: #4a5560; padding: 7px 12px; border-radius: 100px; border: 1px solid #e0e5de; background: #fff; margin-left: 6px; }
+.docs-open-app:hover { border-color: #c9d1c6; background: #f6f8f3; }
+.docs-nav-toggle { display: none !important; }
+
+/* The site language switcher is sized for the hero; compact it here. */
+.docs-header .language-select [data-slot="select-trigger"] { min-height: 34px; height: 34px; padding-block: 4px; }
+
+/* ---------- Layout ---------- */
+
+.docs-layout {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 272px minmax(0, 1fr) 216px;
+  align-items: start;
+}
+
+.docs-sidebar {
+  position: sticky;
+  top: 57px;
+  height: calc(100dvh - 57px);
+  overflow-y: auto;
+  border-right: 1px solid #e5e9e4;
+  scrollbar-width: thin;
+}
+
+.docs-nav { padding: 18px 12px 32px; display: flex; flex-direction: column; gap: 12px; }
+
+.docs-search { display: flex; align-items: center; gap: 8px; margin: 2px 6px 6px; padding: 0 10px; height: 34px; border: 1px solid #dfe4dd; border-radius: 8px; background: #f6f8f4; color: #7a8580; }
+.docs-search:focus-within { border-color: #c9b8ad; background: #fff; }
+.docs-search input { flex: 1; min-width: 0; border: 0; background: none; font: inherit; font-size: 12.5px; color: #2c3a45; outline: none; }
+.docs-search input::placeholder { color: #9aa49e; }
+.docs-search input::-webkit-search-cancel-button { display: none; }
+.docs-search kbd { font: 10px "SFMono-Regular", Consolas, monospace; color: #98a19b; border: 1px solid #dde2da; border-bottom-width: 2px; border-radius: 4px; padding: 1px 5px; background: #fff; }
+
+.docs-no-results { margin: 10px 12px 0; font-size: 12px; color: #8b958e; }
+
+/* ---------- ReUI tree as docs nav ---------- */
+
+/* The tree's Tailwind utilities read theme vars; re-theme them to the site
+   palette inside this scope (unlayered rules beat the utility layer). */
+.docs-tree {
+  padding: 0 2px;
+  --background: transparent;
+  --accent: #eef1ec;
+  --accent-foreground: #15222e;
+}
+
+.docs-tree [data-slot="tree-item-label"] {
+  font-size: 13px;
+}
+.docs-tree [data-slot="tree-item-label"] > svg {
+  color: #98a19b;
+}
+
+/* Keyboard focus: the label's ring is the single indicator — mute the page's
+   generic button outline on tree items and tint the ring with the accent. */
+.docs-tree [data-slot="tree-item"]:focus-visible {
+  outline: none;
+}
+.docs-tree [data-slot="tree-item"]:focus-visible > [data-slot="tree-item-label"] {
+  --tw-ring-color: rgb(206 99 69 / 30%);
+}
+
+/* Current page (headless-tree selection is driven by the route). */
+.docs-tree [data-slot="tree-item"][data-selected="true"] > [data-slot="tree-item-label"] {
+  background: #ce634514;
+  color: #b0512f;
+  font-weight: 550;
+}
+
+/* Section headers are non-folder items kept permanently expanded — style them
+   as static group labels. */
+.docs-tree [data-slot="tree-item"].docs-tree-section {
+  margin-top: 10px;
+  cursor: default;
+}
+.docs-tree [data-slot="tree-item"].docs-tree-section:first-of-type {
+  margin-top: 0;
+}
+.docs-tree .docs-tree-section > [data-slot="tree-item-label"],
+.docs-tree .docs-tree-section:hover > [data-slot="tree-item-label"] {
+  background: transparent;
+  padding: 2px 6px;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: #98a19b;
+}
+
+/* ---------- Content ---------- */
+
+.docs-content {
+  min-width: 0;
+  max-width: 800px;
+  padding: 34px 48px 96px;
+}
+
+.docs-breadcrumb { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; font-size: 11px; letter-spacing: .04em; color: #98a19b; text-transform: capitalize; margin-bottom: 18px; }
+.docs-breadcrumb > span:not(:last-child)::after { content: '/'; margin-left: 7px; color: #c3cbc3; }
+.docs-crumb-current { color: #586460; }
+
+.docs-title { font-size: 40px; font-weight: 450; letter-spacing: -.045em; line-height: 1.15; margin: 0 0 10px; color: #15222e; }
+.docs-description { font-size: 14.5px; line-height: 1.75; color: #67757c; margin: 0 0 30px; }
+
+/* Content column tunes for the shared Markdown styles. */
+.docs-content .markdown { font-size: 14.5px; color: #2c3a45; }
+.docs-content .markdown h2 { font-size: 24px; font-weight: 500; letter-spacing: -.03em; margin-top: 44px; scroll-margin-top: 80px; }
+.docs-content .markdown h3 { font-size: 17px; font-weight: 550; letter-spacing: -.02em; margin-top: 30px; scroll-margin-top: 80px; }
+.docs-content .markdown blockquote { font-style: normal; background: #f4f7f1; border-color: #d8e0cf; border-radius: 0 8px 8px 0; padding: 12px 16px; }
+.docs-content .markdown blockquote > p { margin: 0; }
+.docs-content .markdown code.markdown__inline-code { background: #eef1ea; color: #b0512f; }
+.docs-content .markdown a { color: #b0512f; text-decoration: none; }
+.docs-content .markdown a:hover { text-decoration: underline; }
+
+/* Prev / next */
+
+.docs-prev-next { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 64px; }
+.docs-pager { display: flex; align-items: center; gap: 12px; border: 1px solid #e3e7e0; border-radius: 10px; padding: 14px 16px; color: #4a5560; transition: border-color 150ms ease, background-color 150ms ease; }
+.docs-pager:hover { border-color: #ce634566; background: #fbf8f5; }
+.docs-pager.next { justify-content: flex-end; text-align: right; }
+.docs-pager > span { display: flex; flex-direction: column; gap: 3px; font-size: 13.5px; font-weight: 500; }
+.docs-pager small { font-size: 10px; letter-spacing: .06em; text-transform: uppercase; color: #98a19b; font-weight: 400; }
+.docs-pager > svg { color: #98a19b; flex-shrink: 0; }
+.docs-pager:hover > svg { color: #b0512f; }
+
+/* ---------- Right TOC ---------- */
+
+.docs-toc {
+  position: sticky;
+  top: 57px;
+  max-height: calc(100dvh - 57px);
+  overflow-y: auto;
+  padding: 40px 26px 32px 6px;
+  font-size: 12px;
+}
+
+.docs-toc-title { margin: 0 0 12px; font: 10px "SFMono-Regular", Consolas, monospace; letter-spacing: .08em; text-transform: uppercase; color: #98a19b; }
+.docs-toc ul { list-style: none; margin: 0; padding: 0 0 0 12px; border-left: 1px solid #e5e9e4; }
+.docs-toc li { margin: 0; }
+.docs-toc a { display: block; padding: 4.5px 0 4.5px 12px; margin-left: -1px; border-left: 1px solid transparent; color: #75807a; line-height: 1.5; }
+.docs-toc a:hover { color: #2c3a45; }
+.docs-toc a.active { color: #b0512f; border-left-color: #ce6345; font-weight: 500; }
+.docs-toc li.depth-3 a { padding-left: 26px; }
+
+/* ---------- Mobile drawer ---------- */
+
+.docs-nav-overlay { position: fixed; inset: 0; z-index: 60; background: #18222e33; backdrop-filter: blur(3px); }
+.docs-drawer-head { display: none; }
+
+/* ---------- Responsive ---------- */
+
+@media (max-width: 1240px) {
+  .docs-layout { grid-template-columns: 264px minmax(0, 1fr); }
+  .docs-toc { display: none; }
+}
+
+/* On small screens the sidebar itself becomes the slide-in drawer — the nav
+   tree keeps a single mount point this way. */
+@media (max-width: 940px) {
+  .docs-layout { grid-template-columns: minmax(0, 1fr); }
+  .docs-sidebar {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 61;
+    width: min(330px, 86vw);
+    height: auto;
+    display: flex;
+    flex-direction: column;
+    background: #fcfcfa;
+    border-right: 1px solid #e5e9e4;
+    transform: translateX(-102%);
+    visibility: hidden;
+    transition: transform 180ms ease-out, visibility 0s linear 180ms;
+  }
+  .docs-sidebar.open {
+    transform: none;
+    visibility: visible;
+    transition: transform 180ms ease-out;
+  }
+  .docs-drawer-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px 12px 20px; font-size: 14px; font-weight: 550; border-bottom: 1px solid #e5e9e4; }
+  .docs-nav { flex: 1; overflow-y: auto; }
+  .docs-nav-toggle { display: inline-flex !important; }
+  .docs-content { padding: 26px 22px 80px; max-width: none; }
+  .docs-title { font-size: 32px; }
+  .docs-open-app { display: none; }
+}
