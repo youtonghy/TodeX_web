@@ -21,57 +21,40 @@ export type DocPage = {
 
 export const docNav: DocNavNode[] = [
   {
-    id: 'section-getting-started',
-    title: 'Getting Started',
+    id: 'section-introduction',
+    title: 'Introduction',
     children: [
-      { id: 'introduction', title: 'Introduction', page: 'introduction' },
-      {
-        id: 'quick-start',
-        title: 'Quick Start',
-        page: 'quick-start',
-        children: [
-          { id: 'quick-start/backend', title: 'Run the backend', page: 'quick-start/backend' },
-          { id: 'quick-start/connect-agent', title: 'Connect an agent', page: 'quick-start/connect-agent' },
-          { id: 'quick-start/workbench', title: 'Open the workbench', page: 'quick-start/workbench' },
-        ],
-      },
-      { id: 'concepts', title: 'Core concepts', page: 'concepts' },
+      { id: 'introduction', title: 'Overview', page: 'introduction' },
+      { id: 'introduction/quick-start', title: 'Quick start', page: 'introduction/quick-start' },
+      { id: 'introduction/concepts', title: 'Concepts', page: 'introduction/concepts' },
     ],
   },
   {
-    id: 'section-guides',
-    title: 'Guides',
+    id: 'section-backend',
+    title: 'Backend',
     children: [
-      {
-        id: 'guides/agents',
-        title: 'Coding agents',
-        page: 'guides/agents',
-        children: [
-          { id: 'guides/agents/codex', title: 'Codex', page: 'guides/agents/codex' },
-          { id: 'guides/agents/claude', title: 'Claude Code', page: 'guides/agents/claude' },
-          { id: 'guides/agents/acp', title: 'ACP-compatible agents', page: 'guides/agents/acp' },
-        ],
-      },
-      { id: 'guides/git-workspaces', title: 'Git workspaces', page: 'guides/git-workspaces' },
-      { id: 'guides/kanban', title: 'Kanban & tasks', page: 'guides/kanban' },
-      { id: 'guides/mobile-pairing', title: 'Mobile pairing', page: 'guides/mobile-pairing' },
+      { id: 'backend', title: 'Overview', page: 'backend' },
+      { id: 'backend/install', title: 'Install & run', page: 'backend/install' },
+      { id: 'backend/configuration', title: 'Configuration', page: 'backend/configuration' },
+      { id: 'backend/security', title: 'Security & pairing', page: 'backend/security' },
+      { id: 'backend/api', title: 'API reference', page: 'backend/api' },
     ],
   },
   {
-    id: 'section-self-hosting',
-    title: 'Self-hosting',
+    id: 'section-desktop',
+    title: 'Desktop',
     children: [
-      { id: 'self-hosting/web-client', title: 'Web client', page: 'self-hosting/web-client' },
-      { id: 'self-hosting/docker', title: 'Docker deployment', page: 'self-hosting/docker' },
-      { id: 'self-hosting/https', title: 'HTTPS & remote access', page: 'self-hosting/https' },
+      { id: 'desktop', title: 'Overview', page: 'desktop' },
+      { id: 'desktop/setup', title: 'Set up & build', page: 'desktop/setup' },
+      { id: 'desktop/connect', title: 'Connect a backend', page: 'desktop/connect' },
+      { id: 'desktop/workbench', title: 'The workbench', page: 'desktop/workbench' },
     ],
   },
   {
-    id: 'section-reference',
-    title: 'Reference',
+    id: 'section-mobile',
+    title: 'Mobile',
     children: [
-      { id: 'reference/shortcuts', title: 'Keyboard shortcuts', page: 'reference/shortcuts' },
-      { id: 'reference/faq', title: 'FAQ', page: 'reference/faq' },
+      { id: 'mobile', title: 'Overview', page: 'mobile' },
     ],
   },
 ];
@@ -81,649 +64,727 @@ export const defaultDocSlug = 'introduction';
 const body = (markdown: string) => `${markdown.trim()}\n`;
 
 export const docPages: Record<string, DocPage> = {
-  introduction: {
+
+  // ------------------------------------------------------------- Introduction
+
+  'introduction': {
     slug: 'introduction',
-    title: 'Introduction',
-    description: 'What TodeX is, what it is not, and when it is the right tool for the job.',
+    title: 'Overview',
+    description: 'What TodeX is, how the pieces fit together, and where to start.',
     body: body(`
-TodeX is a **self-hostable multi-agent coding workbench**. It connects the
-coding agents you already use — Codex, Claude Code, Pi, and any
-ACP-compatible agent — to one workspace that stays on *your* machine.
+TodeX is a **self-hostable multi-agent coding workbench**. One Rust backend —
+\`todex-agentd\` — orchestrates the coding agents you already use (Codex,
+Claude Code, Pi, Devin, OpenCode, Grok Build, and any ACP-compatible agent)
+behind a single authenticated API. Desktop, web, and mobile clients connect
+to it over an encrypted channel.
 
-Instead of juggling terminal tabs, chat windows, and editor panes, TodeX
-gives every agent a shared view of the same repository: conversations, Git
-state, terminal output, and task boards live side by side.
+Nothing is proxied through TodeX infrastructure: the backend runs on your
+machine or your server, agents run under your own accounts and credentials,
+and your code never leaves the workspace roots you authorize.
 
-## Why TodeX
+## The moving parts
 
-- **Your machine, your rules.** The backend runs locally or on your own
-  server. Code never leaves infrastructure you control.
-- **Agent-agnostic.** Swap agents per conversation, or run several at once
-  on the same workspace.
-- **Everywhere.** The same backend serves the desktop app, this web client,
-  and paired mobile devices.
+\`\`\`text
+TodeX Desktop (Electron)          Todex Mobile (Swift)
+TodeX Web client ──────┐                 │
+                       │  REST /v2/*  +  WebSocket /v2/ws
+                       │  Ed25519 device auth + X25519 / ML-KEM-768
+                       v
+               todex-agentd  (Rust · Tokio · Axum)
+                       │
+        ┌──────────────┼───────────────┬──────────────┐
+        v              v               v              v
+   codex app-      claude stream-   pi rpc      acp profiles
+   server (JSON)   json             (devin, opencode, …)
+\`\`\`
 
-## What it is not
+| Component | What it is |
+| --- | --- |
+| **Backend** | \`todex-agentd\`, the daemon that owns conversations, workspaces, provider drivers, and security. |
+| **Desktop** | Electron + React 19 client with a three-pane workbench. |
+| **Web** | This site serves the same workbench over HTTP — nothing to install. |
+| **Mobile** | Native Swift + UIKit client for iPhone and iPad (in development). |
 
-TodeX is not an agent itself and does not ship its own model. It is the
-workspace layer *around* your agents — you bring the subscriptions and API
-keys, TodeX orchestrates everything else.
+## Highlights
 
-> **Tip:** If you just want to see it in action, the landing page embeds a
-> [live scripted demo](/) of the real workbench — no install required.
+- **Agent-agnostic.** Conversations are provider-agnostic; swap agents per
+  thread or run several side by side on the same workspace.
+- **Persistent conversations.** Every conversation is a folder on the backend
+  host — manifest, append-only event journal, snapshots, and native provider
+  state — so turns resume across client reconnects and daemon restarts.
+- **Fail-closed security.** Devices enroll through a verification code, every
+  request is Ed25519-signed, and transport can upgrade to post-quantum
+  ML-KEM-768.
+- **Full workbench.** Streaming chat with approvals, embedded terminal, Git
+  status and diffs, skills/MCP catalogs, and task boards — identical on
+  desktop and web.
 
 ## Where to go next
 
 | Goal | Doc |
 | --- | --- |
-| Get running in minutes | [Quick start](/docs/quick-start) |
-| Understand the moving parts | [Core concepts](/docs/concepts) |
-| Run it on your own server | [Self-hosting](/docs/self-hosting/web-client) |
+| Get running in ten minutes | [Quick start](/docs/introduction/quick-start) |
+| Learn the vocabulary | [Concepts](/docs/introduction/concepts) |
+| Run the backend | [Backend overview](/docs/backend) |
+| Use the desktop app | [Desktop overview](/docs/desktop) |
 `),
   },
 
-  'quick-start': {
-    slug: 'quick-start',
-    title: 'Quick Start',
-    description: 'From zero to a working agent conversation in three steps.',
+  'introduction/quick-start': {
+    slug: 'introduction/quick-start',
+    title: 'Quick start',
+    description: 'Install the backend, pair a client, and start your first agent conversation.',
     body: body(`
-This is the fastest path to a running TodeX setup. You will:
+You need a machine that can run the backend and at least one authenticated
+agent CLI (\`codex\`, \`claude\`, \`pi\`, \`devin\`, \`opencode\`, …).
 
-1. Run the **backend** daemon on a machine you control.
-2. Connect a **coding agent** with your own credentials.
-3. Open the **workbench** and send your first prompt.
+## 1. Install the backend
 
-## Before you start
+On macOS, Linux, or WSL — no Rust toolchain required:
 
-- Node.js 22 or newer on the host machine.
-- At least one supported agent installed — for example Codex or
-  Claude Code — with an active subscription or API key.
+\`\`\`bash
+curl -fsSL https://raw.githubusercontent.com/youtonghy/TodeX_backend/main/install.sh | bash
+\`\`\`
 
-## The three steps
+The script installs \`todex-agentd\` into \`~/.local/bin\`, verifies the
+release checksums, and restarts a running managed daemon. Pin a release with
+\`install.sh install --version 2.0.2\`, or build from source with
+\`cargo build --release\`.
 
-### 1. Run the backend
+## 2. Start it and approve your device
 
 \`\`\`bash
 todex-agentd tui
 \`\`\`
 
-The daemon starts on your machine and prints the address your clients
-should connect to. Keep it running.
+The TUI shows daemon status, live logs, and pairing tools. When a client
+requests access for the first time, press \`d\` to show the verification code,
+compare it with the client, then press \`a\` to approve (or \`r\` to reject).
+Quitting the TUI leaves the daemon running in the background.
 
-### 2. Connect an agent
+## 3. Connect a client
 
-In the workbench, open **Settings → Agent providers** and pick the agent
-you want. TodeX reuses the agent's own CLI login, so an agent that works in
-your terminal works here too.
+- **Desktop** — install a package from the release page, open Settings, and
+  enter the backend URL (default \`http://127.0.0.1:7345\`). Complete device
+  verification, then import the encryption public key via QR code or pairing
+  JSON if post-quantum encryption is enabled.
+- **Web** — open \`/app\` on a hosted TodeX site, or the page served by your
+  own deployment, and point it at your backend the same way.
 
-### 3. Open the workbench
+## 4. Create a workspace and a conversation
 
-Open \`http://localhost:4173/app\` (or the desktop app), create a workspace
-pointed at a Git repository, and start a conversation.
+Add a project directory inside a configured workspace root, mark it trusted,
+then start a conversation with any available provider. Prompts, approvals,
+terminal, and Git state all stream over the same connection.
 
-> **Note:** Each step has its own page with screenshots and edge cases —
-> use the menu on the left to jump straight to [Run the
-> backend](/docs/quick-start/backend), [Connect an
-> agent](/docs/quick-start/connect-agent), or [Open the
-> workbench](/docs/quick-start/workbench).
+## Troubleshooting
+
+| Symptom | Check |
+| --- | --- |
+| Client can't reach the backend | \`todex-agentd daemon status\`; the port is 7345 by default |
+| \`401\` on every request | Device not approved — redo verification in the TUI |
+| WebSocket fails while REST works | Encryption mismatch — import the backend's public key |
+| Agent shows unavailable | The provider CLI isn't installed or logged in on the host |
 `),
   },
 
-  'quick-start/backend': {
-    slug: 'quick-start/backend',
-    title: 'Run the backend',
-    description: 'Install and start the todex-agentd daemon.',
+  'introduction/concepts': {
+    slug: 'introduction/concepts',
+    title: 'Concepts',
+    description: 'The vocabulary behind every TodeX screen: providers, workspaces, conversations, devices.',
     body: body(`
-The **backend** (\`todex-agentd\`) is the daemon that owns your workspaces
-and talks to your agents. Every client — desktop, web, mobile — connects
-to it.
+## Providers and provider drivers
+
+A *provider* is an agent engine the backend can drive — Codex, Claude Code,
+Pi, Grok Build, Devin, OpenCode, or any ACP 2.0 profile declared in
+\`config.toml\`. Each provider has a native driver (JSON-RPC app-server,
+stream-json, RPC, or ACP stdio) so capabilities like skills, slash commands,
+and model catalogs come straight from the installed CLI instead of being
+approximated.
+
+*Provider accounts* (the cc-switch model) let you keep several account
+profiles per agent — TodeX activates one by rewriting the agent's own global
+config, so sessions started outside TodeX behave identically.
+
+## Workspaces and trust
+
+A *workspace* is a project directory under a configured *workspace root*
+(\`TODEX_AGENTD_WORKSPACE_ROOT\`, default \`~/projects\`). New workspaces are
+untrusted by default: trusting one is an explicit, owner-scoped decision that
+controls what agents may execute there. Untrusting a workspace cancels its
+active turns.
+
+## Conversations
+
+A conversation is a folder under \`$DATA_DIR/conversations/<uuid>/\`:
+
+| File | Contents |
+| --- | --- |
+| \`manifest.json\` | Metadata, active provider profile, workspace, timestamps |
+| \`events.jsonl\` | Append-only event journal — the source of truth for history |
+| \`snapshot.json\` | Compact state snapshot for fast reloads |
+| \`provider-state.json\` | Native engine state for turn resumption |
+
+Turns are optimistic-concurrency protected: a second mutation while a turn
+runs returns \`409 Conflict\` instead of silently queueing.
+
+## Devices and pairing
+
+Clients don't log in with passwords. Each client *device* generates an
+Ed25519 key and requests enrollment; you approve it once by comparing a code
+in the backend TUI. From then on every HTTP request carries a device
+signature, and devices can be revoked individually.
+
+## Transport encryption
+
+| Mode | Meaning |
+| --- | --- |
+| \`none\` | Plaintext (loopback-only setups) |
+| \`x25519\` | X25519 + ChaCha20-Poly1305 |
+| \`ml-kem-768\` | NIST post-quantum ML-KEM-768 (default for pairing) |
+
+Encryption keys are exchanged through pairing QR codes or JSON payloads —
+separately from device approval.
+
+## Tenants
+
+All data is namespaced by \`tenant_id\`; queries, journals, and subscriptions
+can never cross tenants.
+`),
+  },
+
+  // ------------------------------------------------------------------ Backend
+
+  'backend': {
+    slug: 'backend',
+    title: 'Backend overview',
+    description: 'todex-agentd — the Rust daemon that orchestrates agents, conversations, and security.',
+    body: body(`
+\`todex-agentd\` is the core of TodeX: a single Rust binary built on Tokio and
+Axum that exposes one REST surface (\`/v2/*\`) and one multiplexed WebSocket
+(\`/v2/ws\`) for event streams, approvals, and terminal sessions.
+
+## Provider drivers
+
+| Provider | Transport | Notes |
+| --- | --- | --- |
+| **Codex** | JSON-RPC app-server | \`start\`, \`turn\`, \`status\`, \`stop\`, \`attach\`, \`replay\`, \`interrupt\` |
+| **Claude Code** | stream-json | Drives the Claude CLI; built-in model aliases without a gateway |
+| **Pi** | Native RPC | Command discovery, dynamic models, interactive tool approval |
+| **Grok Build** | Managed CLI | Versioned, self-updatable like other managed CLIs |
+| **ACP 2.0** | stdio profiles | Devin (\`devin acp\`), OpenCode (\`opencode acp\`), custom \`config.toml\` profiles |
+
+The backend never mutates provider installations to serve a UI: capability
+catalogs (skills, MCP servers, slash commands, models) are introspected live
+with project-over-user precedence, and skills are injected into prompts by
+\`resourceId\` rather than uploaded.
+
+## Conversation engine
+
+All turn state lives in conversation folders, journaled as append-only
+events with snapshots and native provider state. Subscriptions replay from a
+sequence number (\`afterSequence\`) so clients resynchronize after reconnects
+without losing messages.
+
+## One socket, many channels
+
+\`/v2/ws\` multiplexes conversation subscriptions, prompt dispatch,
+permission decisions, PTY terminal sessions, and engine controls over a
+single connection — with heartbeat detection and UTF-8 frame enforcement.
+
+## Managing the daemon
+
+\`todex-agentd\` ships an interactive TUI (\`todex-agentd tui\`) for status,
+logs, device approval, and pairing QR codes, plus a PID-file daemon mode
+(\`daemon start|stop|restart|status\`) and login autostart
+(\`daemon autostart enable\`). See [Install & run](/docs/backend/install).
+`),
+  },
+
+  'backend/install': {
+    slug: 'backend/install',
+    title: 'Install & run',
+    description: 'Install script, building from source, run modes, and updates.',
+    body: body(`
+## Install script (macOS / Linux / WSL)
+
+\`\`\`bash
+curl -fsSL https://raw.githubusercontent.com/youtonghy/TodeX_backend/main/install.sh | bash
+\`\`\`
+
+\`\`\`bash
+install.sh install                 # install or update to the latest release
+install.sh update                  # update an existing install
+install.sh install --version 2.0.2 # pin a specific release
+install.sh status                  # installed/latest versions and daemon state
+install.sh uninstall               # stop the daemon and remove the binary
+install.sh uninstall --purge       # also remove the ~/.todex-agent data dir
+\`\`\`
+
+The script installs to \`~/.local/bin\` (override with \`--prefix\` or
+\`TODEX_INSTALL_DIR\`), verifies \`SHA256SUMS\`, keeps one rollback copy, and
+restarts a running managed daemon. The prebuilt Linux binary needs glibc
+2.28+; musl distributions such as Alpine must build from source. WSL is
+detected automatically.
+
+A pinned \`--version\` stays only with \`TODEX_AUTO_UPDATE=0\` — otherwise
+\`serve\`, \`tui\`, and \`daemon start\` self-update on launch, and a running
+daemon restarts into the new release once no agent has run for five minutes.
+
+## Build from source
+
+\`\`\`bash
+cargo build --release
+\`\`\`
+
+Requires Rust 1.80+ (MSRV). The binary is \`todex-agentd\`.
+
+## Run modes
+
+\`\`\`bash
+# Interactive TUI — status, logs, device approval, pairing QR codes
+todex-agentd tui
+
+# Foreground server
+todex-agentd serve --host 127.0.0.1 --port 7345
+
+# Background daemon (PID file under the data dir)
+todex-agentd daemon start
+todex-agentd daemon status
+todex-agentd daemon restart
+todex-agentd daemon stop
+
+# Launch at login (launchd / systemd user service / registry Run key)
+todex-agentd daemon autostart enable
+\`\`\`
+
+Quitting the TUI leaves the daemon running. Pairing QR codes render as solid
+terminal cells; press \`b\` in the QR popup to open a square SVG version in
+the browser when the code doesn't fit the terminal.
+`),
+  },
+
+  'backend/configuration': {
+    slug: 'backend/configuration',
+    title: 'Configuration',
+    description: 'config.toml, environment variables, and how they resolve.',
+    body: body(`
+## Precedence
+
+1. Command-line arguments
+2. Environment variables
+3. \`$TODEX_AGENTD_DATA_DIR/config.toml\` (default \`~/.todex-agent/config.toml\`)
+4. Built-in defaults
+
+## Options
+
+| Option | CLI flag | Environment | Default |
+| --- | --- | --- | --- |
+| Host | \`--host\` | \`TODEX_AGENTD_HOST\` | \`127.0.0.1\` |
+| Port | \`--port\` | \`TODEX_AGENTD_PORT\` | \`7345\` |
+| Data directory | \`--data-dir\` | \`TODEX_AGENTD_DATA_DIR\` | \`~/.todex-agent\` |
+| Workspace roots | \`--workspace-root\` (repeatable) | \`TODEX_AGENTD_WORKSPACE_ROOT\` / \`TODEX_AGENTD_WORKSPACE_ROOTS\` | \`~/projects\` |
+| Default agent | — | \`TODEX_AGENTD_DEFAULT_AGENT\` | \`codex\` |
+| Codex binary | — | \`TODEX_AGENTD_CODEX_BIN\` | \`codex\` |
+| Claude binary | — | \`TODEX_AGENTD_CLAUDE_BIN\` | \`claude\` |
+| Pi binary | — | \`TODEX_AGENTD_PI_BIN\` | \`pi\` |
+| Device auth | — | \`TODEX_AGENTD_ENABLE_AUTH\` | \`true\` |
+| Pairing encryption | — | \`TODEX_AGENTD_PAIRING_ENCRYPTION\` | \`ml-kem-768\` |
+
+## Example \`config.toml\`
+
+\`\`\`toml
+host = "127.0.0.1"
+port = 7345
+pairing_encryption = "ml-kem-768"
+data_dir = "~/.todex-agent"
+workspace_root = "~/projects"
+# workspace_roots = ["~/projects", "/srv/repos"]
+
+[agent]
+default_agent = "codex"
+codex_bin = "codex"
+claude_bin = "claude"
+pi_bin = "pi"
+# Stop a turn whose provider produces no output for this many minutes (0 disables).
+provider_idle_timeout_minutes = 60
+
+[agent.acp_profiles.default]
+command = "mcp-server"
+args = ["--stdio"]
+
+[security]
+enable_auth = true
+enable_tls = false
+\`\`\`
+
+> **Note:** \`enable_tls = true\` is intentionally blocked on the native
+> listener to prevent false security assumptions. For remote access,
+> terminate TLS at a trusted reverse proxy such as Nginx, Caddy, or
+> Cloudflare Tunnel.
+`),
+  },
+
+  'backend/security': {
+    slug: 'backend/security',
+    title: 'Security & pairing',
+    description: 'Device verification, request signing, workspace boundaries, and transport encryption.',
+    body: body(`
+TodeX is fail-closed: nothing talks to the backend until a device is
+explicitly approved, and every request is cryptographically signed.
+
+## Device verification
+
+Each client device generates an Ed25519 key pair and requests enrollment. The
+flow is human-verified:
+
+1. The client shows a random verification code and waits.
+2. In the backend TUI, press \`d\` to open the device panel and compare the
+   full code.
+3. Press \`a\` to approve or \`r\` to reject. Approved devices appear in the
+   same panel; \`x\` revokes the selected device.
+
+After approval, every HTTP request carries the device signature —
+unauthorized requests are rejected with \`401 Unauthorized\`. Device approval
+and transport encryption are separate: encryption public keys still require
+QR-code or manual import.
+
+## Transport encryption
+
+| Mode | Suite | When |
+| --- | --- | --- |
+| \`none\` | Plaintext | Loopback-only setups |
+| \`x25519\` | X25519 + ChaCha20-Poly1305 | General remote access |
+| \`ml-kem-768\` | NIST post-quantum ML-KEM | Default for pairing |
+
+Keys are exchanged through pairing QR codes (including multi-frame ML-KEM
+segments rendered as solid terminal cells, or a browser-rendered SVG via the
+\`b\` key) or by importing a pairing JSON payload.
+
+## Workspace boundaries
+
+\`workspace_roots\` restricts every file and directory API to authorized
+scopes — clients cannot read outside them. Per-workspace trust is
+owner-scoped, new workspaces start untrusted, and revoking trust cancels
+active turns and detaches the workspace without deleting its conversations.
+
+## Isolation
+
+- **Tenants** — every query, journal, and subscription is scoped by
+  \`tenant_id\`.
+- **Subprocesses** — agent CLIs run with sanitized environments so
+  administrative variables don't leak into provider sessions.
+- **TLS** — the native listener refuses \`enable_tls\`; terminate TLS at a
+  reverse proxy instead of trusting a bypass.
+`),
+  },
+
+  'backend/api': {
+    slug: 'backend/api',
+    title: 'API reference',
+    description: 'The /v2 REST surface and the multiplexed /v2/ws WebSocket.',
+    body: body(`
+All endpoints live under \`/v2\`. Every request must carry a registered
+device signature; bodies and responses are JSON.
+
+## System
+
+| Endpoint | Purpose |
+| --- | --- |
+| \`GET /health\` | Liveness probe |
+| \`GET /v2/version\` | Daemon version, workspace root, capabilities |
+
+## Workspaces
+
+| Endpoint | Purpose |
+| --- | --- |
+| \`GET /v2/workspaces\` | Cached workspaces for the current tenant |
+| \`PUT /v2/workspaces\` | Merge workspace caches; returns canonical IDs and auto-trusts undecided directories inside the workspace boundary |
+| \`GET \\| PUT /v2/workspaces/{id}/trust\` | Read or change owner-scoped execution trust (new workspaces are untrusted) |
+| \`DELETE /v2/workspaces/{id}\` | Revoke trust, cancel active turns, remove the workspace (conversations are kept) |
+| \`GET /v2/workspace/entries?workspace=&query=\` | File/folder suggestions for the \`@\` picker |
+| \`GET /v2/workspace/directories?path=\` | Directory tree explorer |
+| \`GET /v2/workspace/file?path=\` | Read a file inside the sandbox root |
+| \`GET /v2/browser/fetch?url=\` | Proxy a web resource fetch |
+
+## Providers
+
+| Endpoint | Purpose |
+| --- | --- |
+| \`GET /v2/providers\` | Providers and their active states |
+| \`GET /v2/providers/versions\` | Installed vs latest CLI versions for each agent |
+| \`POST /v2/providers/{provider}/install\` | Install a missing managed CLI (vendor's official script) |
+| \`POST /v2/providers/{provider}/upgrade\` | Start a single-flight CLI upgrade; active agent work blocks it |
+| \`GET /v2/providers/upgrades/{operationId}\` | Async install/upgrade progress and verified version |
+| \`GET /v2/providers/models?provider=&workspace=\` | Provider's model catalog |
+| \`GET /v2/providers/commands?provider=&workspace=\` | Slash commands and extensions |
+
+Provider accounts live under \`/v2/agent-providers/{agent}\`, with
+\`GET .../export\` and \`POST .../import\` moving profiles between hosts as a
+signed JSON file.
+
+## Conversations
+
+| Endpoint | Purpose |
+| --- | --- |
+| \`GET /v2/conversations\` | Persisted conversations for the tenant |
+| \`POST /v2/conversations\` | Create a conversation folder with a provider |
+| \`GET /v2/conversations/{id}\` | Manifest and details |
+| \`GET /v2/conversations/{id}/events?afterSequence=&limit=\` | Paginated event journal; \`beforeSequence=N\` pages backwards for lazy history |
+| \`POST /v2/conversations/{id}/prompt\` | Dispatch a turn — text, typed content, model, reasoning effort, skill resource IDs |
+| \`POST /v2/conversations/{id}/cancel\` | Cancel the running turn |
+| \`POST /v2/conversations/{id}/permissions/{permissionId}\` | Resolve an interactive approval |
+
+A second mutation while a turn is running returns \`409 Conflict\` — turns
+are not silently queued.
+
+## WebSocket — \`/v2/ws\`
+
+One connection multiplexes:
+
+- \`conversation.subscribe\` — live event journals with sequence-based resume
+- Prompt dispatch and cancellation
+- Permission decisions
+- \`terminal.open\` / \`terminal.input\` / \`terminal.resize\` / \`terminal.close\` — PTY sessions
+- Local Codex engine process control
+
+Frames enforce UTF-8 length limits; heartbeats detect dead connections.
+
+The authoritative contract is [docs/API.md](https://github.com/youtonghy/TodeX_backend/blob/main/docs/API.md)
+in the backend repository.
+`),
+  },
+
+  // ------------------------------------------------------------------ Desktop
+
+  'desktop': {
+    slug: 'desktop',
+    title: 'Desktop overview',
+    description: 'The Electron client — a three-pane workbench for macOS, Windows, and Linux.',
+    body: body(`
+TodeX Desktop is a native client for \`todex-agentd\` built with Electron 44,
+React 19, Vite 7, Tailwind CSS v4, and HeroUI Pro. It shares the
+\`@todex/protocol\` transport library with the web client, so the workbench
+is identical — the desktop app adds native integrations on top.
+
+## Three panes
+
+- **Left sidebar** — workspace explorer, conversation history with agent
+  badges, thread lifecycle (New, Rename, Fork, Delete), and quick settings.
+- **Center chat** — streaming Markdown timeline with Shiki highlighting and
+  KaTeX math, interactive approval cards (commands, diffs, tool calls), and
+  a prompt box with model + reasoning-effort pickers, \`@\` file mentions,
+  \`/\` slash commands, \`#\` skill/MCP suggestions, and Codex Fast mode.
+- **Right workbench** — tabbed drawer with Slash Commands reference, live
+  Git Diff, an embedded xterm.js PTY terminal, the Skills/MCP Capabilities
+  catalog, and Experiments.
+
+## Desktop-only extras
+
+- Native file and directory pickers for loopback workspaces.
+- **Drag & drop pairing** — drop a QR screenshot onto the window to decode
+  it locally (jsQR), or paste pairing JSON / segmented ML-KEM payloads.
+- Electron \`userData\` persistence, secure IPC via \`contextBridge\`
+  (\`nodeIntegration: false\`), and per-build diagnostics logs.
+- Connection diagnostics that distinguish unreachable backends, bad URLs,
+  auth failures, deprecated \`/v1\` endpoints, and WebSocket mismatches.
+
+## Releases
+
+Prebuilt packages ship from GitHub Releases: Windows NSIS (x64 + ARM64),
+macOS Apple Silicon DMG, Linux x64 AppImage, with SHA-256 checksums. See
+[Set up & build](/docs/desktop/setup) for development builds.
+`),
+  },
+
+  'desktop/setup': {
+    slug: 'desktop/setup',
+    title: 'Set up & build',
+    description: 'Prerequisites, development mode, and release packaging.',
+    body: body(`
+## Requirements
+
+- Node.js 22+, pnpm 11+
+- A running \`todex-agentd\` backend (default \`http://127.0.0.1:7345\`)
+- A HeroUI Pro license token for package installation
 
 ## Install
 
-\`\`\`bash
-npm install -g todex-agentd
-\`\`\`
-
-## Start
+\`@heroui-pro/react\` authenticates during install, so export the token first:
 
 \`\`\`bash
-todex-agentd tui
+export HEROUI_AUTH_TOKEN="your_heroui_key"   # or: export HEROUI_AUTH_TOKEN="$HEROUI_KEY"
+pnpm install
+pnpm run dev
 \`\`\`
 
-The TUI shows the listen address, connected agents, and live sessions. For
-a headless server use \`todex-agentd serve\` instead.
+> **Warning:** never commit the token to the repository.
 
-## Verify
+If the Electron binary download breaks midway, repair it with
+\`rm -rf node_modules/electron/dist && node node_modules/electron/install.js\`.
 
-\`\`\`bash
-curl http://localhost:4173/healthz
-# {"status":"ok"}
-\`\`\`
+## Scripts
 
-## Common options
+| Command | What it does |
+| --- | --- |
+| \`pnpm run dev\` | Predev checks, then the app in Vite dev mode (1280×800 window) |
+| \`pnpm run build\` | Build main, preload, and renderer |
+| \`pnpm run package\` | Package with electron-builder |
+| \`pnpm run preview\` | Preview the production build |
+| \`pnpm run typecheck\` | Typecheck main + renderer targets |
+| \`pnpm run check:electron\` | Verify the native Electron binary |
 
-| Flag | Default | Purpose |
+## Releases
+
+Packages are produced by the **Release desktop packages** GitHub workflow:
+enter a semver like \`1.2.3\` and it publishes Windows NSIS (x64 + ARM64), a
+macOS Apple Silicon DMG, a Linux x64 AppImage, and SHA-256 sums to the
+release tag. Development builds report \`DEV0.0.0\`; the workflow needs
+\`HEROUI_AUTH_TOKEN\` and — while the protocol repo is private —
+\`PROTOCOL_REPO_TOKEN\` Actions secrets. macOS releases require signing; see
+\`docs/automatic-updates.md\` in the desktop repo.
+
+## Development logs
+
+Builds stamped \`DEV0.0.0\` write diagnostics to
+\`userData/logs/todex-desktop-debug.log\` (override with
+\`TODEX_DESKTOP_LOG_PATH\`). Logs cover window, IPC, HTTP, WebSocket, and
+uncaught errors with tokens, cookies, keys, and attachments redacted.
+`),
+  },
+
+  'desktop/connect': {
+    slug: 'desktop/connect',
+    title: 'Connect a backend',
+    description: 'Pairing flows, device verification, and connection diagnostics.',
+    body: body(`
+The desktop app talks to one backend at a time over REST + WebSocket; every
+request is signed with the device's enrolled key.
+
+## Ways to pair
+
+| Method | How |
+| --- | --- |
+| **Device verification** | Connect with host/port; the app shows a code — approve it in the backend TUI (\`d\`, then \`a\`) and the token is saved. |
+| **Drag & drop QR** | Drop a QR screenshot or image file onto the window; decoded locally with jsQR. Supports multi-frame ML-KEM segments. |
+| **Paste pairing JSON** | Paste a full pairing payload, including segmented QR text. |
+| **Manual** | Enter the backend URL and import the encryption public key by hand. |
+
+Device approval and encryption are separate steps — when pairing encryption
+is \`x25519\` or \`ml-kem-768\` the client still needs the backend's public
+key (QR or manual import) after the device is approved.
+
+## Managing providers from the client
+
+The pairing panel lists the backend's Codex, Pi, Claude Code, Grok Build, and
+ACP CLI inventory with installed vs latest versions, installs missing CLIs
+in one click, and starts managed upgrades. Provider accounts can be exported
+and imported as a JSON file to sync agent credentials between hosts — the
+file contains keys in plain text, so handle it like a secret.
+
+## Diagnostics
+
+| State | Cause | Fix |
 | --- | --- | --- |
-| \`--port\` | \`4173\` | HTTP/WebSocket listen port |
-| \`--host\` | \`0.0.0.0\` | Bind address; use \`127.0.0.1\` for local-only |
-| \`--data-dir\` | platform default | Where workspaces and session state live |
-
-> **Security note:** The backend executes agent commands on the host. Bind
-> it to \`127.0.0.1\` unless you have set up remote pairing — see
-> [HTTPS & remote access](/docs/self-hosting/https).
+| Backend unreachable | \`/v2/version\` or \`/health\` fails | Start \`todex-agentd\`; check the port |
+| Invalid backend URL | URL can't be parsed | Use \`http://127.0.0.1:7345\` form |
+| Authentication failed | HTTP 401/403 | Re-run device verification |
+| Deprecated protocol | URL path contains \`/v1\` | Switch to \`/v2\` |
+| WebSocket failure | REST works, \`/v2/ws\` fails | Firewall, token, or crypto mismatch — re-import the key |
+| Agent unavailable | Provider shows \`available = false\` | Install/authenticate the agent CLI on the backend host |
 `),
   },
 
-  'quick-start/connect-agent': {
-    slug: 'quick-start/connect-agent',
-    title: 'Connect an agent',
-    description: 'Register a coding agent provider with your own credentials.',
+  'desktop/workbench': {
+    slug: 'desktop/workbench',
+    title: 'The workbench',
+    description: 'Sidebar, chat panel, workbench tabs, and keyboard shortcuts.',
     body: body(`
-TodeX talks to agents through **providers**. A provider wraps the agent's
-CLI or protocol and describes which models and thinking levels it offers.
-
-## Add a provider
-
-1. Open **Settings → Agent providers**.
-2. Click **Add provider** and pick the agent type.
-3. Choose the auth mode — subscription (reuses the CLI login) or API key.
-
-\`\`\`
-Provider:  Claude Code
-Auth:      Official subscription (claude login)
-Models:    claude-sonnet-*, claude-opus-*
-\`\`\`
-
-## How auth works
-
-- **Subscription** — TodeX points the agent at the session already on disk,
-  the same credentials the CLI uses.
-- **API key** — stored locally on the backend host; masked in the UI after
-  saving.
-
-## Pick a model
-
-Each conversation can pin a model and a reasoning effort. Leave the model
-list empty to accept the agent's defaults.
-
-> **Tip:** Mix providers freely — a single workspace can hold a Codex
-> conversation and a Claude Code conversation side by side.
-`),
-  },
-
-  'quick-start/workbench': {
-    slug: 'quick-start/workbench',
-    title: 'Open the workbench',
-    description: 'Create a workspace and send your first prompt.',
-    body: body(`
-The **workbench** is the three-pane app you saw on the landing page:
-history and workspaces on the left, the conversation in the middle, and
-tools — terminal, Git, files, browser — on the right.
-
-## Create a workspace
-
-1. Click **New workspace**.
-2. Pick a local Git repository (or an empty folder).
-3. Name it — the name shows up in history and on paired devices.
-
-## Start a conversation
-
-Press \`⌘ N\` or click **New conversation**, choose an agent, and type a
-prompt. The agent sees the workspace root as its working directory.
-
-## Try this first
-
-\`\`\`
-Look at the repo structure and tell me what this project does.
-\`\`\`
-
-While it runs, open the **Git changes** panel to watch the working tree,
-or the **Terminal** panel (\`⌘ 3\`) for a real shell in the same directory.
-
-## You are set up
-
-From here, the [Guides](/docs/guides/agents) section walks through each
-agent's specifics and the features that make the workspace feel like home.
-`),
-  },
-
-  concepts: {
-    slug: 'concepts',
-    title: 'Core concepts',
-    description: 'The four nouns TodeX is built around.',
-    body: body(`
-Four nouns cover most of TodeX. Once these click, every panel and setting
-makes sense.
-
-## Backend
-
-The \`todex-agentd\` daemon. It owns state, runs agents, and serves every
-client. One backend can serve many clients at once.
-
-## Workspace
-
-A directory (usually a Git repository) the backend watches. Workspaces hold
-their own conversations, terminals, and task boards.
-
-## Conversation
-
-A session with one agent inside one workspace. Conversations are resumable —
-close the client, reopen it on another device, and the same stream
-continues.
-
-## Agent provider
-
-A configured coding agent: its auth, models, and capabilities. Providers
-are backend-wide, so every client sees the same list.
-
-## How they fit together
-
-\`\`\`
-todex-agentd (backend)
- └── Workspace ── Conversation ── Agent provider
-        └── Terminal · Git · Files · Kanban
-\`\`\`
-
-Clients — desktop, web, mobile — are thin views onto this tree.
-`),
-  },
-
-  'guides/agents': {
-    slug: 'guides/agents',
-    title: 'Coding agents',
-    description: 'How providers, models, and thinking levels work across agents.',
-    body: body(`
-Every agent plugs into TodeX through the same provider contract, but each
-one keeps its own personality: its model names, its thinking levels, its
-tooling.
-
-## What is shared
-
-- **Auth** — subscription or API key, stored on the backend.
-- **Models** — a picker with enable/disable per model.
-- **Reasoning effort** — mapped to whatever the agent calls it
-  (thinking, effort, reasoning level).
-
-## What differs
-
-| Agent | Auth | Notable extras |
-| --- | --- | --- |
-| Codex | Subscription or API key | Plan mode, code-review prompts |
-| Claude Code | Subscription or API key | Skills, subagents |
-| Pi | API key | Extension panels in the UI |
-| ACP agents | Agent-specific | Anything ACP-capable |
-
-## Picking the right one
-
-Use the agent that already reads your codebase well — the workspace, Git
-state, and history are identical either way, so switching agents mid-task
-costs nothing.
-
-> Pick a specific agent on the left for its setup quirks:
-> [Codex](/docs/guides/agents/codex) · [Claude
-> Code](/docs/guides/agents/claude) · [ACP-compatible
-> agents](/docs/guides/agents/acp)
-`),
-  },
-
-  'guides/agents/codex': {
-    slug: 'guides/agents/codex',
-    title: 'Codex',
-    description: 'OpenAI Codex as a TodeX provider.',
-    body: body(`
-Codex connects through its CLI login or an API key, and exposes
-OpenAI's \`gpt\` and \`codex\` model families.
-
-## Setup
-
-1. Run \`codex login\` on the backend host once (subscription path).
-2. In TodeX: **Settings → Agent providers → Add → Codex**.
-3. Pick the models you want available in the model picker.
-
-## Highlights
-
-- **Plan mode** — ask Codex to plan before it edits; the plan renders in
-  the conversation before any code changes.
-- **Reasoning effort** — low / medium / high / xhigh, mapped to Codex's
-  own effort levels.
-
-## Useful prompts
-
-\`\`\`
-/plan Refactor the session store to use transactions.
-\`\`\`
-
-Codex runs entirely under your account — TodeX never proxies the model
-traffic.
-`),
-  },
-
-  'guides/agents/claude': {
-    slug: 'guides/agents/claude',
-    title: 'Claude Code',
-    description: 'Anthropic Claude Code as a TodeX provider.',
-    body: body(`
-Claude Code connects through \`claude login\` (subscription) or an
-\`ANTHROPIC_API_KEY\`, and brings its skills and subagent ecosystem along.
-
-## Setup
-
-1. Run \`claude login\` on the backend host once.
-2. **Settings → Agent providers → Add → Claude Code**.
-3. Enable the models you want (Sonnet, Opus, Haiku).
-
-## Highlights
-
-- **Skills** — repo-level \`SKILL.md\` files are picked up automatically.
-- **Subagents** — spawned subagent runs appear inline in the conversation
-  timeline with their own status.
-
-## Notes
-
-Claude Code's permission prompts surface in TodeX as approval cards —
-approve once per tool, per session, or always.
-`),
-  },
-
-  'guides/agents/acp': {
-    slug: 'guides/agents/acp',
-    title: 'ACP-compatible agents',
-    description: 'Any agent that speaks the Agent Client Protocol.',
-    body: body(`
-The **Agent Client Protocol (ACP)** is the open contract TodeX uses
-internally. Any agent with an ACP driver works out of the box.
-
-## Built-in drivers
-
-- Pi
-- Grok Build
-- Devin
-- OpenCode
-
-## Bring your own
-
-If an agent speaks ACP, point a custom provider at its command:
-
-\`\`\`
-Provider:  Custom (ACP)
-Command:   my-agent --acp
-\`\`\`
-
-TodeX handles the session lifecycle, streaming, and permission bridge —
-your agent just implements the protocol.
-
-> **Deep dive:** the protocol itself lives in the
-> [\`TodeX_protocol\`](https://github.com/youtonghy/TodeX_backend)
-> repository next to the backend.
-`),
-  },
-
-  'guides/git-workspaces': {
-    slug: 'guides/git-workspaces',
-    title: 'Git workspaces',
-    description: 'Working tree visibility, diffs, and agent-safe Git actions.',
-    body: body(`
-Every workspace is a Git repository first. TodeX watches the working tree
-and renders it live — no refresh, no polling.
-
-## The Git panel
-
-- **Changes** — staged, unstaged, and untracked files with inline diffs.
-- **Branches** — current branch, upstream state, ahead/behind counts.
-- **Actions** — commit, push, pull, and create PRs through the agent.
-
-## Agent-aware Git
-
-When an agent edits files, the changes stream into the same panel — you
-watch the diff build in real time and can commit or revert hunks without
-leaving the conversation.
-
-## Safety
-
-Destructive operations (discard changes, force push, reset hard) always
-ask for confirmation — whether you click them or an agent requests them.
-
-> **Tip:** The \`⌘ 2\` shortcut jumps straight to the Git panel.
-`),
-  },
-
-  'guides/kanban': {
-    slug: 'guides/kanban',
-    title: 'Kanban & tasks',
-    description: 'Track agent work on a shared board.',
-    body: body(`
-The **Kanban panel** turns agent work into cards you can see, reorder, and
-hand back.
-
-## How it works
-
-1. Describe a task — or ask an agent to break a goal into cards.
-2. Drag cards across **Backlog → In progress → Review → Done**.
-3. Agents read the board: tell one to "pick up the top card" and it starts
-   working.
-
-## Why a board
-
-Long-running agent work benefits from a shared source of truth that is
-*not* the chat scroll. The board survives sessions, pairs across devices,
-and gives you a place to park ideas mid-conversation.
-
-## Tips
-
-- Cards can carry file references — mention \`@path/to/file\` and the
-  agent opens it.
-- Combine with Git: review the diff when a card hits **Review**.
-`),
-  },
-
-  'guides/mobile-pairing': {
-    slug: 'guides/mobile-pairing',
-    title: 'Mobile pairing',
-    description: 'Carry the same workspace to your phone.',
-    body: body(`
-The TodeX mobile app pairs with your backend over an encrypted channel —
-scan a QR code, approve the device, done.
-
-## Pair a device
-
-1. On the backend host: **Settings → Devices → Pair new device**.
-2. Scan the QR code (or paste the pairing link) in the mobile app.
-3. Approve the request on the host.
-
-## What syncs
-
-- Conversations — including streams still running.
-- Workspaces and kanban boards.
-- Approval requests — approve a tool call from your phone.
-
-## Trust model
-
-Pairing uses device verification: keys are generated on each side and the
-host approves each device explicitly. Revoke any device from the same
-settings page.
-
-> **Remote access:** pairing works over LAN out of the box. For access
-> away from home, see [HTTPS & remote
-> access](/docs/self-hosting/https).
-`),
-  },
-
-  'self-hosting/web-client': {
-    slug: 'self-hosting/web-client',
-    title: 'Web client',
-    description: 'Serve the browser workbench from your own backend.',
-    body: body(`
-The web client is a static bundle served by the backend — there is no
-separate server-side app to deploy.
-
-## Build & run
-
-\`\`\`bash
-pnpm build
-pnpm start
-# → http://localhost:4173
-\`\`\`
-
-The Express server in \`server/\` serves the built client, the releases
-API, and strict security headers. Point your reverse proxy at port
-\`4173\`.
-
-## Layout
-
-| Route | Serves |
+The workbench is the same on desktop and web. This page uses desktop terms;
+where the web differs it's noted.
+
+## Left sidebar
+
+Workspaces on top, conversations below. Conversation rows show the active
+agent badge and run state; right-click actions cover New, Rename, Fork, and
+Delete. Workspaces can be added from any directory under a configured
+workspace root and are trusted explicitly.
+
+## Center — chat
+
+- Streaming Markdown with Shiki code highlighting and KaTeX math.
+- Approval cards for commands, file diffs, and tool calls — resolve them
+  inline while the turn runs.
+- Prompt box: \`@\` mentions a workspace file, \`/\` runs a provider slash
+  command, \`#\` references a skill or MCP capability. The model picker
+  matches names case-insensitively and carries a draggable reasoning-effort
+  control plus Codex Fast mode where the provider supports it.
+- Reasoning and tool details mount lazily on expansion; final answers stay
+  isolated from context and execution noise.
+
+## Right — workbench tabs
+
+| Tab | Contents |
 | --- | --- |
-| \`/\` | Landing page + downloads |
-| \`/app\` | The workbench (connects to your backend) |
-| \`/demo\` | Scripted demo, no backend needed |
-| \`/docs\` | This documentation |
+| Slash Commands | Reference of the provider's commands |
+| Git Diff | Live working-directory changes |
+| Terminal | Embedded xterm.js PTY with direct keyboard input and auto resize |
+| Capabilities | Read-only catalog of active Skills and MCP servers |
+| Experiments | Feature toggles and developer diagnostics |
 
-## Configuration
-
-- \`PORT\`, \`HOST\` — listen address.
-- \`.env.example\` documents the rest.
-`),
-  },
-
-  'self-hosting/docker': {
-    slug: 'self-hosting/docker',
-    title: 'Docker deployment',
-    description: 'Run the full stack in containers.',
-    body: body(`
-The repo ships a multi-stage \`Dockerfile\` and \`compose.yaml\` that build
-the client and run the backend together.
-
-## Compose
-
-\`\`\`bash
-docker compose up -d --build
-\`\`\`
-
-## What the image does
-
-1. **deps stage** — installs dependencies, including the licensed
-   \`@heroui-pro/react\` package.
-2. **build stage** — compiles the client bundle and the server.
-3. **runtime** — a slim image exposing \`4173\`.
-
-## Volumes
-
-Mount a volume at the backend's data directory to persist workspaces and
-sessions across rebuilds:
-
-\`\`\`yaml
-volumes:
-  - todex-data:/data
-\`\`\`
-
-> **Heads up:** keep \`pnpm-lock.yaml\` and \`pnpm-workspace.yaml\` in sync
-> with the licensed package — the Dockerfile handles this, see the
-> \`AGENTS.md\` note in the repo for why.
-`),
-  },
-
-  'self-hosting/https': {
-    slug: 'self-hosting/https',
-    title: 'HTTPS & remote access',
-    description: 'Reach your backend securely from anywhere.',
-    body: body(`
-Local pairing works over LAN with zero setup. For access outside your
-network, put the backend behind HTTPS.
-
-## Recommended setup
-
-A reverse proxy (Caddy, nginx, Traefik) terminating TLS in front of port
-\`4173\`:
-
-\`\`\`
-your-domain.com → 127.0.0.1:4173
-\`\`\`
-
-WebSocket upgrade headers must be forwarded — conversations stream over
-\`wss:\`.
-
-## Threat model
-
-- **Always** serve remote access over HTTPS; pairing secrets and session
-  tokens travel over this channel.
-- Keep \`--host 127.0.0.1\` on the backend and let the proxy listen
-  publicly.
-- Firewall the raw port; only the proxy should reach it.
-
-## Tailscale alternative
-
-A private tailnet gives you remote access without exposing anything
-publicly — often the simplest safe option for a personal backend.
-`),
-  },
-
-  'reference/shortcuts': {
-    slug: 'reference/shortcuts',
-    title: 'Keyboard shortcuts',
-    description: 'Every shortcut in the workbench.',
-    body: body(`
-The workbench is keyboard-first. \`⌘\` is Cmd on macOS, Ctrl elsewhere.
-
-## Global
+## Keyboard shortcuts
 
 | Keys | Action |
 | --- | --- |
-| \`⌘ K\` | Command palette — actions, skills, navigation |
-| \`⌘ N\` | New conversation |
-| \`⌘ ,\` | Settings |
-| \`⌘ /\` | Toggle the left sidebar |
+| ⌘B / Ctrl B | Toggle the left sidebar |
+| ⌘⌥B / Ctrl Alt B | Toggle the workbench aside |
+| ⇧⌘G / Ctrl Shift G | Git actions |
+| ⌘N (⌥N on web) | New conversation |
+| ⇧⌘N (⌥⇧N on web) | Add a workspace |
+| ⇧⌘K / Ctrl Shift K | Kanban task board |
 
-## Panels
+> Browsers reserve ⌘N / ⇧⌘N, so the web client uses the Option modifier for
+> the two "new" actions. Everything else is identical.
 
-| Keys | Action |
-| --- | --- |
-| \`⌘ 1\` | Conversation |
-| \`⌘ 2\` | Git changes |
-| \`⌘ 3\` | Terminal |
-| \`⌘ 4\` | Kanban |
-
-## Composer
-
-| Keys | Action |
-| --- | --- |
-| \`Enter\` | Send |
-| \`Shift Enter\` | New line |
-| \`@\` | Mention a workspace file |
-| \`#\` | Reference a capability |
+Holding the modifier briefly reveals shortcut hint badges in the UI.
 `),
   },
 
-  'reference/faq': {
-    slug: 'reference/faq',
-    title: 'FAQ',
-    description: 'Questions that come up every time.',
+  // ------------------------------------------------------------------- Mobile
+
+  'mobile': {
+    slug: 'mobile',
+    title: 'Mobile',
+    description: 'The native iPhone & iPad client — coming soon.',
     body: body(`
-## Is TodeX free?
+> **Coming soon.** The mobile client is in active development; this page
+> tracks what's planned and will be replaced by full documentation when the
+> first beta ships.
 
-The client and backend are open source under the MIT license. You pay only
-for the agents and models you connect — under your own accounts.
+Todex Mobile is a native Swift + UIKit app for iPhone and iPad that pairs
+with the same \`todex-agentd\` backend — the same workspaces, conversations,
+approvals, and terminal sessions in your pocket.
 
-## Does my code leave my machine?
+## Planned
 
-No. The backend runs where you put it, agents run under your credentials,
-and the UI talks to your backend over an encrypted channel. Nothing is
-proxied through us.
+- **Camera pairing** — scan the backend's QR code, including multi-frame
+  ML-KEM segments, or import a pairing JSON; device verification works like
+  the desktop flow.
+- **Chat + console** — a two-pane layout on wide screens: conversation
+  timeline on one side, a workbench with terminal, files, browser preview,
+  and Git on the other.
+- **Full turn control** — approvals, plan-mode feedback, model and
+  reasoning pickers, message queueing, and local notifications when a
+  conversation finishes while you're away.
+- **Same security model** — Ed25519 device signatures and X25519 /
+  ML-KEM-768 transport encryption, with tokens stored in the iOS Keychain.
 
-## Can I use several agents at once?
+## In the meantime
 
-Yes — that is the point. Different conversations in one workspace can use
-different providers and models.
-
-## Web vs desktop?
-
-Same workbench, same backend. The desktop app adds native integration
-(notifications, menu bar); the web client needs nothing installed.
-
-## Something is broken — where do I look?
-
-1. \`todex-agentd\` logs on the host.
-2. The browser console for client issues.
-3. [GitHub issues](https://github.com/youtonghy/TodeX_desktop/issues) for
-   everything else.
+The [web client](/docs/introduction/quick-start) already works in mobile
+browsers against a reachable backend — it's the same workbench UI, just not
+a native shell. For backend pairing details see
+[Security & pairing](/docs/backend/security).
 `),
   },
 };
