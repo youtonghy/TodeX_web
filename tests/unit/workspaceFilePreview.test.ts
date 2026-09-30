@@ -4,7 +4,8 @@ import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { V2ApiClient } from '@todex/protocol/v2';
 import { WorkbenchPanel } from '../../src/renderer/screens/WorkbenchPanel';
-import { WorkspaceFilePreview, type PreviewFile } from '../../src/renderer/components/WorkspaceFilePreview';
+import { WorkspaceFilePreview, type PreviewFile, type WorkspaceFileSaveOutcome } from '../../src/renderer/components/WorkspaceFilePreview';
+import { buildConflictMergeDocument, conflictMarkersRemain } from '../../src/renderer/session/helpers';
 import type { TodeXSession } from '../../src/renderer/session/useTodeXSession';
 import type { OpenPanelOptions } from '../../src/renderer/lib/panels';
 
@@ -152,6 +153,104 @@ describe('WorkspaceFilePreview', () => {
   });
 });
 
+
+describe('WorkspaceFilePreview edit mode', () => {
+  const textFile = (text = 'line one\nline two\n'): PreviewFile => ({ path: '/workspace/a.txt', mimeType: 'text/plain', text });
+
+  function pressButton(label: string, scope: ParentNode = container) {
+    const button = [...scope.querySelectorAll('button')].find(node => node.textContent?.includes(label));
+    expect(button, `button ${label}`).toBeTruthy();
+    act(() => { button!.click(); });
+    return button!;
+  }
+
+  function setTextarea(textarea: HTMLTextAreaElement, value: string) {
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
+    act(() => {
+      setter.call(textarea, value);
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+  }
+
+  it('stays read-only without a save handler', async () => {
+    await renderPreview(textFile());
+    expect(container.querySelector('textarea')).toBeNull();
+    expect(container.textContent).not.toContain('编辑');
+  });
+
+  it('saves edits through compare-and-save with the loaded text as expectedText', async () => {
+    const onSaveFile = vi.fn(async (): Promise<WorkspaceFileSaveOutcome> => 'saved');
+    await act(async () => {
+      root.render(createElement(WorkspaceFilePreview, { file: textFile(), onSaveFile, onReloadFile: async () => null }));
+    });
+    pressButton('编辑');
+    const textarea = container.querySelector('textarea')!;
+    expect(textarea.value).toBe('line one\nline two\n');
+    setTextarea(textarea, 'line one\nedited\n');
+    pressButton('保存');
+    await act(async () => { await Promise.resolve(); });
+    expect(onSaveFile).toHaveBeenCalledExactlyOnceWith('/workspace/a.txt', 'line one\nedited\n', 'line one\nline two\n');
+    expect(container.querySelector('textarea')).toBeNull();
+  });
+
+  it('opens the conflict flow on 409 and adopts the merged document as the new draft', async () => {
+    const onSaveFile = vi.fn(async (): Promise<WorkspaceFileSaveOutcome> => 'conflict');
+    const onReloadFile = vi.fn(async () => textFile('remote change\n'));
+    await act(async () => {
+      root.render(createElement(WorkspaceFilePreview, { file: textFile(), onSaveFile, onReloadFile }));
+    });
+    pressButton('编辑');
+    setTextarea(container.querySelector('textarea')!, 'local change\n');
+    pressButton('保存');
+    await act(async () => { await Promise.resolve(); });
+    // Conflict dialog offers keep-editing / compare-merge.
+    expect(document.body.textContent).toContain('文件已被修改');
+    await act(async () => { pressButton('比较并合并', document.body); await Promise.resolve(); });
+    expect(onReloadFile).toHaveBeenCalledWith('/workspace/a.txt');
+    const mergeArea = [...document.body.querySelectorAll('textarea')].at(-1)!;
+    expect(mergeArea.value).toContain('<<<<<<<');
+    expect(mergeArea.value).toContain('local change');
+    expect(mergeArea.value).toContain('remote change');
+    // Adopting while markers remain is rejected.
+    const adopt = [...document.body.querySelectorAll('button')].find(node => node.textContent?.includes('采用合并结果'))!;
+    act(() => { adopt.click(); });
+    expect(document.body.textContent).toContain('冲突标记');
+    setTextarea(mergeArea, 'resolved\n');
+    act(() => { adopt.click(); });
+    // Back in the editor with the merged draft; next save uses the remote text as expectedText.
+    expect(container.querySelector('textarea')!.value).toBe('resolved\n');
+    onSaveFile.mockClear();
+    pressButton('保存');
+    await act(async () => { await Promise.resolve(); });
+    expect(onSaveFile).toHaveBeenCalledExactlyOnceWith('/workspace/a.txt', 'resolved\n', 'remote change\n');
+  });
+
+  it('warns before discarding dirty edits when switching files', async () => {
+    const dirtyRef = { current: false };
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    await act(async () => {
+      root.render(createElement(WorkspaceFilePreview, {
+        file: textFile(), onSaveFile: async () => 'saved', onDirtyChange: (dirty) => { dirtyRef.current = dirty; },
+      }));
+    });
+    pressButton('编辑');
+    setTextarea(container.querySelector('textarea')!, 'dirty');
+    expect(dirtyRef.current).toBe(true);
+    expect(confirmSpy).not.toHaveBeenCalled();
+    confirmSpy.mockRestore();
+  });
+});
+
+describe('conflict merge helpers', () => {
+  it('builds a git-style conflict document', () => {
+    const doc = buildConflictMergeDocument('local\n', 'remote\n', 'Local edits', 'Latest backend version');
+    expect(doc).toBe('<<<<<<< Local edits\nlocal\n\n=======\nremote\n\n>>>>>>> Latest backend version');
+    expect(conflictMarkersRemain(doc)).toBe(true);
+    expect(conflictMarkersRemain('resolved\ntext')).toBe(false);
+    expect(conflictMarkersRemain('======= ')).toBe(true);
+    expect(conflictMarkersRemain('x ======= y')).toBe(false);
+  });
+});
 
 describe('legacy file response compatibility', () => {
   it('does not label a PNG with generic MIME and null text as an empty file', async () => {
