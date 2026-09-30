@@ -1457,5 +1457,7 @@ export const en: Messages = {
   'docs.toc.label': 'On this page',
   'docs.pager.prev': 'Previous',
   'docs.pager.next': 'Next',
+  'docs.breadcrumb.label': 'Breadcrumb',
+  'docs.pagination.label': 'Pagination',
 
 };

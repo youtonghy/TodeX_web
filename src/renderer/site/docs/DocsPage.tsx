@@ -6,28 +6,17 @@ import { Markdown, type MarkdownProps } from '@heroui-pro/react/markdown';
 import { RiArrowLeftLine, RiArrowRightLine, RiArrowRightUpLine, RiBookOpenLine, RiCloseLine, RiGithubLine, RiMenuLine, RiSearchLine } from '@remixicon/react';
 import { baseMarkdownComponents } from '../../components/markdownComponents';
 import { Tree, TreeItem, TreeItemLabel } from '../../components/reui/tree';
-import { useT } from '../../i18n';
+import { useLocale, useT, type Locale } from '../../i18n';
 import brand from '../../assets/brand/t-icon-light.png';
 import { LanguageSwitcher } from '../LanguageSwitcher';
-import { ancestorsOf, defaultDocSlug, docNav, docPageOrder, docPages, docSectionIds, docsRootId, docTreeItems, filterDocTree, pageToItemId, type DocNavNode, type DocTreeItem } from './docsContent';
+import { ancestorsOf, defaultDocSlug, docPageOrder, docSectionIds, docsRootId, getDocsContent, isDocSlug, pageToItemId, type DocTreeItem } from './docsContent';
 import './docs.css';
 
 const repository = 'https://github.com/youtonghy/TodeX_desktop';
 
-// slug → { title, trail } for breadcrumbs, built once from the nav tree.
-const navIndex = new Map<string, { title: string; trail: string[] }>();
-for (const section of docNav) {
-  const walk = (node: DocNavNode, trail: string[]) => {
-    const next = [...trail, node.title];
-    if (node.page) navIndex.set(node.page, { title: node.title, trail: next });
-    node.children?.forEach((child) => walk(child, next));
-  };
-  section.children?.forEach((child) => walk(child, [section.title]));
-}
-
 function slugFromPath(pathname: string): string {
   const slug = pathname.replace(/^\/docs\/?/, '').replace(/\/+$/, '');
-  return docPages[slug] ? slug : defaultDocSlug;
+  return isDocSlug(slug) ? slug : defaultDocSlug;
 }
 
 function docsPath(slug: string) {
@@ -61,7 +50,16 @@ function tocOf(markdown: string): TocEntry[] {
 }
 
 export function DocsPage() {
+  const locale = useLocale();
+  // Remount on locale change: useTree captures the dataLoader (and its items
+  // map) at creation, so a fresh instance is what relocalizes nav titles.
+  // The current page survives the remount via the URL.
+  return <DocsPageView key={locale} locale={locale} />;
+}
+
+function DocsPageView({ locale }: { locale: Locale }) {
   const t = useT();
+  const docs = getDocsContent(locale);
   const [slug, setSlug] = useState(() => slugFromPath(window.location.pathname));
   // Folders the user opened/closed. Section ids always stay expanded (they are
   // non-folder group headers whose children render while the id is expanded).
@@ -73,20 +71,20 @@ export function DocsPage() {
   const [activeHeading, setActiveHeading] = useState('');
   const contentRef = useRef<HTMLElement>(null);
 
-  const page = docPages[slug] ?? docPages[defaultDocSlug];
+  const page = docs.pages[slug] ?? docs.pages[defaultDocSlug];
   const toc = useMemo(() => tocOf(page.body), [page.body]);
   const index = docPageOrder.indexOf(page.slug);
-  const prev = index > 0 ? docPages[docPageOrder[index - 1]] : null;
-  const next = index >= 0 && index < docPageOrder.length - 1 ? docPages[docPageOrder[index + 1]] : null;
-  const crumbs = navIndex.get(page.slug)?.trail ?? [page.title];
+  const prev = index > 0 ? docs.pages[docPageOrder[index - 1]] : null;
+  const next = index >= 0 && index < docPageOrder.length - 1 ? docs.pages[docPageOrder[index + 1]] : null;
+  const crumbs = docs.navIndex.get(page.slug)?.trail ?? [page.title];
   const searching = query.trim().length > 0;
-  const filtered = useMemo(() => (searching ? filterDocTree(query) : null), [searching, query]);
-  const items = filtered?.items ?? docTreeItems;
+  const filtered = useMemo(() => (searching ? docs.filterTree(query) : null), [docs, searching, query]);
+  const items = filtered?.items ?? docs.treeItems;
   const expandedItems = filtered?.expandedIds ?? expanded;
   const selectedItems = useMemo(() => [pageToItemId.get(page.slug) ?? page.slug], [page.slug]);
 
   const navigate = useCallback((target: string) => {
-    if (!docPages[target]) return;
+    if (!isDocSlug(target)) return;
     window.history.pushState(null, '', docsPath(target));
     setSlug(target);
     setExpanded((prev) => [...new Set([...prev, ...ancestorsOf(target)])]);
@@ -245,14 +243,14 @@ export function DocsPage() {
         </aside>
 
         <main className="docs-content" ref={contentRef}>
-          <nav className="docs-breadcrumb" aria-label="Breadcrumb">
+          <nav className="docs-breadcrumb" aria-label={t('docs.breadcrumb.label')}>
             {crumbs.slice(0, -1).map((crumb) => <span key={crumb}>{crumb}</span>)}
             <span className="docs-crumb-current">{crumbs[crumbs.length - 1]}</span>
           </nav>
           <h1 className="docs-title">{page.title}</h1>
           <p className="docs-description">{page.description}</p>
           <Markdown id={page.slug} components={markdownComponents}>{page.body}</Markdown>
-          <nav className="docs-prev-next" aria-label="Pagination">
+          <nav className="docs-prev-next" aria-label={t('docs.pagination.label')}>
             {prev ? (
               <a className="docs-pager prev" href={docsPath(prev.slug)} onClick={(event) => { event.preventDefault(); navigate(prev.slug); }}>
                 <RiArrowLeftLine size={15} />

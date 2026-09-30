@@ -1457,5 +1457,7 @@ export const ko: Messages = {
   'docs.toc.label': '이 페이지의 목차',
   'docs.pager.prev': '이전',
   'docs.pager.next': '다음',
+  'docs.breadcrumb.label': '브레드크럼',
+  'docs.pagination.label': '페이지네이션',
 
 };

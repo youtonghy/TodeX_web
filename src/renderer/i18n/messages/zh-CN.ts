@@ -1457,5 +1457,7 @@ export const zhCN = {
   'docs.toc.label': '本页目录',
   'docs.pager.prev': '上一页',
   'docs.pager.next': '下一页',
+  'docs.breadcrumb.label': '面包屑',
+  'docs.pagination.label': '分页',
 
 } satisfies Record<string, string>;

@@ -1457,5 +1457,7 @@ export const ja: Messages = {
   'docs.toc.label': 'このページの目次',
   'docs.pager.prev': '前へ',
   'docs.pager.next': '次へ',
+  'docs.breadcrumb.label': 'パンくずリスト',
+  'docs.pagination.label': 'ページネーション',
 
 };

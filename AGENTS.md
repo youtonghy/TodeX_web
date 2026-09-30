@@ -6,7 +6,7 @@
 
 ## Site docs page
 
-- `/docs/*` is routed inside `src/renderer/site/entry.tsx` (not `main.tsx`) and renders `src/renderer/site/docs/DocsPage.tsx`. Left nav is the ReUI `tree` component (`src/renderer/components/reui/tree.tsx`) driven by `@headless-tree/react` `useTree`; content renders via `@heroui-pro/react/markdown`. Nav/page data lives in `src/renderer/site/docs/docsContent.ts` — a flat `docTreeItems` map backs the tree dataLoader, sections are non-folder items kept permanently expanded.
+- `/docs/*` is routed inside `src/renderer/site/entry.tsx` (not `main.tsx`) and renders `src/renderer/site/docs/DocsPage.tsx`. Left nav is the ReUI `tree` component (`src/renderer/components/reui/tree.tsx`) driven by `@headless-tree/react` `useTree`; content renders via `@heroui-pro/react/markdown`. Docs content is split into a locale-independent structure plus per-locale packs: `docsContent.ts` holds the tree seed (ids are URL slugs — keep them identical across locales), the tree dataLoader helpers, and `getDocsContent(locale)`; `docsContent.<locale>.ts` files (`en`, `zh-CN`, `ja`, `ko`) carry translated `sections` + `pages`, and untranslated pages fall back to English. `DocsPage` remounts on locale change because `useTree` captures the dataLoader once. Sections are non-folder items kept permanently expanded.
 - `components.json` + root `tsconfig.json` exist so `pnpm dlx shadcn@latest add @reui/<name>` resolves the `@reui` registry and the `@renderer/*` alias. The registry reads `REUI_LICENSE_KEY` from the environment (`.env.local`, gitignored — never commit it). Generated ReUI files use `cn` (the npm package) and lucide icons; swap lucide imports for `@remixicon/react` to match the app.
 
 ## Docker / CI notes

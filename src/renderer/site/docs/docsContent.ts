@@ -1,6 +1,13 @@
-// Docs preview content: a multi-level navigation tree plus one markdown body
-// per leaf page. Real content loading (files, API, search index) plugs in
-// behind `docPages` later without touching the layout.
+// Docs content: a locale-independent structure (ids, slugs, hierarchy — these
+// are the URLs) plus per-locale content packs providing titles, descriptions,
+// and markdown bodies. getDocsContent(locale) assembles the localized bundle;
+// missing pages/sections fall back to English so a partial translation never
+// breaks navigation.
+import type { Locale } from '../../i18n';
+import { enDocs } from './docsContent.en';
+import { zhCNDocs } from './docsContent.zh-CN';
+import { jaDocs } from './docsContent.ja';
+import { koDocs } from './docsContent.ko';
 
 export type DocNavNode = {
   /** Unique tree key. For nodes with a page this is also the URL slug. */
@@ -19,780 +26,70 @@ export type DocPage = {
   body: string;
 };
 
-export const docNav: DocNavNode[] = [
+// One locale's content: section heading titles plus every page. Leaf nav
+// titles are the page titles — no separate duplication.
+export type DocsLocalePack = {
+  sections: Record<string, string>;
+  pages: Record<string, DocPage>;
+};
+
+// The shape of the docs tree. Language-independent: ids are also URL slugs, so
+// they must stay identical across locales.
+type DocNavSeed = {
+  id: string;
+  page?: string;
+  children?: DocNavSeed[];
+};
+
+const docNavSeed: DocNavSeed[] = [
   {
     id: 'section-introduction',
-    title: 'Introduction',
     children: [
-      { id: 'introduction', title: 'Overview', page: 'introduction' },
-      { id: 'introduction/quick-start', title: 'Quick start', page: 'introduction/quick-start' },
-      { id: 'introduction/concepts', title: 'Concepts', page: 'introduction/concepts' },
+      { id: 'introduction', page: 'introduction' },
+      { id: 'introduction/quick-start', page: 'introduction/quick-start' },
+      { id: 'introduction/concepts', page: 'introduction/concepts' },
     ],
   },
   {
     id: 'section-backend',
-    title: 'Backend',
     children: [
-      { id: 'backend', title: 'Overview', page: 'backend' },
-      { id: 'backend/install', title: 'Install & run', page: 'backend/install' },
-      { id: 'backend/configuration', title: 'Configuration', page: 'backend/configuration' },
-      { id: 'backend/security', title: 'Security & pairing', page: 'backend/security' },
-      { id: 'backend/api', title: 'API reference', page: 'backend/api' },
+      { id: 'backend', page: 'backend' },
+      { id: 'backend/install', page: 'backend/install' },
+      { id: 'backend/configuration', page: 'backend/configuration' },
+      { id: 'backend/security', page: 'backend/security' },
+      { id: 'backend/api', page: 'backend/api' },
     ],
   },
   {
     id: 'section-desktop',
-    title: 'Desktop',
     children: [
-      { id: 'desktop', title: 'Overview', page: 'desktop' },
-      { id: 'desktop/setup', title: 'Set up & build', page: 'desktop/setup' },
-      { id: 'desktop/connect', title: 'Connect a backend', page: 'desktop/connect' },
-      { id: 'desktop/workbench', title: 'The workbench', page: 'desktop/workbench' },
+      { id: 'desktop', page: 'desktop' },
+      { id: 'desktop/setup', page: 'desktop/setup' },
+      { id: 'desktop/connect', page: 'desktop/connect' },
+      { id: 'desktop/workbench', page: 'desktop/workbench' },
     ],
   },
   {
     id: 'section-mobile',
-    title: 'Mobile',
-    children: [
-      { id: 'mobile', title: 'Overview', page: 'mobile' },
-    ],
+    children: [{ id: 'mobile', page: 'mobile' }],
   },
 ];
 
+const packs: Record<Locale, DocsLocalePack> = {
+  en: enDocs,
+  'zh-CN': zhCNDocs,
+  ja: jaDocs,
+  ko: koDocs,
+};
+
 export const defaultDocSlug = 'introduction';
 
-const body = (markdown: string) => `${markdown.trim()}\n`;
-
-export const docPages: Record<string, DocPage> = {
-
-  // ------------------------------------------------------------- Introduction
-
-  'introduction': {
-    slug: 'introduction',
-    title: 'Overview',
-    description: 'What TodeX is, how the pieces fit together, and where to start.',
-    body: body(`
-TodeX is a **self-hostable multi-agent coding workbench**. One Rust backend —
-\`todex-agentd\` — orchestrates the coding agents you already use (Codex,
-Claude Code, Pi, Devin, OpenCode, Grok Build, and any ACP-compatible agent)
-behind a single authenticated API. Desktop, web, and mobile clients connect
-to it over an encrypted channel.
-
-Nothing is proxied through TodeX infrastructure: the backend runs on your
-machine or your server, agents run under your own accounts and credentials,
-and your code never leaves the workspace roots you authorize.
-
-## The moving parts
-
-\`\`\`text
-TodeX Desktop (Electron)          Todex Mobile (Swift)
-TodeX Web client ──────┐                 │
-                       │  REST /v2/*  +  WebSocket /v2/ws
-                       │  Ed25519 device auth + X25519 / ML-KEM-768
-                       v
-               todex-agentd  (Rust · Tokio · Axum)
-                       │
-        ┌──────────────┼───────────────┬──────────────┐
-        v              v               v              v
-   codex app-      claude stream-   pi rpc      acp profiles
-   server (JSON)   json             (devin, opencode, …)
-\`\`\`
-
-| Component | What it is |
-| --- | --- |
-| **Backend** | \`todex-agentd\`, the daemon that owns conversations, workspaces, provider drivers, and security. |
-| **Desktop** | Electron + React 19 client with a three-pane workbench. |
-| **Web** | This site serves the same workbench over HTTP — nothing to install. |
-| **Mobile** | Native Swift + UIKit client for iPhone and iPad (in development). |
-
-## Highlights
-
-- **Agent-agnostic.** Conversations are provider-agnostic; swap agents per
-  thread or run several side by side on the same workspace.
-- **Persistent conversations.** Every conversation is a folder on the backend
-  host — manifest, append-only event journal, snapshots, and native provider
-  state — so turns resume across client reconnects and daemon restarts.
-- **Fail-closed security.** Devices enroll through a verification code, every
-  request is Ed25519-signed, and transport can upgrade to post-quantum
-  ML-KEM-768.
-- **Full workbench.** Streaming chat with approvals, embedded terminal, Git
-  status and diffs, skills/MCP catalogs, and task boards — identical on
-  desktop and web.
-
-## Where to go next
-
-| Goal | Doc |
-| --- | --- |
-| Get running in ten minutes | [Quick start](/docs/introduction/quick-start) |
-| Learn the vocabulary | [Concepts](/docs/introduction/concepts) |
-| Run the backend | [Backend overview](/docs/backend) |
-| Use the desktop app | [Desktop overview](/docs/desktop) |
-`),
-  },
-
-  'introduction/quick-start': {
-    slug: 'introduction/quick-start',
-    title: 'Quick start',
-    description: 'Install the backend, pair a client, and start your first agent conversation.',
-    body: body(`
-You need a machine that can run the backend and at least one authenticated
-agent CLI (\`codex\`, \`claude\`, \`pi\`, \`devin\`, \`opencode\`, …).
-
-## 1. Install the backend
-
-On macOS, Linux, or WSL — no Rust toolchain required:
-
-\`\`\`bash
-curl -fsSL https://raw.githubusercontent.com/youtonghy/TodeX_backend/main/install.sh | bash
-\`\`\`
-
-The script installs \`todex-agentd\` into \`~/.local/bin\`, verifies the
-release checksums, and restarts a running managed daemon. Pin a release with
-\`install.sh install --version 2.0.2\`, or build from source with
-\`cargo build --release\`.
-
-## 2. Start it and approve your device
-
-\`\`\`bash
-todex-agentd tui
-\`\`\`
-
-The TUI shows daemon status, live logs, and pairing tools. When a client
-requests access for the first time, press \`d\` to show the verification code,
-compare it with the client, then press \`a\` to approve (or \`r\` to reject).
-Quitting the TUI leaves the daemon running in the background.
-
-## 3. Connect a client
-
-- **Desktop** — install a package from the release page, open Settings, and
-  enter the backend URL (default \`http://127.0.0.1:7345\`). Complete device
-  verification, then import the encryption public key via QR code or pairing
-  JSON if post-quantum encryption is enabled.
-- **Web** — open \`/app\` on a hosted TodeX site, or the page served by your
-  own deployment, and point it at your backend the same way.
-
-## 4. Create a workspace and a conversation
-
-Add a project directory inside a configured workspace root, mark it trusted,
-then start a conversation with any available provider. Prompts, approvals,
-terminal, and Git state all stream over the same connection.
-
-## Troubleshooting
-
-| Symptom | Check |
-| --- | --- |
-| Client can't reach the backend | \`todex-agentd daemon status\`; the port is 7345 by default |
-| \`401\` on every request | Device not approved — redo verification in the TUI |
-| WebSocket fails while REST works | Encryption mismatch — import the backend's public key |
-| Agent shows unavailable | The provider CLI isn't installed or logged in on the host |
-`),
-  },
-
-  'introduction/concepts': {
-    slug: 'introduction/concepts',
-    title: 'Concepts',
-    description: 'The vocabulary behind every TodeX screen: providers, workspaces, conversations, devices.',
-    body: body(`
-## Providers and provider drivers
-
-A *provider* is an agent engine the backend can drive — Codex, Claude Code,
-Pi, Grok Build, Devin, OpenCode, or any ACP 2.0 profile declared in
-\`config.toml\`. Each provider has a native driver (JSON-RPC app-server,
-stream-json, RPC, or ACP stdio) so capabilities like skills, slash commands,
-and model catalogs come straight from the installed CLI instead of being
-approximated.
-
-*Provider accounts* (the cc-switch model) let you keep several account
-profiles per agent — TodeX activates one by rewriting the agent's own global
-config, so sessions started outside TodeX behave identically.
-
-## Workspaces and trust
-
-A *workspace* is a project directory under a configured *workspace root*
-(\`TODEX_AGENTD_WORKSPACE_ROOT\`, default \`~/projects\`). New workspaces are
-untrusted by default: trusting one is an explicit, owner-scoped decision that
-controls what agents may execute there. Untrusting a workspace cancels its
-active turns.
-
-## Conversations
-
-A conversation is a folder under \`$DATA_DIR/conversations/<uuid>/\`:
-
-| File | Contents |
-| --- | --- |
-| \`manifest.json\` | Metadata, active provider profile, workspace, timestamps |
-| \`events.jsonl\` | Append-only event journal — the source of truth for history |
-| \`snapshot.json\` | Compact state snapshot for fast reloads |
-| \`provider-state.json\` | Native engine state for turn resumption |
-
-Turns are optimistic-concurrency protected: a second mutation while a turn
-runs returns \`409 Conflict\` instead of silently queueing.
-
-## Devices and pairing
-
-Clients don't log in with passwords. Each client *device* generates an
-Ed25519 key and requests enrollment; you approve it once by comparing a code
-in the backend TUI. From then on every HTTP request carries a device
-signature, and devices can be revoked individually.
-
-## Transport encryption
-
-| Mode | Meaning |
-| --- | --- |
-| \`none\` | Plaintext (loopback-only setups) |
-| \`x25519\` | X25519 + ChaCha20-Poly1305 |
-| \`ml-kem-768\` | NIST post-quantum ML-KEM-768 (default for pairing) |
-
-Encryption keys are exchanged through pairing QR codes or JSON payloads —
-separately from device approval.
-
-## Tenants
-
-All data is namespaced by \`tenant_id\`; queries, journals, and subscriptions
-can never cross tenants.
-`),
-  },
-
-  // ------------------------------------------------------------------ Backend
-
-  'backend': {
-    slug: 'backend',
-    title: 'Backend overview',
-    description: 'todex-agentd — the Rust daemon that orchestrates agents, conversations, and security.',
-    body: body(`
-\`todex-agentd\` is the core of TodeX: a single Rust binary built on Tokio and
-Axum that exposes one REST surface (\`/v2/*\`) and one multiplexed WebSocket
-(\`/v2/ws\`) for event streams, approvals, and terminal sessions.
-
-## Provider drivers
-
-| Provider | Transport | Notes |
-| --- | --- | --- |
-| **Codex** | JSON-RPC app-server | \`start\`, \`turn\`, \`status\`, \`stop\`, \`attach\`, \`replay\`, \`interrupt\` |
-| **Claude Code** | stream-json | Drives the Claude CLI; built-in model aliases without a gateway |
-| **Pi** | Native RPC | Command discovery, dynamic models, interactive tool approval |
-| **Grok Build** | Managed CLI | Versioned, self-updatable like other managed CLIs |
-| **ACP 2.0** | stdio profiles | Devin (\`devin acp\`), OpenCode (\`opencode acp\`), custom \`config.toml\` profiles |
-
-The backend never mutates provider installations to serve a UI: capability
-catalogs (skills, MCP servers, slash commands, models) are introspected live
-with project-over-user precedence, and skills are injected into prompts by
-\`resourceId\` rather than uploaded.
-
-## Conversation engine
-
-All turn state lives in conversation folders, journaled as append-only
-events with snapshots and native provider state. Subscriptions replay from a
-sequence number (\`afterSequence\`) so clients resynchronize after reconnects
-without losing messages.
-
-## One socket, many channels
-
-\`/v2/ws\` multiplexes conversation subscriptions, prompt dispatch,
-permission decisions, PTY terminal sessions, and engine controls over a
-single connection — with heartbeat detection and UTF-8 frame enforcement.
-
-## Managing the daemon
-
-\`todex-agentd\` ships an interactive TUI (\`todex-agentd tui\`) for status,
-logs, device approval, and pairing QR codes, plus a PID-file daemon mode
-(\`daemon start|stop|restart|status\`) and login autostart
-(\`daemon autostart enable\`). See [Install & run](/docs/backend/install).
-`),
-  },
-
-  'backend/install': {
-    slug: 'backend/install',
-    title: 'Install & run',
-    description: 'Install script, building from source, run modes, and updates.',
-    body: body(`
-## Install script (macOS / Linux / WSL)
-
-\`\`\`bash
-curl -fsSL https://raw.githubusercontent.com/youtonghy/TodeX_backend/main/install.sh | bash
-\`\`\`
-
-\`\`\`bash
-install.sh install                 # install or update to the latest release
-install.sh update                  # update an existing install
-install.sh install --version 2.0.2 # pin a specific release
-install.sh status                  # installed/latest versions and daemon state
-install.sh uninstall               # stop the daemon and remove the binary
-install.sh uninstall --purge       # also remove the ~/.todex-agent data dir
-\`\`\`
-
-The script installs to \`~/.local/bin\` (override with \`--prefix\` or
-\`TODEX_INSTALL_DIR\`), verifies \`SHA256SUMS\`, keeps one rollback copy, and
-restarts a running managed daemon. The prebuilt Linux binary needs glibc
-2.28+; musl distributions such as Alpine must build from source. WSL is
-detected automatically.
-
-A pinned \`--version\` stays only with \`TODEX_AUTO_UPDATE=0\` — otherwise
-\`serve\`, \`tui\`, and \`daemon start\` self-update on launch, and a running
-daemon restarts into the new release once no agent has run for five minutes.
-
-## Build from source
-
-\`\`\`bash
-cargo build --release
-\`\`\`
-
-Requires Rust 1.80+ (MSRV). The binary is \`todex-agentd\`.
-
-## Run modes
-
-\`\`\`bash
-# Interactive TUI — status, logs, device approval, pairing QR codes
-todex-agentd tui
-
-# Foreground server
-todex-agentd serve --host 127.0.0.1 --port 7345
-
-# Background daemon (PID file under the data dir)
-todex-agentd daemon start
-todex-agentd daemon status
-todex-agentd daemon restart
-todex-agentd daemon stop
-
-# Launch at login (launchd / systemd user service / registry Run key)
-todex-agentd daemon autostart enable
-\`\`\`
-
-Quitting the TUI leaves the daemon running. Pairing QR codes render as solid
-terminal cells; press \`b\` in the QR popup to open a square SVG version in
-the browser when the code doesn't fit the terminal.
-`),
-  },
-
-  'backend/configuration': {
-    slug: 'backend/configuration',
-    title: 'Configuration',
-    description: 'config.toml, environment variables, and how they resolve.',
-    body: body(`
-## Precedence
-
-1. Command-line arguments
-2. Environment variables
-3. \`$TODEX_AGENTD_DATA_DIR/config.toml\` (default \`~/.todex-agent/config.toml\`)
-4. Built-in defaults
-
-## Options
-
-| Option | CLI flag | Environment | Default |
-| --- | --- | --- | --- |
-| Host | \`--host\` | \`TODEX_AGENTD_HOST\` | \`127.0.0.1\` |
-| Port | \`--port\` | \`TODEX_AGENTD_PORT\` | \`7345\` |
-| Data directory | \`--data-dir\` | \`TODEX_AGENTD_DATA_DIR\` | \`~/.todex-agent\` |
-| Workspace roots | \`--workspace-root\` (repeatable) | \`TODEX_AGENTD_WORKSPACE_ROOT\` / \`TODEX_AGENTD_WORKSPACE_ROOTS\` | \`~/projects\` |
-| Default agent | — | \`TODEX_AGENTD_DEFAULT_AGENT\` | \`codex\` |
-| Codex binary | — | \`TODEX_AGENTD_CODEX_BIN\` | \`codex\` |
-| Claude binary | — | \`TODEX_AGENTD_CLAUDE_BIN\` | \`claude\` |
-| Pi binary | — | \`TODEX_AGENTD_PI_BIN\` | \`pi\` |
-| Device auth | — | \`TODEX_AGENTD_ENABLE_AUTH\` | \`true\` |
-| Pairing encryption | — | \`TODEX_AGENTD_PAIRING_ENCRYPTION\` | \`ml-kem-768\` |
-
-## Example \`config.toml\`
-
-\`\`\`toml
-host = "127.0.0.1"
-port = 7345
-pairing_encryption = "ml-kem-768"
-data_dir = "~/.todex-agent"
-workspace_root = "~/projects"
-# workspace_roots = ["~/projects", "/srv/repos"]
-
-[agent]
-default_agent = "codex"
-codex_bin = "codex"
-claude_bin = "claude"
-pi_bin = "pi"
-# Stop a turn whose provider produces no output for this many minutes (0 disables).
-provider_idle_timeout_minutes = 60
-
-[agent.acp_profiles.default]
-command = "mcp-server"
-args = ["--stdio"]
-
-[security]
-enable_auth = true
-enable_tls = false
-\`\`\`
-
-> **Note:** \`enable_tls = true\` is intentionally blocked on the native
-> listener to prevent false security assumptions. For remote access,
-> terminate TLS at a trusted reverse proxy such as Nginx, Caddy, or
-> Cloudflare Tunnel.
-`),
-  },
-
-  'backend/security': {
-    slug: 'backend/security',
-    title: 'Security & pairing',
-    description: 'Device verification, request signing, workspace boundaries, and transport encryption.',
-    body: body(`
-TodeX is fail-closed: nothing talks to the backend until a device is
-explicitly approved, and every request is cryptographically signed.
-
-## Device verification
-
-Each client device generates an Ed25519 key pair and requests enrollment. The
-flow is human-verified:
-
-1. The client shows a random verification code and waits.
-2. In the backend TUI, press \`d\` to open the device panel and compare the
-   full code.
-3. Press \`a\` to approve or \`r\` to reject. Approved devices appear in the
-   same panel; \`x\` revokes the selected device.
-
-After approval, every HTTP request carries the device signature —
-unauthorized requests are rejected with \`401 Unauthorized\`. Device approval
-and transport encryption are separate: encryption public keys still require
-QR-code or manual import.
-
-## Transport encryption
-
-| Mode | Suite | When |
-| --- | --- | --- |
-| \`none\` | Plaintext | Loopback-only setups |
-| \`x25519\` | X25519 + ChaCha20-Poly1305 | General remote access |
-| \`ml-kem-768\` | NIST post-quantum ML-KEM | Default for pairing |
-
-Keys are exchanged through pairing QR codes (including multi-frame ML-KEM
-segments rendered as solid terminal cells, or a browser-rendered SVG via the
-\`b\` key) or by importing a pairing JSON payload.
-
-## Workspace boundaries
-
-\`workspace_roots\` restricts every file and directory API to authorized
-scopes — clients cannot read outside them. Per-workspace trust is
-owner-scoped, new workspaces start untrusted, and revoking trust cancels
-active turns and detaches the workspace without deleting its conversations.
-
-## Isolation
-
-- **Tenants** — every query, journal, and subscription is scoped by
-  \`tenant_id\`.
-- **Subprocesses** — agent CLIs run with sanitized environments so
-  administrative variables don't leak into provider sessions.
-- **TLS** — the native listener refuses \`enable_tls\`; terminate TLS at a
-  reverse proxy instead of trusting a bypass.
-`),
-  },
-
-  'backend/api': {
-    slug: 'backend/api',
-    title: 'API reference',
-    description: 'The /v2 REST surface and the multiplexed /v2/ws WebSocket.',
-    body: body(`
-All endpoints live under \`/v2\`. Every request must carry a registered
-device signature; bodies and responses are JSON.
-
-## System
-
-| Endpoint | Purpose |
-| --- | --- |
-| \`GET /health\` | Liveness probe |
-| \`GET /v2/version\` | Daemon version, workspace root, capabilities |
-
-## Workspaces
-
-| Endpoint | Purpose |
-| --- | --- |
-| \`GET /v2/workspaces\` | Cached workspaces for the current tenant |
-| \`PUT /v2/workspaces\` | Merge workspace caches; returns canonical IDs and auto-trusts undecided directories inside the workspace boundary |
-| \`GET \\| PUT /v2/workspaces/{id}/trust\` | Read or change owner-scoped execution trust (new workspaces are untrusted) |
-| \`DELETE /v2/workspaces/{id}\` | Revoke trust, cancel active turns, remove the workspace (conversations are kept) |
-| \`GET /v2/workspace/entries?workspace=&query=\` | File/folder suggestions for the \`@\` picker |
-| \`GET /v2/workspace/directories?path=\` | Directory tree explorer |
-| \`GET /v2/workspace/file?path=\` | Read a file inside the sandbox root |
-| \`GET /v2/browser/fetch?url=\` | Proxy a web resource fetch |
-
-## Providers
-
-| Endpoint | Purpose |
-| --- | --- |
-| \`GET /v2/providers\` | Providers and their active states |
-| \`GET /v2/providers/versions\` | Installed vs latest CLI versions for each agent |
-| \`POST /v2/providers/{provider}/install\` | Install a missing managed CLI (vendor's official script) |
-| \`POST /v2/providers/{provider}/upgrade\` | Start a single-flight CLI upgrade; active agent work blocks it |
-| \`GET /v2/providers/upgrades/{operationId}\` | Async install/upgrade progress and verified version |
-| \`GET /v2/providers/models?provider=&workspace=\` | Provider's model catalog |
-| \`GET /v2/providers/commands?provider=&workspace=\` | Slash commands and extensions |
-
-Provider accounts live under \`/v2/agent-providers/{agent}\`, with
-\`GET .../export\` and \`POST .../import\` moving profiles between hosts as a
-signed JSON file.
-
-## Conversations
-
-| Endpoint | Purpose |
-| --- | --- |
-| \`GET /v2/conversations\` | Persisted conversations for the tenant |
-| \`POST /v2/conversations\` | Create a conversation folder with a provider |
-| \`GET /v2/conversations/{id}\` | Manifest and details |
-| \`GET /v2/conversations/{id}/events?afterSequence=&limit=\` | Paginated event journal; \`beforeSequence=N\` pages backwards for lazy history |
-| \`POST /v2/conversations/{id}/prompt\` | Dispatch a turn — text, typed content, model, reasoning effort, skill resource IDs |
-| \`POST /v2/conversations/{id}/cancel\` | Cancel the running turn |
-| \`POST /v2/conversations/{id}/permissions/{permissionId}\` | Resolve an interactive approval |
-
-A second mutation while a turn is running returns \`409 Conflict\` — turns
-are not silently queued.
-
-## WebSocket — \`/v2/ws\`
-
-One connection multiplexes:
-
-- \`conversation.subscribe\` — live event journals with sequence-based resume
-- Prompt dispatch and cancellation
-- Permission decisions
-- \`terminal.open\` / \`terminal.input\` / \`terminal.resize\` / \`terminal.close\` — PTY sessions
-- Local Codex engine process control
-
-Frames enforce UTF-8 length limits; heartbeats detect dead connections.
-
-The authoritative contract is [docs/API.md](https://github.com/youtonghy/TodeX_backend/blob/main/docs/API.md)
-in the backend repository.
-`),
-  },
-
-  // ------------------------------------------------------------------ Desktop
-
-  'desktop': {
-    slug: 'desktop',
-    title: 'Desktop overview',
-    description: 'The Electron client — a three-pane workbench for macOS, Windows, and Linux.',
-    body: body(`
-TodeX Desktop is a native client for \`todex-agentd\` built with Electron 44,
-React 19, Vite 7, Tailwind CSS v4, and HeroUI Pro. It shares the
-\`@todex/protocol\` transport library with the web client, so the workbench
-is identical — the desktop app adds native integrations on top.
-
-## Three panes
-
-- **Left sidebar** — workspace explorer, conversation history with agent
-  badges, thread lifecycle (New, Rename, Fork, Delete), and quick settings.
-- **Center chat** — streaming Markdown timeline with Shiki highlighting and
-  KaTeX math, interactive approval cards (commands, diffs, tool calls), and
-  a prompt box with model + reasoning-effort pickers, \`@\` file mentions,
-  \`/\` slash commands, \`#\` skill/MCP suggestions, and Codex Fast mode.
-- **Right workbench** — tabbed drawer with Slash Commands reference, live
-  Git Diff, an embedded xterm.js PTY terminal, the Skills/MCP Capabilities
-  catalog, and Experiments.
-
-## Desktop-only extras
-
-- Native file and directory pickers for loopback workspaces.
-- **Drag & drop pairing** — drop a QR screenshot onto the window to decode
-  it locally (jsQR), or paste pairing JSON / segmented ML-KEM payloads.
-- Electron \`userData\` persistence, secure IPC via \`contextBridge\`
-  (\`nodeIntegration: false\`), and per-build diagnostics logs.
-- Connection diagnostics that distinguish unreachable backends, bad URLs,
-  auth failures, deprecated \`/v1\` endpoints, and WebSocket mismatches.
-
-## Releases
-
-Prebuilt packages ship from GitHub Releases: Windows NSIS (x64 + ARM64),
-macOS Apple Silicon DMG, Linux x64 AppImage, with SHA-256 checksums. See
-[Set up & build](/docs/desktop/setup) for development builds.
-`),
-  },
-
-  'desktop/setup': {
-    slug: 'desktop/setup',
-    title: 'Set up & build',
-    description: 'Prerequisites, development mode, and release packaging.',
-    body: body(`
-## Requirements
-
-- Node.js 22+, pnpm 11+
-- A running \`todex-agentd\` backend (default \`http://127.0.0.1:7345\`)
-- A HeroUI Pro license token for package installation
-
-## Install
-
-\`@heroui-pro/react\` authenticates during install, so export the token first:
-
-\`\`\`bash
-export HEROUI_AUTH_TOKEN="your_heroui_key"   # or: export HEROUI_AUTH_TOKEN="$HEROUI_KEY"
-pnpm install
-pnpm run dev
-\`\`\`
-
-> **Warning:** never commit the token to the repository.
-
-If the Electron binary download breaks midway, repair it with
-\`rm -rf node_modules/electron/dist && node node_modules/electron/install.js\`.
-
-## Scripts
-
-| Command | What it does |
-| --- | --- |
-| \`pnpm run dev\` | Predev checks, then the app in Vite dev mode (1280×800 window) |
-| \`pnpm run build\` | Build main, preload, and renderer |
-| \`pnpm run package\` | Package with electron-builder |
-| \`pnpm run preview\` | Preview the production build |
-| \`pnpm run typecheck\` | Typecheck main + renderer targets |
-| \`pnpm run check:electron\` | Verify the native Electron binary |
-
-## Releases
-
-Packages are produced by the **Release desktop packages** GitHub workflow:
-enter a semver like \`1.2.3\` and it publishes Windows NSIS (x64 + ARM64), a
-macOS Apple Silicon DMG, a Linux x64 AppImage, and SHA-256 sums to the
-release tag. Development builds report \`DEV0.0.0\`; the workflow needs
-\`HEROUI_AUTH_TOKEN\` and — while the protocol repo is private —
-\`PROTOCOL_REPO_TOKEN\` Actions secrets. macOS releases require signing; see
-\`docs/automatic-updates.md\` in the desktop repo.
-
-## Development logs
-
-Builds stamped \`DEV0.0.0\` write diagnostics to
-\`userData/logs/todex-desktop-debug.log\` (override with
-\`TODEX_DESKTOP_LOG_PATH\`). Logs cover window, IPC, HTTP, WebSocket, and
-uncaught errors with tokens, cookies, keys, and attachments redacted.
-`),
-  },
-
-  'desktop/connect': {
-    slug: 'desktop/connect',
-    title: 'Connect a backend',
-    description: 'Pairing flows, device verification, and connection diagnostics.',
-    body: body(`
-The desktop app talks to one backend at a time over REST + WebSocket; every
-request is signed with the device's enrolled key.
-
-## Ways to pair
-
-| Method | How |
-| --- | --- |
-| **Device verification** | Connect with host/port; the app shows a code — approve it in the backend TUI (\`d\`, then \`a\`) and the token is saved. |
-| **Drag & drop QR** | Drop a QR screenshot or image file onto the window; decoded locally with jsQR. Supports multi-frame ML-KEM segments. |
-| **Paste pairing JSON** | Paste a full pairing payload, including segmented QR text. |
-| **Manual** | Enter the backend URL and import the encryption public key by hand. |
-
-Device approval and encryption are separate steps — when pairing encryption
-is \`x25519\` or \`ml-kem-768\` the client still needs the backend's public
-key (QR or manual import) after the device is approved.
-
-## Managing providers from the client
-
-The pairing panel lists the backend's Codex, Pi, Claude Code, Grok Build, and
-ACP CLI inventory with installed vs latest versions, installs missing CLIs
-in one click, and starts managed upgrades. Provider accounts can be exported
-and imported as a JSON file to sync agent credentials between hosts — the
-file contains keys in plain text, so handle it like a secret.
-
-## Diagnostics
-
-| State | Cause | Fix |
-| --- | --- | --- |
-| Backend unreachable | \`/v2/version\` or \`/health\` fails | Start \`todex-agentd\`; check the port |
-| Invalid backend URL | URL can't be parsed | Use \`http://127.0.0.1:7345\` form |
-| Authentication failed | HTTP 401/403 | Re-run device verification |
-| Deprecated protocol | URL path contains \`/v1\` | Switch to \`/v2\` |
-| WebSocket failure | REST works, \`/v2/ws\` fails | Firewall, token, or crypto mismatch — re-import the key |
-| Agent unavailable | Provider shows \`available = false\` | Install/authenticate the agent CLI on the backend host |
-`),
-  },
-
-  'desktop/workbench': {
-    slug: 'desktop/workbench',
-    title: 'The workbench',
-    description: 'Sidebar, chat panel, workbench tabs, and keyboard shortcuts.',
-    body: body(`
-The workbench is the same on desktop and web. This page uses desktop terms;
-where the web differs it's noted.
-
-## Left sidebar
-
-Workspaces on top, conversations below. Conversation rows show the active
-agent badge and run state; right-click actions cover New, Rename, Fork, and
-Delete. Workspaces can be added from any directory under a configured
-workspace root and are trusted explicitly.
-
-## Center — chat
-
-- Streaming Markdown with Shiki code highlighting and KaTeX math.
-- Approval cards for commands, file diffs, and tool calls — resolve them
-  inline while the turn runs.
-- Prompt box: \`@\` mentions a workspace file, \`/\` runs a provider slash
-  command, \`#\` references a skill or MCP capability. The model picker
-  matches names case-insensitively and carries a draggable reasoning-effort
-  control plus Codex Fast mode where the provider supports it.
-- Reasoning and tool details mount lazily on expansion; final answers stay
-  isolated from context and execution noise.
-
-## Right — workbench tabs
-
-| Tab | Contents |
-| --- | --- |
-| Slash Commands | Reference of the provider's commands |
-| Git Diff | Live working-directory changes |
-| Terminal | Embedded xterm.js PTY with direct keyboard input and auto resize |
-| Capabilities | Read-only catalog of active Skills and MCP servers |
-| Experiments | Feature toggles and developer diagnostics |
-
-## Keyboard shortcuts
-
-| Keys | Action |
-| --- | --- |
-| ⌘B / Ctrl B | Toggle the left sidebar |
-| ⌘⌥B / Ctrl Alt B | Toggle the workbench aside |
-| ⇧⌘G / Ctrl Shift G | Git actions |
-| ⌘N (⌥N on web) | New conversation |
-| ⇧⌘N (⌥⇧N on web) | Add a workspace |
-| ⇧⌘K / Ctrl Shift K | Kanban task board |
-
-> Browsers reserve ⌘N / ⇧⌘N, so the web client uses the Option modifier for
-> the two "new" actions. Everything else is identical.
-
-Holding the modifier briefly reveals shortcut hint badges in the UI.
-`),
-  },
-
-  // ------------------------------------------------------------------- Mobile
-
-  'mobile': {
-    slug: 'mobile',
-    title: 'Mobile',
-    description: 'The native iPhone & iPad client — coming soon.',
-    body: body(`
-> **Coming soon.** The mobile client is in active development; this page
-> tracks what's planned and will be replaced by full documentation when the
-> first beta ships.
-
-Todex Mobile is a native Swift + UIKit app for iPhone and iPad that pairs
-with the same \`todex-agentd\` backend — the same workspaces, conversations,
-approvals, and terminal sessions in your pocket.
-
-## Planned
-
-- **Camera pairing** — scan the backend's QR code, including multi-frame
-  ML-KEM segments, or import a pairing JSON; device verification works like
-  the desktop flow.
-- **Chat + console** — a two-pane layout on wide screens: conversation
-  timeline on one side, a workbench with terminal, files, browser preview,
-  and Git on the other.
-- **Full turn control** — approvals, plan-mode feedback, model and
-  reasoning pickers, message queueing, and local notifications when a
-  conversation finishes while you're away.
-- **Same security model** — Ed25519 device signatures and X25519 /
-  ML-KEM-768 transport encryption, with tokens stored in the iOS Keychain.
-
-## In the meantime
-
-The [web client](/docs/introduction/quick-start) already works in mobile
-browsers against a reachable backend — it's the same workbench UI, just not
-a native shell. For backend pairing details see
-[Security & pairing](/docs/backend/security).
-`),
-  },
-};
+// ---------- structure-derived data (locale-independent) ----------
 
 // Flattened page order for previous/next navigation.
 export const docPageOrder: string[] = [];
-for (const node of docNav) {
-  const walk = (n: DocNavNode) => {
+for (const node of docNavSeed) {
+  const walk = (n: DocNavSeed) => {
     if (n.page) docPageOrder.push(n.page);
     n.children?.forEach(walk);
   };
@@ -800,7 +97,7 @@ for (const node of docNav) {
 }
 
 // Ancestor keys (branch ids) that must be expanded for a slug to be visible.
-function findAncestors(slug: string, nodes: DocNavNode[], trail: string[]): string[] | null {
+function findAncestors(slug: string, nodes: DocNavSeed[], trail: string[]): string[] | null {
   for (const node of nodes) {
     if (node.id === slug || node.page === slug) return trail;
     if (node.children) {
@@ -812,10 +109,30 @@ function findAncestors(slug: string, nodes: DocNavNode[], trail: string[]): stri
 }
 
 export function ancestorsOf(slug: string): string[] {
-  return findAncestors(slug, docNav, []) ?? [];
+  return findAncestors(slug, docNavSeed, []) ?? [];
 }
 
-// ---------- headless-tree data ----------
+export const docsRootId = 'docs-root';
+
+export const docSectionIds: string[] = docNavSeed.map((section) => section.id);
+
+// slug → nav item id. Today ids equal page slugs, but keep the lookup so the
+// two can diverge without breaking selection.
+export const pageToItemId: ReadonlyMap<string, string> = (() => {
+  const map = new Map<string, string>();
+  const walk = (node: DocNavSeed) => {
+    if (node.page) map.set(node.page, node.id);
+    node.children?.forEach(walk);
+  };
+  docNavSeed.forEach(walk);
+  return map;
+})();
+
+export function isDocSlug(slug: string): boolean {
+  return pageToItemId.has(slug);
+}
+
+// ---------- localized bundle ----------
 
 export type DocTreeItem = {
   title: string;
@@ -825,70 +142,104 @@ export type DocTreeItem = {
   children?: string[];
 };
 
-export const docsRootId = 'docs-root';
-
-// Flat id → item map the tree's dataLoader reads.
-export const docTreeItems: Record<string, DocTreeItem> = {
-  [docsRootId]: { title: 'Docs', children: docNav.map((section) => section.id) },
+export type DocsContent = {
+  /** Localized nav tree (section + page titles in the active locale). */
+  nav: DocNavNode[];
+  /** slug → localized page, with English fallback for untranslated pages. */
+  pages: Record<string, DocPage>;
+  /** Flat id → item map the tree's dataLoader reads. */
+  treeItems: Record<string, DocTreeItem>;
+  /** slug → { title, trail } for breadcrumbs. */
+  navIndex: ReadonlyMap<string, { title: string; trail: string[] }>;
+  /** Prunes nav to nodes matching `query`, flattened for the dataLoader. */
+  filterTree: (query: string) => { items: Record<string, DocTreeItem>; expandedIds: string[] };
 };
 
-export const docSectionIds: string[] = [];
-
-for (const section of docNav) {
-  docSectionIds.push(section.id);
-  docTreeItems[section.id] = {
-    title: section.title,
-    isSection: true,
-    children: section.children?.map((child) => child.id) ?? [],
+function buildNav(pack: DocsLocalePack): DocNavNode[] {
+  const titleOf = (seed: DocNavSeed): string => {
+    if (seed.page) return pack.pages[seed.page]?.title ?? enDocs.pages[seed.page]?.title ?? seed.id;
+    return pack.sections[seed.id] ?? enDocs.sections[seed.id] ?? seed.id;
   };
-  const walk = (node: DocNavNode) => {
-    docTreeItems[node.id] = {
-      title: node.title,
-      page: node.page,
-      children: node.children?.map((child) => child.id),
-    };
-    node.children?.forEach(walk);
-  };
-  section.children?.forEach(walk);
+  const map = (seed: DocNavSeed): DocNavNode => ({
+    id: seed.id,
+    title: titleOf(seed),
+    page: seed.page,
+    children: seed.children?.map(map),
+  });
+  return docNavSeed.map(map);
 }
 
-// slug → nav item id. Today ids equal page slugs, but keep the lookup so the
-// two can diverge without breaking selection.
-export const pageToItemId: ReadonlyMap<string, string> = new Map(
-  Object.entries(docTreeItems)
-    .filter((entry): entry is [string, DocTreeItem & { page: string }] => Boolean(entry[1].page))
-    .map(([id, item]) => [item.page, id]),
-);
+function buildContent(locale: Locale): DocsContent {
+  const pack = packs[locale] ?? enDocs;
+  // Per-page fallback: an untranslated page degrades to English instead of a hole.
+  const pages: Record<string, DocPage> = { ...enDocs.pages, ...pack.pages };
+  const nav = buildNav(pack);
 
-// Prunes docNav to nodes matching `query` (a matching node keeps its whole
-// subtree so context is preserved), then flattens the result into the
-// headless-tree item map the sidebar dataLoader reads. `expandedIds` lists
-// every kept item so the filtered tree renders fully expanded.
-export function filterDocTree(query: string): { items: Record<string, DocTreeItem>; expandedIds: string[] } {
-  const q = query.trim().toLowerCase();
-  const items: Record<string, DocTreeItem> = { [docsRootId]: { title: 'Docs', children: [] } };
-
-  const prune = (node: DocNavNode): DocNavNode | null => {
-    const children = node.children?.map(prune).filter((k): k is DocNavNode => k !== null);
-    if (node.title.toLowerCase().includes(q)) return node;
-    if (children?.length) return { ...node, children };
-    return null;
+  const treeItems: Record<string, DocTreeItem> = {
+    [docsRootId]: { title: 'Docs', children: nav.map((section) => section.id) },
   };
-
-  const register = (node: DocNavNode) => {
-    items[node.id] = { title: node.title, page: node.page, children: node.children?.map((c) => c.id) };
-    node.children?.forEach(register);
-  };
-
-  for (const section of docNav) {
-    const kept = section.title.toLowerCase().includes(q)
-      ? section.children
-      : section.children?.map(prune).filter((k): k is DocNavNode => k !== null);
-    if (!kept?.length) continue;
-    items[docsRootId].children!.push(section.id);
-    items[section.id] = { title: section.title, isSection: true, children: kept.map((c) => c.id) };
-    kept.forEach(register);
+  const navIndex = new Map<string, { title: string; trail: string[] }>();
+  for (const section of nav) {
+    treeItems[section.id] = {
+      title: section.title,
+      isSection: true,
+      children: section.children?.map((child) => child.id) ?? [],
+    };
+    const walk = (node: DocNavNode, trail: string[]) => {
+      treeItems[node.id] = {
+        title: node.title,
+        page: node.page,
+        children: node.children?.map((child) => child.id),
+      };
+      const next = [...trail, node.title];
+      if (node.page) navIndex.set(node.page, { title: node.title, trail: next });
+      node.children?.forEach((child) => walk(child, next));
+    };
+    section.children?.forEach((child) => walk(child, [section.title]));
   }
 
-  return { items, expandedIds: Object.keys(items).filter((id) => id !== docsRootId) };
+  // A matching node keeps its whole subtree so context is preserved;
+  // `expandedIds` lists every kept item so the filtered tree renders fully
+  // expanded.
+  const filterTree = (query: string) => {
+    const q = query.trim().toLowerCase();
+    const items: Record<string, DocTreeItem> = { [docsRootId]: { title: 'Docs', children: [] } };
+
+    const prune = (node: DocNavNode): DocNavNode | null => {
+      const children = node.children?.map(prune).filter((k): k is DocNavNode => k !== null);
+      if (node.title.toLowerCase().includes(q)) return node;
+      if (children?.length) return { ...node, children };
+      return null;
+    };
+
+    const register = (node: DocNavNode) => {
+      items[node.id] = { title: node.title, page: node.page, children: node.children?.map((c) => c.id) };
+      node.children?.forEach(register);
+    };
+
+    for (const section of nav) {
+      const kept = section.title.toLowerCase().includes(q)
+        ? section.children
+        : section.children?.map(prune).filter((k): k is DocNavNode => k !== null);
+      if (!kept?.length) continue;
+      items[docsRootId].children!.push(section.id);
+      items[section.id] = { title: section.title, isSection: true, children: kept.map((c) => c.id) };
+      kept.forEach(register);
+    }
+
+    return { items, expandedIds: Object.keys(items).filter((id) => id !== docsRootId) };
+  };
+
+  return { nav, pages, treeItems, navIndex, filterTree };
+}
+
+const contentCache = new Map<Locale, DocsContent>();
+
+export function getDocsContent(locale: Locale): DocsContent {
+  let content = contentCache.get(locale);
+  if (!content) {
+    content = buildContent(locale);
+    contentCache.set(locale, content);
+  }
+  return content;
 }
