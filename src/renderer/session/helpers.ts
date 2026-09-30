@@ -1309,6 +1309,9 @@ export const REASONING_EFFORT_LABELS: Record<string, string> = {
   medium: 'Medium',
   high: 'High',
   xhigh: 'Extra high',
+  max: 'Max',
+  ultra: 'Ultra',
+  ultracode: 'Ultracode',
 };
 
 export function reasoningEffortLabel(value: string | null | undefined): string {
