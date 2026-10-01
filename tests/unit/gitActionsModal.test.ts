@@ -490,3 +490,13 @@ it('shows the not-a-repository state without loading history, branches or PR', a
   expect(readGitLog).not.toHaveBeenCalled();
   expect(readGitPullRequest).not.toHaveBeenCalled();
 });
+
+it('explains a missing history endpoint on an older backend instead of showing a read error', async () => {
+  vi.mocked(readGitLog).mockRejectedValue(new GitWorkspaceError('Git 请求失败 (404)', { status: 404 }));
+  render({ tab: 'status' });
+  await settle();
+  expect(document.body.textContent).toContain('当前后端版本不支持提交记录');
+  expect(document.body.textContent).not.toContain('读取失败');
+  // The rest of the status tab still loads.
+  expect(readGitWorkspace).toHaveBeenCalled();
+});
