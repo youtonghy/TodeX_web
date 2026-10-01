@@ -16,7 +16,7 @@ import { configureKanbanSync, syncKanbanTasksFromBackend } from './kanbanTasks';
 import { ENCRYPTION_VERIFICATION_ERROR, TransportVerificationError, validateTransportEncryption, verifyEncryptedSocket } from './transportVerification';
 import { t } from '../i18n';
 import { QueuedFollowUps, restoreQueuedFollowUps } from './queuedFollowUps';
-import { parseSessionLimitReset, restoreRateLimitWaits, type SessionLimitReset } from './sessionRateLimit';
+import { parseSessionLimitReset, rateLimitContinuationText, restoreRateLimitWaits, type SessionLimitReset } from './sessionRateLimit';
 import { LegacyEventRecovery } from './legacyEventRecovery';
 import { ConversationRecovery, isConversationRuntimeBusy, type ConversationOpenStatus, type EarlierHistoryResult } from './conversationRecovery';
 import { type ConversationRuntime } from '@todex/protocol/conversationRuntime';
@@ -1939,7 +1939,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
             const queued = queuedChatDraftsRef.current[localId] ?? [];
             if (rateLimited && queued.length < 32) {
               queuedChatDraftsRef.current = { ...queuedChatDraftsRef.current,
-                [localId]: [{ id: createRequestId('queued'), text: submission.text,
+                [localId]: [{ id: createRequestId('queued'), text: rateLimitContinuationText(submission.text),
                   attachments: submission.attachments, skills: submission.skills }, ...queued] };
               setQueuedChatDrafts(queuedChatDraftsRef.current);
             } else {
