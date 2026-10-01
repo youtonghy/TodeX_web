@@ -4,7 +4,7 @@ import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Toast, toast } from '@heroui/react';
 import { GitActionsModal } from '../../src/renderer/components/GitActionsModal';
-import { GitWorkspaceError, readGitPullRequest, readGitWorkspace, runGitWorkspaceOperation } from '../../src/renderer/lib/gitWorkspace';
+import { GitWorkspaceError, readGitLog, readGitPullRequest, readGitScan, readGitStatus, readGitWorkspace, runGitWorkspaceOperation, type GitLogCommit } from '../../src/renderer/lib/gitWorkspace';
 import { buildGitAgentPrompt, gitAgentActionGroups } from '../../src/renderer/session/gitAgentActions';
 import type { TodeXSession } from '../../src/renderer/session/useTodeXSession';
 
@@ -14,13 +14,25 @@ vi.hoisted(() => {
 
 vi.mock('../../src/renderer/lib/gitWorkspace', async importOriginal => {
   const actual = await importOriginal<typeof import('../../src/renderer/lib/gitWorkspace')>();
-  return { ...actual, readGitWorkspace: vi.fn(), runGitWorkspaceOperation: vi.fn(), readGitPullRequest: vi.fn() };
+  return { ...actual, readGitWorkspace: vi.fn(), runGitWorkspaceOperation: vi.fn(), readGitPullRequest: vi.fn(), readGitStatus: vi.fn(), readGitScan: vi.fn(), readGitLog: vi.fn() };
 });
 beforeEach(() => {
   vi.mocked(readGitWorkspace).mockReset().mockResolvedValue({ repositoryPath: '/project/current', initialized: true, currentBranch: 'main', branches: [{ name: 'main', current: true, remote: false }], worktrees: [], dirty: false });
   vi.mocked(runGitWorkspaceOperation).mockReset().mockResolvedValue({ repositoryPath: '/project/current', action: 'create-branch', output: 'Created branch' });
   vi.mocked(readGitPullRequest).mockReset().mockResolvedValue({ repositoryPath: '/project/current', initialized: true, branch: 'feature/x', pullRequest: null });
+  vi.mocked(readGitStatus).mockReset().mockResolvedValue({ repositoryPath: '/project/current', initialized: true, branch: 'main', worktreeKind: 'main',
+    changedFiles: 2, additions: 5, deletions: 1, statsTruncated: false, upstream: 'origin/main', ahead: 1, behind: 0 });
+  vi.mocked(readGitScan).mockReset().mockResolvedValue({ repositories: [{ path: '/project/current', name: 'current', branch: 'main', initialEligible: false, additions: 5, deletions: 1,
+    files: [{ path: 'src/app.ts', status: ' M', additions: 4, deletions: 1 }, { path: 'notes.md', status: '??', additions: 1, deletions: 0 }] }] });
+  vi.mocked(readGitLog).mockReset().mockImplementation(async (_settings, _path, skip, limit) => {
+    const all = Array.from({ length: 8 }, (_, index) => commit(index));
+    return { repositoryPath: '/project/current', initialized: true, commits: all.slice(skip, skip + limit), hasMore: skip + limit < all.length };
+  });
 });
+
+function commit(index: number): GitLogCommit {
+  return { sha: `${index}`.repeat(40).slice(0, 40), subject: `commit ${index}`, authorName: 'Alice', authoredAt: 1_700_000_000 - index * 3600, pushed: index === 0 ? false : true };
+}
 
 let root: Root;
 let container: HTMLDivElement;
@@ -29,17 +41,23 @@ beforeAll(() => {
   globalThis.ResizeObserver ??= class { observe() {} unobserve() {} disconnect() {} };
   globalThis.CSS ??= { escape: (value: string) => value.replace(/[^a-zA-Z0-9_-]/g, character => `\\${character}`) } as typeof CSS;
   HTMLElement.prototype.scrollIntoView ??= () => {};
+  // jsdom has no Web Animations API; the Tabs indicator transition queries it.
+  Element.prototype.getAnimations ??= () => [];
 });
 afterEach(() => {
   act(() => { toast.clear(); root?.unmount(); });
   container?.remove();
 });
 
-function render({ active = true, outcome = 'sent', pending = false, busy = false, openGitWorktree, workspacePath = '/project/current' }: {
+function render({ active = true, outcome = 'sent', pending = false, busy = false, openGitWorktree, workspacePath = '/project/current', tab = 'operations' }: {
   active?: boolean; outcome?: 'sent' | 'queued'; pending?: boolean; busy?: boolean;
   openGitWorktree?: (path: string, sourceConversationId: string) => unknown;
   workspacePath?: string;
+  /** The menu opens on the status tab; most tests drive the actions tab. */
+  tab?: 'status' | 'operations';
 } = {}) {
+  // Status-tab reads need an open socket; action tests stay offline so request counts only reflect the action.
+  const connected = tab === 'status';
   let finish!: (value: 'sent' | 'queued') => void;
   const response = pending ? new Promise<'sent' | 'queued'>(resolve => { finish = resolve; }) : Promise.resolve(outcome);
   const draft = Object.freeze({ c: 'Keep my unfinished message' });
@@ -54,6 +72,7 @@ function render({ active = true, outcome = 'sent', pending = false, busy = false
     chatDrafts: draft, composerAttachments: attachments, setChatDraft,
     openGitWorktree: openGitWorktree ?? vi.fn(() => null),
     selectedGitRepoByWorkspace: {}, selectGitRepo: vi.fn(),
+    ...(connected ? { connectionState: 'open', activeBackendConnectionId: 'b' } : {}),
   } as unknown as TodeXSession;
   container = document.createElement('div');
   document.body.append(container);
@@ -62,8 +81,16 @@ function render({ active = true, outcome = 'sent', pending = false, busy = false
     createElement(GitActionsModal, { session, isOpen: true, onOpenChange }),
     createElement(Toast.Provider),
   )));
+  if (tab === 'operations') act(() => { menuTab('操作').click(); });
   return { session, sendAgentMessage, setChatDraft, onOpenChange, finish, draft, attachments };
 }
+
+function menuTab(label: string) {
+  const found = [...document.querySelectorAll<HTMLElement>('[role="tab"]')].find(item => item.textContent?.includes(label));
+  expect(found, `tab ${label}`).toBeDefined();
+  return found!;
+}
+async function settle() { for (let index = 0; index < 6; index++) await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); }); }
 
 async function flushNotices() { await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); }); }
 function notices() { return [...document.querySelectorAll('[data-slot="toast"]')].map(item => item.textContent).join(' '); }
@@ -388,4 +415,78 @@ it('reopens a closed PR through the shared detail panel', async () => {
   await act(async () => { button('确认重新打开').click(); });
   expect(runGitWorkspaceOperation).toHaveBeenCalledExactlyOnceWith(state.session.settings, '/project/current', { action: 'reopen-pr' });
   expect(state.sendAgentMessage).not.toHaveBeenCalled();
+});
+
+it('opens on the read-only status tab with changes, commits, PR and branch state', async () => {
+  vi.mocked(readGitPullRequest).mockResolvedValue({ repositoryPath: '/project/current', initialized: true, branch: 'feature/x', pullRequest: openPr });
+  vi.mocked(readGitWorkspace).mockResolvedValue({ repositoryPath: '/project/current', initialized: true, currentBranch: 'main', dirty: true,
+    branches: [{ name: 'main', current: true, remote: false }, { name: 'origin/main', current: false, remote: true }],
+    worktrees: [{ path: '/project/current', branch: 'main', current: true, main: true, locked: false, dirty: true, accessible: true },
+      { path: '/project/todex/x', branch: 'todex/x', current: false, main: false, locked: true, dirty: false, accessible: true }] });
+  const state = render({ tab: 'status' });
+  await settle();
+  expect(document.querySelectorAll('[role="menuitem"]')).toHaveLength(0);
+  const text = document.body.textContent;
+  expect(text).toContain('2 个文件已更改');
+  expect(text).toContain('src/app.ts');
+  expect(text).toContain('1 个提交未推送');
+  expect(text).toContain('commit 0');
+  expect(text).not.toContain('commit 1');
+  expect(text).toContain('本地分支 1 · 远端 1 · 工作树 2');
+  const prLink = document.querySelector<HTMLAnchorElement>('a[href="https://github.com/owner/project/pull/42"]');
+  expect(prLink?.target).toBe('_blank');
+  expect(prLink?.rel).toBe('noopener noreferrer');
+  // Reads run one at a time and the PR, which may wait on GitHub, goes last.
+  const order = [readGitLog, readGitWorkspace, readGitPullRequest].map(mock => vi.mocked(mock).mock.invocationCallOrder[0]);
+  expect(order).toEqual([...order].sort((a, b) => a - b));
+  expect(readGitLog).toHaveBeenCalledWith(state.session.settings, '/project/current', 0, 1, expect.anything());
+  expect(state.sendAgentMessage).not.toHaveBeenCalled();
+});
+
+it('reveals five earlier commits per expand and collapses back to the latest without refetching', async () => {
+  render({ tab: 'status' });
+  await settle();
+  const rows = () => document.querySelectorAll('ol[aria-label="提交记录"] > li').length;
+  expect(rows()).toBe(1);
+  await act(async () => { button('显示更早的 5 个提交').click(); });
+  await settle();
+  expect(rows()).toBe(6);
+  expect(readGitLog).toHaveBeenLastCalledWith(expect.anything(), '/project/current', 1, 5, expect.anything());
+  await act(async () => { button('显示更早的 5 个提交').click(); });
+  await settle();
+  expect(rows()).toBe(8);
+  expect([...document.querySelectorAll('button')].some(item => item.textContent?.includes('显示更早'))).toBe(false);
+  await act(async () => { button('收起').click(); });
+  expect(rows()).toBe(1);
+  const calls = vi.mocked(readGitLog).mock.calls.length;
+  await act(async () => { button('显示更早的 5 个提交').click(); });
+  await settle();
+  expect(rows()).toBe(6);
+  expect(readGitLog).toHaveBeenCalledTimes(calls);
+});
+
+it('jumps from a status section to its action group', async () => {
+  render({ tab: 'status' });
+  await settle();
+  await act(async () => { [...document.querySelectorAll('button')].find(item => item.textContent === '分支 / 工作树操作')!.click(); });
+  expect(menuTab('操作').getAttribute('aria-selected')).toBe('true');
+  expect(document.querySelectorAll('[role="menuitem"]')).toHaveLength(27);
+});
+
+it('retries a status read rejected because the backend read slots are busy', async () => {
+  vi.mocked(readGitStatus).mockRejectedValueOnce(new GitWorkspaceError('Git read capacity is busy', { status: 409 }));
+  render({ tab: 'status' });
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 700)); });
+  await settle();
+  expect(document.body.textContent).toContain('2 个文件已更改');
+});
+
+it('shows the not-a-repository state without loading history, branches or PR', async () => {
+  vi.mocked(readGitStatus).mockResolvedValue({ repositoryPath: '/project/current', initialized: false, branch: null, worktreeKind: null,
+    changedFiles: 0, additions: 0, deletions: 0, statsTruncated: false, upstream: null, ahead: null, behind: null });
+  render({ tab: 'status' });
+  await settle();
+  expect(document.body.textContent).toContain('当前目录还不是 Git 仓库');
+  expect(readGitLog).not.toHaveBeenCalled();
+  expect(readGitPullRequest).not.toHaveBeenCalled();
 });
