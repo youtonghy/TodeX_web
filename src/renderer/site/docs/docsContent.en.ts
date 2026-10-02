@@ -664,7 +664,8 @@ workspace root and are trusted explicitly.
 - Streaming Markdown with Shiki code highlighting and KaTeX math.
 - Approval cards for commands, file diffs, and tool calls — resolve them
   inline while the turn runs.
-- Prompt box: \`@\` mentions a workspace file, \`/\` runs a provider slash
+- Prompt box: \`@\` mentions a workspace file, \`@chat:\` attaches another
+  conversation of the workspace as a Markdown file, \`/\` runs a provider slash
   command, \`#\` references a skill or MCP capability. The model picker
   matches names case-insensitively and carries a draggable reasoning-effort
   control plus Codex Fast mode where the provider supports it.
