@@ -581,6 +581,7 @@ export function ChatPanel({ session }: Props) {
     { mode: '', query: '', items: [], truncated: false });
   const [mentionSearchPending, setMentionSearchPending] = useState(false);
   const [suggestionIndex, setSuggestionIndex] = useState(0);
+  const suggestionsPopoverRef = useRef<HTMLDivElement>(null);
   const [isDraggingAttachment, setIsDraggingAttachment] = useState(false);
   const [previewAttachment, setPreviewAttachment] = useState<ComposerAttachmentDraft | null>(null);
   const [expandedProcessIds, setExpandedProcessIds] = useState<Set<string>>(() => new Set());
@@ -608,6 +609,16 @@ export function ChatPanel({ session }: Props) {
       .catch(() => settle([], false));
     return () => { active = false; };
   }, [entryMode, referenceQuery, workspace?.path, session.fetchWorkspaceEntries]);
+  // Keyboard navigation keeps the active row centered inside the popover;
+  // near the list edges scrollTop simply clamps at the boundary.
+  useEffect(() => {
+    const popover = suggestionsPopoverRef.current;
+    const active = popover?.querySelector<HTMLElement>('.composer-suggestion-item--active');
+    if (!popover || !active) return;
+    const popRect = popover.getBoundingClientRect();
+    const itemRect = active.getBoundingClientRect();
+    popover.scrollTop += itemRect.top + itemRect.height / 2 - (popRect.top + popRect.height / 2);
+  }, [suggestionIndex, draft]);
   const messagesRef = useRef<HTMLDivElement>(null);
   const [quote, setQuote] = useState<{ text: string; left: number; top: number; messageId?: string } | null>(null);
   useEffect(() => {
@@ -1293,7 +1304,7 @@ export function ChatPanel({ session }: Props) {
               onPress={session.refreshProviderCommands}>{t('chat.refreshCommands')}</Button>
           </div> : null}
           {(slashSuggestions.length > 0 || referenceSuggestions.length > 0 || (mentionActive && referenceSuggestions.length === 0) || capabilityActive) ? (
-            <div className="composer-suggestions-popover">
+            <div ref={suggestionsPopoverRef} className="composer-suggestions-popover">
               {slashSuggestions.length > 0 ? (
                 <ListBox
                   aria-label={t('chat.commandSuggestions')}
