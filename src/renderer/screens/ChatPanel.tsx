@@ -525,7 +525,7 @@ const ChatTimelineItem = memo(function ChatTimelineItem({
           : null}
         {request ? (
           <ChatMessage.Actions>
-            <ConversationPermissionActions request={request} onSelect={(option, data) => { onApprove(option, request, data); }} />
+            <ConversationPermissionActions request={request} deviceSecret={session.settings.deviceSecret} onSelect={(option, data) => { onApprove(option, request, data); }} />
           </ChatMessage.Actions>
         ) : null}
       </div>
@@ -1295,7 +1295,7 @@ export function ChatPanel({ session }: Props) {
             isConnected={session.connectionState === 'open'} /> : null}
           {permissionRequests.map(request => <div key={request.requestId} className="mb-3 rounded-xl border border-separator p-3">
             <p className="mb-2 text-xs font-medium">{sessionPermissionIds.has(request.requestId) ? t('chat.piPluginRequest') : request.title || t('chat.permissionApproval')}</p>
-            <ConversationPermissionActions request={request} onSelect={(option, data) => { session.sendApprovalResponse(option, request, data); }} />
+            <ConversationPermissionActions request={request} deviceSecret={session.settings.deviceSecret} onSelect={(option, data) => { session.sendApprovalResponse(option, request, data); }} />
           </div>)}
           {currentProvider === 'pi' && slashTrigger ? <div className="mb-2 flex items-center gap-2 text-xs text-muted">
             <span>{commandCatalog?.status === 'ready' ? (commandCatalog.source === 'session' ? t('chat.piCommandsSession') : t('chat.piCommandsWorkspace'))

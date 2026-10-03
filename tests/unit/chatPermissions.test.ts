@@ -4,6 +4,8 @@ import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { toast } from '@heroui/react';
 import { ChatPanel } from '../../src/renderer/screens/ChatPanel';
+import { ConversationPermissionActions } from '../../src/renderer/components/ConversationRunStatus';
+import { deviceIdentityFromSecret } from '@todex/protocol/deviceAuth';
 import type { TodeXSession } from '../../src/renderer/session/useTodeXSession';
 vi.hoisted(() => { window.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false, media: '', onchange: null }); });
 let root: Root;
@@ -80,4 +82,24 @@ it('shows missing permission capability once as a toast and clears it when resol
   rerender();
   act(() => vi.advanceTimersByTime(0));
   expect(warning).toHaveBeenCalledTimes(2);
+});
+
+it('requests naming their answering devices show buttons only on those devices', () => {
+  const secret = 'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8';
+  const deviceId = deviceIdentityFromSecret(secret)!.deviceId;
+  const onSelect = vi.fn();
+  const request = {
+    requestId: 'p', requestType: 'permission', title: 'Use the desktop browser?', event: {} as never,
+    data: {
+      kind: 'desktop_browser', allowedDeviceIds: [deviceId],
+      details: { executors: [{ deviceId, deviceName: 'Studio Mac' }] },
+      options: [{ optionId: 'allow', name: '允许', kind: 'allow_always' }, { optionId: 'reject', name: '拒绝', kind: 'reject_once' }],
+    },
+  };
+  container = document.createElement('div'); document.body.append(container); root = createRoot(container);
+  act(() => root.render(createElement(ConversationPermissionActions, { request, deviceSecret: undefined, onSelect })));
+  expect(container.textContent).toContain('请在 Studio Mac 上确认');
+  expect(container.querySelector('button')).toBeNull();
+  act(() => root.render(createElement(ConversationPermissionActions, { request, deviceSecret: secret, onSelect })));
+  expect([...container.querySelectorAll('button')].map(button => button.textContent)).toEqual(['允许', '拒绝']);
 });
