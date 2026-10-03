@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { RiCloseLine, RiDeleteBinLine, RiDownload2Line, RiEdit2Line, RiFolderAddLine, RiLinksLine, RiLink, RiServerLine, RiTerminalBoxLine, RiUpload2Line, RiGitBranchLine, RiAddLine, RiArrowLeftDoubleLine, RiArrowRightDoubleLine, RiFileTextLine, RiFolder3Line, RiGlobalLine, RiFocus3Line, RiLayoutColumnLine, RiLayoutRowLine, RiRefreshLine, RiStopCircleLine } from '@remixicon/react';
+import { RiCloseLine, RiDeleteBinLine, RiDownload2Line, RiEdit2Line, RiFolderAddLine, RiLinksLine, RiLink, RiServerLine, RiTerminalBoxLine, RiTerminalWindowLine, RiUpload2Line, RiGitBranchLine, RiAddLine, RiArrowLeftDoubleLine, RiArrowRightDoubleLine, RiFileTextLine, RiFolder3Line, RiGlobalLine, RiFocus3Line, RiLayoutColumnLine, RiLayoutRowLine, RiRefreshLine, RiStopCircleLine } from '@remixicon/react';
 import { AlertDialog, Button, Chip, Dropdown, Input, Label, Modal, ScrollShadow, Spinner, TextField, Tooltip, toast } from '@heroui/react';
 import type { Selection } from '@heroui/react';
 import { FileTree } from '@heroui-pro/react';
@@ -10,6 +10,8 @@ import { WorkspaceFilePreview, type PreviewFile, type ReferenceSelection, type W
 import { useNoticeToast } from '../components/NoticeToast';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { useRemoteConnector } from '../components/ssh/useRemoteConnector';
+import { SshExecPane } from '../components/ssh/SshExecPane';
+import { capSshExecTabs, rememberSessionSshExecTabs, sessionSshExecTabsFor, sshExecTabTitle } from '../session/sshExecTabs';
 import { normalizeRemoteFilesBinding, remoteFileSource, remoteFilesBinding, workspaceFileSource, type FileSource, type FileSourceEntry, type RemoteFilesBinding } from '../session/fileSources';
 import { latencyLabelOf, terminalIdForConversation, terminalStatusLabel, type TerminalTarget } from '../session/helpers';
 import type { OpenPanelOptions, WorkbenchItem, WorkbenchRequest, WorkbenchTab } from '../lib/panels';
@@ -43,6 +45,7 @@ type StoredWorkbenchState = {
   activeId: string;
 };
 
+/** Types written to the tab store; 'ssh-exec' tabs are session-only. */
 const WORKBENCH_TYPES = new Set<WorkbenchTab>(['terminal', 'browser', 'files', 'git-diff']);
 
 const WORKBENCH_LABEL_KEYS: Record<WorkbenchTab, MessageKey> = {
@@ -50,6 +53,7 @@ const WORKBENCH_LABEL_KEYS: Record<WorkbenchTab, MessageKey> = {
   browser: 'workbench.tabBrowser',
   files: 'workbench.tabFiles',
   'git-diff': 'workbench.tabGitDiff',
+  'ssh-exec': 'workbench.tabSshExec',
 };
 
 const workbenchLabel = (tab: WorkbenchTab) => t(WORKBENCH_LABEL_KEYS[tab]);
@@ -59,6 +63,7 @@ const WORKBENCH_ICONS = {
   browser: RiGlobalLine,
   files: RiFileTextLine,
   'git-diff': RiGitBranchLine,
+  'ssh-exec': RiTerminalWindowLine,
 };
 
 const REMOTE_ICONS = {
@@ -70,8 +75,10 @@ type WorkbenchTabAxis = 'horizontal' | 'vertical';
 
 const WORKBENCH_TAB_AXIS_KEY = `${SETTINGS_STORAGE_KEY}.workbenchTabAxis.v1`;
 
-function parseStoredWorkbenchState(value: unknown): StoredWorkbenchState {
-  if (!value || typeof value !== 'object') return { items: [], activeId: '' };
+/** `sessionItems` are this app session's 'ssh-exec' tabs for the scope; they
+ * follow the stored tabs and may hold the stored active tab. */
+function parseStoredWorkbenchState(value: unknown, sessionItems: WorkbenchItem[] = []): StoredWorkbenchState {
+  if (!value || typeof value !== 'object') return { items: sessionItems, activeId: sessionItems[0]?.id ?? '' };
   const candidate = value as Partial<StoredWorkbenchState>;
   const seen = new Set<string>();
   const items = Array.isArray(candidate.items)
@@ -84,10 +91,11 @@ function parseStoredWorkbenchState(value: unknown): StoredWorkbenchState {
       return true;
     })
     : [];
-  const activeId = typeof candidate.activeId === 'string' && items.some((item) => item.id === candidate.activeId)
+  const restored = [...items.map(normalizeWorkbenchItem), ...sessionItems.filter(item => !seen.has(item.id))];
+  const activeId = typeof candidate.activeId === 'string' && restored.some((item) => item.id === candidate.activeId)
     ? candidate.activeId
-    : items[0]?.id ?? '';
-  return { items: items.map(normalizeWorkbenchItem), activeId };
+    : restored[0]?.id ?? '';
+  return { items: restored, activeId };
 }
 
 function normalizeWorkbenchItem(item: WorkbenchItem): WorkbenchItem {
@@ -143,7 +151,7 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
     void window.todexWeb.store.get(storageKey)
       .then((value) => {
         if (cancelled) return;
-        const stored = parseStoredWorkbenchState(value);
+        const stored = parseStoredWorkbenchState(value, sessionSshExecTabsFor(storageKey));
         setItems(stored.items);
         setActiveId(stored.activeId);
         const active = stored.items.find((item) => item.id === stored.activeId);
@@ -160,7 +168,9 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
 
   useEffect(() => {
     if (!restored) return;
-    void window.todexWeb.store.set(storageKey, { items: items.map(normalizeWorkbenchItem), activeId } satisfies StoredWorkbenchState)
+    rememberSessionSshExecTabs(storageKey, items);
+    const persisted = items.filter(item => item.type !== 'ssh-exec').map(normalizeWorkbenchItem);
+    void window.todexWeb.store.set(storageKey, { items: persisted, activeId } satisfies StoredWorkbenchState)
       .catch((reason) => {
         console.error('Failed to persist workbench tabs', reason);
       });
@@ -252,6 +262,11 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
 
   useEffect(() => { onItemsChange?.(items); }, [items, onItemsChange]);
 
+  const sshExecRun = useCallback((item: WorkbenchItem) => item.sshExec
+    ? session.conversationRuntimeById[item.sshExec.conversationId]?.sshExecs.find(run => run.id === item.sshExec!.execId)
+    : undefined, [session.conversationRuntimeById]);
+  const isSshExecRunning = useCallback((item: WorkbenchItem) => sshExecRun(item)?.status === 'running', [sshExecRun]);
+
   const handledRequestRef = useRef(0);
   /** SSH tabs opened during this mount connect at once; restored ones wait for Connect. */
   const freshSshTabsRef = useRef(new Set<string>());
@@ -262,9 +277,22 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
     handledRequestRef.current = pending[pending.length - 1].id;
     onRequestsHandled?.(handledRequestRef.current);
     let opened: WorkbenchItem | null = null;
+    const added: WorkbenchItem[] = [];
     for (const request of pending) {
       if (request.kind === 'close') {
         if (items.some(item => item.id === request.itemId)) closeTab(request.itemId);
+        continue;
+      }
+      if (request.kind === 'ssh-exec') {
+        const binding = { conversationId: request.conversationId, execId: request.execId };
+        const existing = [...items, ...added].find(item => item.sshExec?.conversationId === binding.conversationId && item.sshExec.execId === binding.execId);
+        if (existing) {
+          opened = existing;
+          continue;
+        }
+        const item: WorkbenchItem = { id: `ssh-exec-${Date.now()}-${request.id}`, type: 'ssh-exec', title: request.title, sshExec: binding };
+        added.push(item);
+        opened = item;
         continue;
       }
       const id = `${request.kind === 'ssh-terminal' ? 'terminal' : 'files'}-${Date.now()}-${request.id}`;
@@ -272,14 +300,18 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
         ? { id, type: 'terminal', title: request.host, ssh: { host: request.host } }
         : { id, type: 'files', title: request.remote.label, remote: request.remote };
       if (item.ssh) freshSshTabsRef.current.add(item.id);
-      setItems(current => [...current, item]);
+      added.push(item);
       opened = item;
+    }
+    if (added.length) {
+      const keep = new Set(added.map(item => item.id));
+      setItems(current => capSshExecTabs([...current, ...added], isSshExecRunning, keep));
     }
     if (opened) {
       setActiveId(opened.id);
       onTabChange(opened.type);
     }
-  }, [closeTab, items, onRequestsHandled, onTabChange, requests, restored]);
+  }, [closeTab, isSshExecRunning, items, onRequestsHandled, onTabChange, requests, restored]);
 
   const closeActiveTab = useCallback(() => {
     if (!activeId) return false;
@@ -327,7 +359,10 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
   const tabStrip = items.map((item) => {
     const Icon = item.ssh || item.remote ? REMOTE_ICONS[item.type === 'terminal' ? 'terminal' : 'files'] : WORKBENCH_ICONS[item.type];
     const workspacePath = session.activeWorkspace?.path;
-    const location = item.ssh
+    const execRun = item.type === 'ssh-exec' ? sshExecRun(item) : undefined;
+    const location = item.type === 'ssh-exec'
+      ? (execRun && sshExecTabTitle(execRun)) || item.title
+      : item.ssh
       ? `ssh ${item.ssh.host}`
       : item.remote
         ? `${item.remote.label}${item.target?.filePath ? ` ${item.target.filePath}` : ''}`
@@ -439,6 +474,7 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
             {item.type === 'browser' ? <BrowserPane workspacePath={session.activeWorkspace?.path} session={session} target={item.type === tab && item.id === active?.id && (target?.filePath || target?.url) ? target : item.target} onTargetChange={next => updateTabTarget(item.id, next)} /> : null}
             {item.type === 'files' ? <FilesPane session={session} remote={item.remote} onRemoteRebind={next => updateRemoteBinding(item.id, next)} target={item.type === tab && item.id === active?.id && (target?.filePath || target?.url) ? target : item.target} onTargetChange={next => updateTabTarget(item.id, next)} /> : null}
             {item.type === 'git-diff' ? <GitDiffPane session={session} /> : null}
+            {item.type === 'ssh-exec' ? <SshExecPane run={sshExecRun(item)} isActive={item.id === active?.id} onClose={() => closeTab(item.id)} /> : null}
           </div>
         ))}
       </div>
