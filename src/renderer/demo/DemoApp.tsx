@@ -259,6 +259,7 @@ export function DemoApp() {
             onOpenCliManager={noop}
             onOpenAgentProviders={noop}
             onOpenUsage={noop}
+            onOpenQuota={noop}
             onOpenAbout={noop}
             onOpenKanban={noop}
             onOpenTerminal={noop}

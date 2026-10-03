@@ -28,6 +28,7 @@ const AsidePanel = lazy(() => import('./screens/AsidePanel').then((module) => ({
 const CapabilitiesPanel = lazy(() => import('./screens/CapabilitiesPanel').then((module) => ({ default: module.CapabilitiesPanel })));
 const WorkbenchPanel = lazy(() => import('./screens/WorkbenchPanel').then((module) => ({ default: module.WorkbenchPanel })));
 const UsagePanel = lazy(() => import('./screens/UsagePanel').then((module) => ({ default: module.UsagePanel })));
+const QuotaPanel = lazy(() => import('./screens/QuotaPanel').then((module) => ({ default: module.QuotaPanel })));
 const AboutPanel = lazy(() => import('./screens/AboutPanel').then((module) => ({ default: module.AboutPanel })));
 const CliManagerPanel = lazy(() => import('./screens/CliManagerPanel').then((module) => ({ default: module.CliManagerPanel })));
 const AgentProvidersPanel = lazy(() => import('./screens/AgentProvidersPanel').then((module) => ({ default: module.AgentProvidersPanel })));
@@ -150,7 +151,7 @@ export function App() {
     if (isWorkbenchTab(next)) {
       setWorkbenchTab(next);
     }
-    if (next !== 'settings' && next !== 'usage' && next !== 'about' && next !== 'cli-manager' && next !== 'agent-providers') {
+    if (next !== 'settings' && next !== 'usage' && next !== 'quota' && next !== 'about' && next !== 'cli-manager' && next !== 'agent-providers') {
       persistAsideOpen(true);
     }
   }, [persistAsideOpen, scopeKey, setPanelTarget, setWorkbenchTab]);
@@ -184,7 +185,7 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    setPanel(current => current && ['settings', 'usage', 'about', 'cli-manager', 'agent-providers', 'kanban', 'ssh'].includes(current) ? current : null);
+    setPanel(current => current && ['settings', 'usage', 'quota', 'about', 'cli-manager', 'agent-providers', 'kanban', 'ssh'].includes(current) ? current : null);
     setSlashCommand(undefined);
     // Requests and the reported tab list belong to the scope that produced them.
     setWorkbenchRequests([]);
@@ -301,10 +302,11 @@ export function App() {
   const insetChrome = window.todexWeb.app.windowChrome === 'hidden-inset';
   const settingsOpen = panel === 'settings';
   const usageOpen = panel === 'usage';
+  const quotaOpen = panel === 'quota';
   const aboutOpen = panel === 'about';
   const cliManagerOpen = panel === 'cli-manager';
   const agentProvidersOpen = panel === 'agent-providers';
-  const modalPanel = settingsOpen || usageOpen || aboutOpen || cliManagerOpen || agentProvidersOpen;
+  const modalPanel = settingsOpen || usageOpen || quotaOpen || aboutOpen || cliManagerOpen || agentProvidersOpen;
   const subagentRuns = session.activeConversation
     ? session.subagentsByConversation[session.activeConversation.id] ?? []
     : [];
@@ -372,6 +374,7 @@ export function App() {
               onOpenCliManager={() => { persistAsideOpen(false); setPanel('cli-manager'); }}
               onOpenAgentProviders={() => { persistAsideOpen(false); setPanel('agent-providers'); }}
               onOpenUsage={() => setPanel('usage')}
+              onOpenQuota={() => setPanel('quota')}
               onOpenAbout={() => setPanel('about')}
               onOpenKanban={() => { setPanel('kanban'); persistAsideOpen(false); }}
               onOpenTerminal={toggleSshView}
@@ -480,6 +483,17 @@ export function App() {
               <Modal.CloseTrigger />
               <Modal.Header><Modal.Heading>{t('app.usage')}</Modal.Heading></Modal.Header>
               <Modal.Body className="max-h-[82vh] overflow-y-auto p-0"><Suspense fallback={panelFallback}><UsagePanel session={session} /></Suspense></Modal.Body>
+            </Modal.Dialog>
+          </Modal.Container>
+        </Modal.Backdrop>
+      </Modal>
+      <Modal isOpen={quotaOpen} onOpenChange={(open) => { if (!open) setPanel((current) => current === 'quota' ? null : current); }}>
+        <Modal.Backdrop>
+          <Modal.Container>
+            <Modal.Dialog className="max-h-[90vh] sm:max-w-2xl">
+              <Modal.CloseTrigger />
+              <Modal.Header><Modal.Heading>{t('usage.quotaTitle')}</Modal.Heading></Modal.Header>
+              <Modal.Body className="max-h-[76vh] overflow-y-auto p-0"><Suspense fallback={panelFallback}><QuotaPanel session={session} /></Suspense></Modal.Body>
             </Modal.Dialog>
           </Modal.Container>
         </Modal.Backdrop>
