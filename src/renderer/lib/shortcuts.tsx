@@ -7,6 +7,7 @@ export type ShortcutId =
   | 'newConversation'
   | 'newWorkspace'
   | 'kanban'
+  | 'sshTerminal'
   | 'gitActions'
   | 'toggleSidebar'
   | 'toggleAside';
@@ -23,7 +24,9 @@ type ShortcutCombo = {
 };
 
 // Browsers reserve ⌘N / ⇧⌘N (new window / incognito), so "new" actions use the
-// Option modifier on the web. Everything else matches the desktop client.
+// Option modifier on the web. ⌘⇧T / Ctrl+Shift+T reopens a closed tab and can't
+// be intercepted, so the Terminal view also uses Option. Everything else matches
+// the desktop client.
 const COMBOS: Record<ShortcutId, ShortcutCombo> = {
   toggleSidebar: { code: 'KeyB', label: 'B', mod: true },
   toggleAside: { code: 'KeyB', label: 'B', mod: true, alt: true },
@@ -31,6 +34,7 @@ const COMBOS: Record<ShortcutId, ShortcutCombo> = {
   newConversation: { code: 'KeyN', label: 'N', alt: true },
   newWorkspace: { code: 'KeyN', label: 'N', alt: true, shift: true },
   kanban: { code: 'KeyK', label: 'K', mod: true, shift: true },
+  sshTerminal: { code: 'KeyT', label: 'T', alt: true, shift: true },
 };
 
 const MODIFIER_KEY = isMacLike ? 'Meta' : 'Control';

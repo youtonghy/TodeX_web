@@ -693,9 +693,10 @@ workspace root and are trusted explicitly.
 | ⌘N (⌥N on web) | New conversation |
 | ⇧⌘N (⌥⇧N on web) | Add a workspace |
 | ⇧⌘K / Ctrl Shift K | Kanban task board |
+| ⇧⌘T (⌥⇧T on web) | Terminal view (SSH hosts, keys, remote files) |
 
-> Browsers reserve ⌘N / ⇧⌘N, so the web client uses the Option modifier for
-> the two "new" actions. Everything else is identical.
+> Browsers reserve ⌘N / ⇧⌘N / ⇧⌘T, so the web client uses the Option modifier
+> for the two "new" actions and the Terminal view. Everything else is identical.
 
 Holding the modifier briefly reveals shortcut hint badges in the UI.
 `),

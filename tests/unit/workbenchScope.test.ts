@@ -107,12 +107,12 @@ it('isolates new conversations and restores each conversation’s tabs and file/
 it('keeps the same shared terminal identity when changing conversations within a workspace', async () => {
   await render('a', 'workspace', 'workspace');
   await addTerminal();
-  const firstId = status.mock.calls.at(-1)?.[2];
+  const firstId = status.mock.calls.at(-1)?.[1];
   expect(firstId).toBeTruthy();
   await render('b', 'workspace', 'workspace');
   expect(tabButton('终端')).toBeTruthy();
-  expect(status.mock.calls.at(-1)?.[2]).toBe(firstId);
-  expect(status.mock.calls.at(-1)?.[1]).toEqual(expect.objectContaining({ id: 'b' }));
+  expect(status.mock.calls.at(-1)?.[1]).toBe(firstId);
+  expect(status.mock.calls.at(-1)?.[0]).toEqual(expect.objectContaining({ kind: 'workspace', conversation: expect.objectContaining({ id: 'b' }) }));
   const tabKeys = [...disk.keys()].filter(key => key.includes('.workbenchTabs.v1:'));
   expect(tabKeys).toEqual([tabsKey(scope('a', 'workspace', 'workspace'))]);
 });
@@ -166,7 +166,7 @@ it('disables adding tabs until delayed stored tabs have finished restoring', asy
 it('keeps a manually stopped shared terminal stopped when switching conversations', async () => {
   await render('a', 'workspace', 'workspace');
   await addTerminal();
-  const terminalId = status.mock.calls.at(-1)?.[2] as string;
+  const terminalId = status.mock.calls.at(-1)?.[1] as string;
   expect(terminalId).toBeTruthy();
   terminals = { [terminalId]: { id: terminalId, status: 'running', output: [], rows: 24, cols: 80 } };
   await render('a', 'workspace', 'workspace');

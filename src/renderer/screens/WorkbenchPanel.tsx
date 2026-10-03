@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { RiCloseLine, RiTerminalBoxLine, RiGitBranchLine, RiAddLine, RiArrowLeftDoubleLine, RiArrowRightDoubleLine, RiFileTextLine, RiFolder3Line, RiGlobalLine, RiFocus3Line, RiLayoutColumnLine, RiLayoutRowLine, RiRefreshLine, RiStopCircleLine } from '@remixicon/react';
-import { Button, Chip, Dropdown, Input, ScrollShadow, Spinner, TextField, Tooltip, toast } from '@heroui/react';
+import { RiCloseLine, RiDeleteBinLine, RiDownload2Line, RiEdit2Line, RiFolderAddLine, RiLinksLine, RiLink, RiServerLine, RiTerminalBoxLine, RiUpload2Line, RiGitBranchLine, RiAddLine, RiArrowLeftDoubleLine, RiArrowRightDoubleLine, RiFileTextLine, RiFolder3Line, RiGlobalLine, RiFocus3Line, RiLayoutColumnLine, RiLayoutRowLine, RiRefreshLine, RiStopCircleLine } from '@remixicon/react';
+import { AlertDialog, Button, Chip, Dropdown, Input, Label, Modal, ScrollShadow, Spinner, TextField, Tooltip, toast } from '@heroui/react';
 import type { Selection } from '@heroui/react';
 import { FileTree } from '@heroui-pro/react';
 import { Resizable } from '@heroui-pro/react/resizable';
@@ -9,14 +9,17 @@ import type { PanelImperativeHandle } from '@heroui-pro/react/resizable';
 import { WorkspaceFilePreview, type PreviewFile, type ReferenceSelection, type WorkspaceFileSaveOutcome } from '../components/WorkspaceFilePreview';
 import { useNoticeToast } from '../components/NoticeToast';
 import type { TodeXSession } from '../session/useTodeXSession';
-import { latencyLabelOf, terminalIdForConversation, terminalStatusLabel } from '../session/helpers';
-import type { OpenPanelOptions, WorkbenchTab } from '../lib/panels';
+import { useRemoteConnector } from '../components/ssh/useRemoteConnector';
+import { normalizeRemoteFilesBinding, remoteFileSource, remoteFilesBinding, workspaceFileSource, type FileSource, type FileSourceEntry, type RemoteFilesBinding } from '../session/fileSources';
+import { latencyLabelOf, terminalIdForConversation, terminalStatusLabel, type TerminalTarget } from '../session/helpers';
+import type { OpenPanelOptions, WorkbenchItem, WorkbenchRequest, WorkbenchTab } from '../lib/panels';
 import { prepareBrowserSnapshot } from '../lib/browserSnapshot';
 import { normalizeWorkbenchLayout } from '../session/workbenchLayout';
 import { SETTINGS_STORAGE_KEY, attachmentId, referenceToken, uniqueReferenceName } from '../session/helpers';
 import { V2ApiClient } from '@todex/protocol/v2';
 import { deviceIdentityFromSecret } from '@todex/protocol/deviceAuth';
 import { isConflictError } from '@todex/protocol/connectionError';
+import { isNotFoundError } from '@todex/protocol/ssh';
 import { t, useT, type MessageKey } from '../i18n';
 
 type Props = {
@@ -26,9 +29,14 @@ type Props = {
   tab: WorkbenchTab;
   target?: OpenPanelOptions;
   onTabChange: (tab: WorkbenchTab) => void;
+  /** SSH view scope: tabs are opened from the SSH view, not the + menu. */
+  sshMode?: boolean;
+  /** Ordered queue; ids increase monotonically. */
+  requests?: WorkbenchRequest[];
+  /** Every request with an id up to and including this one was applied. */
+  onRequestsHandled?: (lastId: number) => void;
+  onItemsChange?: (items: WorkbenchItem[]) => void;
 };
-
-type WorkbenchItem = { id: string; type: WorkbenchTab; title: string; target?: OpenPanelOptions };
 
 type StoredWorkbenchState = {
   items: WorkbenchItem[];
@@ -53,6 +61,11 @@ const WORKBENCH_ICONS = {
   'git-diff': RiGitBranchLine,
 };
 
+const REMOTE_ICONS = {
+  terminal: RiServerLine,
+  files: RiFolder3Line,
+};
+
 type WorkbenchTabAxis = 'horizontal' | 'vertical';
 
 const WORKBENCH_TAB_AXIS_KEY = `${SETTINGS_STORAGE_KEY}.workbenchTabAxis.v1`;
@@ -74,7 +87,24 @@ function parseStoredWorkbenchState(value: unknown): StoredWorkbenchState {
   const activeId = typeof candidate.activeId === 'string' && items.some((item) => item.id === candidate.activeId)
     ? candidate.activeId
     : items[0]?.id ?? '';
-  return { items: items.map(item => ({ ...item, target: normalizeWorkbenchLayout({ target: item.target }).target })), activeId };
+  return { items: items.map(normalizeWorkbenchItem), activeId };
+}
+
+function normalizeWorkbenchItem(item: WorkbenchItem): WorkbenchItem {
+  const host = item.type === 'terminal' && typeof item.ssh?.host === 'string' ? item.ssh.host.trim() : '';
+  const remote = item.type === 'files' ? normalizeRemoteFilesBinding(item.remote) : undefined;
+  return {
+    id: item.id,
+    type: item.type,
+    title: item.title,
+    target: normalizeWorkbenchLayout({ target: item.target }).target,
+    ...(host ? { ssh: { host } } : {}),
+    ...(remote ? { remote } : {}),
+  };
+}
+
+function v2Api(session: TodeXSession) {
+  return new V2ApiClient({ serverUrl: session.settings.serverUrl, device: deviceIdentityFromSecret(session.settings.deviceSecret) });
 }
 
 function placeholderFiles(): Record<string, { title: string; language: string; body: string }> {
@@ -97,7 +127,7 @@ function placeholderFiles(): Record<string, { title: string; language: string; b
   };
 }
 
-export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = session.activeConversation?.id || '', onTargetConsumed }: Props) {
+export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = session.activeConversation?.id || '', onTargetConsumed, sshMode = false, requests, onRequestsHandled, onItemsChange }: Props) {
   const t = useT();
   const storageKey = `${SETTINGS_STORAGE_KEY}.workbenchTabs.v1:${scopeKey}`;
   const [items, setItems] = useState<WorkbenchItem[]>([]);
@@ -130,7 +160,7 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
 
   useEffect(() => {
     if (!restored) return;
-    void window.todexWeb.store.set(storageKey, { items: items.map(item => ({ ...item, target: normalizeWorkbenchLayout({ target: item.target }).target })), activeId } satisfies StoredWorkbenchState)
+    void window.todexWeb.store.set(storageKey, { items: items.map(normalizeWorkbenchItem), activeId } satisfies StoredWorkbenchState)
       .catch((reason) => {
         console.error('Failed to persist workbench tabs', reason);
       });
@@ -168,6 +198,14 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
   }, [activeId, items, onTargetConsumed, tab]);
 
   const active = items.find((item) => item.id === activeId) ?? null;
+  const workspace = session.activeWorkspace;
+  const conversation = session.activeConversation;
+  // Identity follows the workspace/conversation records, so terminal effects
+  // re-run exactly when they did before targets were introduced.
+  const workspaceTerminalTarget = useMemo<TerminalTarget | null>(
+    () => (workspace && conversation ? { kind: 'workspace', workspace, conversation } : null),
+    [conversation, workspace],
+  );
   const addTab = (type: WorkbenchTab) => {
     if (!restored) return;
     const count = items.filter((item) => item.type === type).length + 1;
@@ -189,15 +227,56 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
   }, [activeId, onTabChange]);
 
   // Closing a terminal tab that holds a live PTY stops the backend PTY
-  // instead of leaving it running in the background.
+  // instead of leaving it running in the background; closing a remote files
+  // tab closes its backend connection.
   const closeTab = useCallback((id: string) => {
     const item = items.find((entry) => entry.id === id);
     const terminal = item?.type === 'terminal' ? session.terminalById[terminalIdForConversation(scopeKey, id)] : undefined;
     if (item && terminal && (terminal.status === 'running' || terminal.status === 'starting' || terminal.status === 'stopping')) {
-      session.stopTerminalSession(terminalIdForConversation(scopeKey, id), session.activeWorkspace?.tenantId || session.settings.tenantId);
+      session.stopTerminalSession(terminalIdForConversation(scopeKey, id), item.ssh ? session.settings.tenantId : session.activeWorkspace?.tenantId || session.settings.tenantId);
+    }
+    if (item?.remote) {
+      const { connectionId, label } = item.remote;
+      void v2Api(session).closeRemoteConnection(connectionId).catch((reason) => {
+        // Already dropped by the backend (idle timeout or restart) is fine.
+        if (isNotFoundError(reason)) return;
+        toast.danger(t('ssh.remote.closeFailed', { label, error: reason instanceof Error ? reason.message : String(reason) }));
+      });
     }
     removeTab(id);
-  }, [items, removeTab, scopeKey, session.activeWorkspace?.tenantId, session.settings.tenantId, session.stopTerminalSession, session.terminalById]);
+  }, [items, removeTab, scopeKey, session, t]);
+
+  const updateRemoteBinding = useCallback((id: string, remote: RemoteFilesBinding) => {
+    setItems(current => current.map(item => item.id === id ? { ...item, remote, title: remote.label } : item));
+  }, []);
+
+  useEffect(() => { onItemsChange?.(items); }, [items, onItemsChange]);
+
+  const handledRequestRef = useRef(0);
+  useEffect(() => {
+    if (!restored || !requests?.length) return;
+    const pending = requests.filter(request => request.id > handledRequestRef.current);
+    if (!pending.length) return;
+    handledRequestRef.current = pending[pending.length - 1].id;
+    onRequestsHandled?.(handledRequestRef.current);
+    let opened: WorkbenchItem | null = null;
+    for (const request of pending) {
+      if (request.kind === 'close') {
+        if (items.some(item => item.id === request.itemId)) closeTab(request.itemId);
+        continue;
+      }
+      const id = `${request.kind === 'ssh-terminal' ? 'terminal' : 'files'}-${Date.now()}-${request.id}`;
+      const item: WorkbenchItem = request.kind === 'ssh-terminal'
+        ? { id, type: 'terminal', title: request.host, ssh: { host: request.host } }
+        : { id, type: 'files', title: request.remote.label, remote: request.remote };
+      setItems(current => [...current, item]);
+      opened = item;
+    }
+    if (opened) {
+      setActiveId(opened.id);
+      onTabChange(opened.type);
+    }
+  }, [closeTab, items, onRequestsHandled, onTabChange, requests, restored]);
 
   const closeActiveTab = useCallback(() => {
     if (!activeId) return false;
@@ -243,13 +322,17 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
   };
 
   const tabStrip = items.map((item) => {
-    const Icon = WORKBENCH_ICONS[item.type];
+    const Icon = item.ssh || item.remote ? REMOTE_ICONS[item.type === 'terminal' ? 'terminal' : 'files'] : WORKBENCH_ICONS[item.type];
     const workspacePath = session.activeWorkspace?.path;
-    const location = item.type === 'terminal'
-      ? session.terminalById[terminalIdForConversation(scopeKey, item.id)]?.cwd || workspacePath
-      : item.type === 'browser'
-        ? item.target?.url || item.target?.filePath || 'http://127.0.0.1:7345'
-        : item.target?.filePath || workspacePath;
+    const location = item.ssh
+      ? `ssh ${item.ssh.host}`
+      : item.remote
+        ? `${item.remote.label}${item.target?.filePath ? ` ${item.target.filePath}` : ''}`
+        : item.type === 'terminal'
+          ? session.terminalById[terminalIdForConversation(scopeKey, item.id)]?.cwd || workspacePath
+          : item.type === 'browser'
+            ? item.target?.url || item.target?.filePath || 'http://127.0.0.1:7345'
+            : item.target?.filePath || workspacePath;
     const title = location ? `${workbenchLabel(item.type)} ${location}` : item.title;
     const isActive = item.id === activeId;
     return (
@@ -324,26 +407,33 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
           : 'flex min-w-0 flex-1 overflow-x-auto'}
         >
           {tabStrip}
-          {vertical ? newTabDropdown : null}
+          {vertical && !sshMode ? newTabDropdown : null}
         </div>
         {vertical ? (
           <div className="flex items-center justify-center py-1.5">{axisToggle}</div>
         ) : (
           <>
-            {newTabDropdown}
+            {sshMode ? null : newTabDropdown}
             {axisToggle}
           </>
         )}
       </div>
       <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
         {!active ? (
-          <div className="text-muted flex h-full items-center justify-center text-sm">{t('workbench.noTabs')}</div>
+          <div className="text-muted flex h-full items-center justify-center px-6 text-center text-sm">{sshMode ? t('ssh.workbenchEmpty') : t('workbench.noTabs')}</div>
         ) : null}
         {items.map((item) => (
           <div key={item.id} className={item.id === active?.id ? 'h-full' : 'hidden'}>
-            {item.type === 'terminal' ? <TerminalPane session={session} terminalId={terminalIdForConversation(scopeKey, item.id)} /> : null}
+            {item.type === 'terminal' ? (
+              <TerminalPane
+                session={session}
+                terminalId={terminalIdForConversation(scopeKey, item.id)}
+                workspaceTarget={workspaceTerminalTarget}
+                sshHost={item.ssh?.host}
+              />
+            ) : null}
             {item.type === 'browser' ? <BrowserPane workspacePath={session.activeWorkspace?.path} session={session} target={item.type === tab && item.id === active?.id && (target?.filePath || target?.url) ? target : item.target} onTargetChange={next => updateTabTarget(item.id, next)} /> : null}
-            {item.type === 'files' ? <FilesPane session={session} target={item.type === tab && item.id === active?.id && (target?.filePath || target?.url) ? target : item.target} onTargetChange={next => updateTabTarget(item.id, next)} /> : null}
+            {item.type === 'files' ? <FilesPane session={session} remote={item.remote} onRemoteRebind={next => updateRemoteBinding(item.id, next)} target={item.type === tab && item.id === active?.id && (target?.filePath || target?.url) ? target : item.target} onTargetChange={next => updateTabTarget(item.id, next)} /> : null}
             {item.type === 'git-diff' ? <GitDiffPane session={session} /> : null}
           </div>
         ))}
@@ -352,11 +442,25 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
   );
 }
 
-function TerminalPane({ session, terminalId }: { session: TodeXSession; terminalId: string }) {
+const SECRET_PROMPT_PATTERN = /(password|passphrase)[^\n]*:\s*$/i;
+
+function TerminalPane({ session, terminalId, workspaceTarget, sshHost }: {
+  session: TodeXSession;
+  terminalId: string;
+  workspaceTarget: TerminalTarget | null;
+  /** Set for SSH tabs: the terminal runs `ssh -tt <host>` on the backend. */
+  sshHost?: string;
+}) {
   const t = useT();
   const [input, setInput] = useState('');
-  const workspace = session.activeWorkspace;
-  const conversation = session.activeConversation;
+  const target = useMemo<TerminalTarget | null>(
+    () => (sshHost ? { kind: 'ssh', host: sshHost } : workspaceTarget),
+    [sshHost, workspaceTarget],
+  );
+  const workspace = target?.kind === 'workspace' ? target.workspace : null;
+  const isSsh = target?.kind === 'ssh';
+  const targetKey = !target ? '' : target.kind === 'ssh' ? `ssh:${target.host}` : target.conversation.id;
+  const tenantId = workspace?.tenantId || session.settings.tenantId;
   const backendIdentity = workspace?.backendConnectionId || session.activeBackendConnectionId || session.settings.serverUrl;
   const autoStartAttempts = useRef(new Set<string>());
   const manualStopRef = useRef(false);
@@ -385,25 +489,25 @@ function TerminalPane({ session, terminalId }: { session: TodeXSession; terminal
   }, [terminalId, backendIdentity]);
 
   useEffect(() => {
-    if (!workspace || !conversation || !terminalId || session.connectionState !== 'open') {
+    if (!target || !terminalId || session.connectionState !== 'open') {
       return;
     }
     const current = terminalByIdRef.current[terminalId];
     if (current && current.status !== 'idle') {
       return;
     }
-    const attemptKey = `${conversation.id}:${terminalId}`;
+    const attemptKey = `${targetKey}:${terminalId}`;
     if (autoStartAttempts.current.has(attemptKey)) {
       return;
     }
     autoStartAttempts.current.add(attemptKey);
-    session.requestTerminalStatus(workspace, conversation, terminalId);
+    session.requestTerminalStatus(target, terminalId);
     const timeoutId = window.setTimeout(() => {
       const latest = terminalByIdRef.current[terminalId];
       if (!latest || latest.status === 'idle') {
-        session.startTerminalSession(workspace, conversation, {
+        session.startTerminalSession(target, {
           terminalId,
-          cwd: workspace.path,
+          cwd: workspace?.path ?? '',
           shell: '',
           rows: 24,
           cols: 80,
@@ -412,7 +516,7 @@ function TerminalPane({ session, terminalId }: { session: TodeXSession; terminal
     }, 300);
     return () => window.clearTimeout(timeoutId);
   }, [
-    conversation?.id,
+    targetKey,
     session.connectionState,
     session.requestTerminalStatus,
     session.startTerminalSession,
@@ -434,8 +538,11 @@ function TerminalPane({ session, terminalId }: { session: TodeXSession; terminal
     return () => window.clearTimeout(timer);
   }, [terminal?.status]);
 
+  // Local shells restart automatically. SSH sessions do not: an exit is
+  // usually a deliberate `exit` or a failed login, and retrying would loop
+  // through password or host-key prompts; the Reconnect button restarts them.
   useEffect(() => {
-    if (!workspace || !conversation || !terminalId || session.connectionState !== 'open' || manualStopRef.current) {
+    if (!target || isSsh || !terminalId || session.connectionState !== 'open' || manualStopRef.current) {
       return;
     }
     if (terminal?.status !== 'error' && terminal?.status !== 'exited') {
@@ -454,7 +561,7 @@ function TerminalPane({ session, terminalId }: { session: TodeXSession; terminal
       // Ask the backend first — another client may already hold a live PTY
       // under this id, in which case terminal.status flips us back to running
       // and restarting would spawn a duplicate shell.
-      session.requestTerminalStatus(workspace, conversation, terminalId);
+      session.requestTerminalStatus(target, terminalId);
       statusCheckTimerRef.current = window.setTimeout(() => {
         statusCheckTimerRef.current = null;
         if (manualStopRef.current) {
@@ -467,9 +574,9 @@ function TerminalPane({ session, terminalId }: { session: TodeXSession; terminal
         if (latest?.stopRequested) {
           return;
         }
-        session.startTerminalSession(workspace, conversation, {
+        session.startTerminalSession(target, {
           terminalId,
-          cwd: latest?.cwd || workspace.path,
+          cwd: latest?.cwd || workspace?.path || '',
           shell: latest?.shell || '',
           rows: latest?.rows || 24,
           cols: latest?.cols || 80,
@@ -487,7 +594,7 @@ function TerminalPane({ session, terminalId }: { session: TodeXSession; terminal
         statusCheckTimerRef.current = null;
       }
     };
-  }, [conversation, session.connectionState, session.requestTerminalStatus, session.startTerminalSession, terminal?.status, terminal?.stopRequested, terminalId, workspace]);
+  }, [target, isSsh, session.connectionState, session.requestTerminalStatus, session.startTerminalSession, terminal?.status, terminal?.stopRequested, terminalId, workspace]);
 
   const defaultPath = workspace?.path || '';
   const [cwdDraft, setCwdDraft] = useState(defaultPath);
@@ -499,58 +606,100 @@ function TerminalPane({ session, terminalId }: { session: TodeXSession; terminal
   const handleCwdSubmit = (targetPath: string) => {
     const trimmed = targetPath.trim();
     if (!trimmed || !terminalId || !workspace) return;
-    session.sendTerminalInput(terminalId, workspace.tenantId || session.settings.tenantId, `cd "${trimmed.replace(/"/g, '\\"')}"\n`);
+    session.sendTerminalInput(terminalId, tenantId, `cd "${trimmed.replace(/"/g, '\\"')}"\n`);
+  };
+
+  const sshEnded = isSsh && (terminal?.status === 'exited' || terminal?.status === 'error');
+  // This pane is a line-based console, not a TTY emulator: mask the input
+  // while ssh is asking for a password or key passphrase.
+  const lastLine = lines[lines.length - 1];
+  const secretPrompt = isSsh && lastLine?.kind === 'stdout' && SECRET_PROMPT_PATTERN.test(lastLine.text);
+  const reconnectSsh = () => {
+    if (!target || !terminalId) return;
+    manualStopRef.current = false;
+    session.startTerminalSession(target, {
+      terminalId,
+      cwd: '',
+      shell: '',
+      rows: terminal?.rows || 24,
+      cols: terminal?.cols || 80,
+      preserveOutput: true,
+    });
   };
 
   return (
     <div className="flex h-full min-h-0 flex-col px-4 pb-4 pt-3">
       <div className="mb-3 flex items-center justify-between gap-3">
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            handleCwdSubmit(cwdDraft);
-          }}
-          className="min-w-0 flex-1"
-        >
-          <TextField aria-label={t('workbench.terminalPath')} className="w-full" value={cwdDraft} onChange={setCwdDraft}>
-            <Input
-              placeholder="/path/to/directory..."
-              className="text-xs"
-            />
-          </TextField>
-        </form>
+        {isSsh ? (
+          <div className="flex min-w-0 flex-1 items-center gap-2">
+            <RiServerLine className="text-muted size-4 shrink-0" />
+            <span className="truncate text-sm font-medium">{sshHost}</span>
+            {terminal ? <Chip size="sm" variant="soft">{terminalStatusLabel(terminal.status)}</Chip> : null}
+          </div>
+        ) : (
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleCwdSubmit(cwdDraft);
+            }}
+            className="min-w-0 flex-1"
+          >
+            <TextField aria-label={t('workbench.terminalPath')} className="w-full" value={cwdDraft} onChange={setCwdDraft}>
+              <Input
+                placeholder="/path/to/directory..."
+                className="text-xs"
+              />
+            </TextField>
+          </form>
+        )}
         <div className="flex shrink-0 items-center gap-2">
           <Chip size="sm" variant="soft">
             {session.connectionState === 'open'
               ? session.connectionHealth.latencyMs === null ? t('workbench.detecting') : latencyLabelOf(session.connectionHealth.latencyMs)
               : t('workbench.disconnected')}
           </Chip>
-          <Button
-            size="sm"
-            variant="danger-soft"
-            isDisabled={!terminalId || !terminal || terminal.status === 'exited'}
-            onPress={() => {
-              manualStopRef.current = true;
-              if (reconnectTimerRef.current !== null) {
-                window.clearTimeout(reconnectTimerRef.current);
-                reconnectTimerRef.current = null;
-              }
-              if (statusCheckTimerRef.current !== null) {
-                window.clearTimeout(statusCheckTimerRef.current);
-                statusCheckTimerRef.current = null;
-              }
-              if (terminalId) {
-                session.stopTerminalSession(terminalId, workspace?.tenantId || session.settings.tenantId);
-              }
-            }}
-            aria-label={t('workbench.stopTerminal')}
-            className="expandable-action-btn"
-          >
-            <span className="expandable-action-btn__icon">
-              <RiStopCircleLine className="size-4" />
-            </span>
-            <span className="expandable-action-btn__label">{t('workbench.stop')}</span>
-          </Button>
+          {sshEnded ? (
+            <Button
+              size="sm"
+              variant="secondary"
+              isDisabled={session.connectionState !== 'open'}
+              onPress={reconnectSsh}
+              aria-label={t('ssh.terminal.reconnect')}
+              className="expandable-action-btn"
+            >
+              <span className="expandable-action-btn__icon">
+                <RiRefreshLine className="size-4" />
+              </span>
+              <span className="expandable-action-btn__label">{t('ssh.terminal.reconnect')}</span>
+            </Button>
+          ) : (
+            <Button
+              size="sm"
+              variant="danger-soft"
+              isDisabled={!terminalId || !terminal || terminal.status === 'exited'}
+              onPress={() => {
+                manualStopRef.current = true;
+                if (reconnectTimerRef.current !== null) {
+                  window.clearTimeout(reconnectTimerRef.current);
+                  reconnectTimerRef.current = null;
+                }
+                if (statusCheckTimerRef.current !== null) {
+                  window.clearTimeout(statusCheckTimerRef.current);
+                  statusCheckTimerRef.current = null;
+                }
+                if (terminalId) {
+                  session.stopTerminalSession(terminalId, tenantId);
+                }
+              }}
+              aria-label={t('workbench.stopTerminal')}
+              className="expandable-action-btn"
+            >
+              <span className="expandable-action-btn__icon">
+                <RiStopCircleLine className="size-4" />
+              </span>
+              <span className="expandable-action-btn__label">{t('workbench.stop')}</span>
+            </Button>
+          )}
         </div>
       </div>
       <div className="bg-surface-secondary flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-separator">
@@ -576,16 +725,16 @@ function TerminalPane({ session, terminalId }: { session: TodeXSession; terminal
           className="bg-surface flex gap-2 border-t border-separator p-2.5"
           onSubmit={(event) => {
             event.preventDefault();
-            if (!input.trim() || !terminalId || !workspace) return;
-            session.sendTerminalInput(terminalId, workspace.tenantId || session.settings.tenantId, `${input}\n`);
+            if (!input.trim() || !terminalId || !target) return;
+            session.sendTerminalInput(terminalId, tenantId, `${input}\n`);
             setInput('');
           }}
         >
           <span className="text-success self-center font-mono text-sm">$</span>
           <TextField aria-label={t('workbench.terminalInput')} className="min-w-0 flex-1" value={input} onChange={setInput}>
-            <Input placeholder={t('workbench.commandPlaceholder')} className="border-0 bg-transparent font-mono text-xs" />
+            <Input type={secretPrompt ? 'password' : 'text'} autoComplete="off" placeholder={t('workbench.commandPlaceholder')} className="border-0 bg-transparent font-mono text-xs" />
           </TextField>
-          <Button size="sm" variant="secondary" type="submit" isDisabled={!conversation || terminal?.status !== 'running'}>
+          <Button size="sm" variant="secondary" type="submit" isDisabled={!target || terminal?.status !== 'running'}>
             {t('workbench.send')}
           </Button>
         </form>
@@ -927,16 +1076,9 @@ function GitDiffPane({ session }: { session: TodeXSession }) {
   );
 }
 
-type FileTreeEntry = {
-  name: string;
-  path: string;
-  kind: 'directory' | 'file';
+type FileTreeEntry = FileSourceEntry & {
   children?: FileTreeEntry[];
 };
-
-function absoluteEntryPath(cwd: string, relativePath: string): string {
-  return `${cwd.replace(/[\\/]$/, '')}/${relativePath.replace(/^[/\\]+/, '').replace(/[/\\]+/g, '/')}`;
-}
 
 function findFileTreeEntry(entries: FileTreeEntry[], path: string): FileTreeEntry | undefined {
   for (const entry of entries) {
@@ -954,12 +1096,34 @@ function replaceFileTreeChildren(entries: FileTreeEntry[], path: string, childre
   });
 }
 
-function FilesPane({ session, target, onTargetChange }: { session: TodeXSession; target?: OpenPanelOptions; onTargetChange?: (target: OpenPanelOptions) => void }) {
+type FileOperationDialog =
+  | { kind: 'mkdir'; directory: string }
+  | { kind: 'rename'; path: string }
+  | { kind: 'delete'; path: string; isDirectory: boolean };
+
+function FilesPane({ session, target, onTargetChange, remote, onRemoteRebind }: {
+  session: TodeXSession;
+  target?: OpenPanelOptions;
+  onTargetChange?: (target: OpenPanelOptions) => void;
+  /** Bind the pane to a remote SFTP/FTP connection instead of the workspace. */
+  remote?: RemoteFilesBinding;
+  onRemoteRebind?: (remote: RemoteFilesBinding) => void;
+}) {
   const t = useT();
   const targetChangeRef = useRef(onTargetChange);
   targetChangeRef.current = onTargetChange;
+  const serverUrl = session.settings.serverUrl;
+  const deviceSecret = session.settings.deviceSecret;
+  const api = useCallback(() => new V2ApiClient({ serverUrl, device: deviceIdentityFromSecret(deviceSecret) }), [deviceSecret, serverUrl]);
+  const workspacePath = session.activeWorkspace?.path || '';
+  const source: FileSource = useMemo(
+    () => (remote ? remoteFileSource(api, remote) : workspaceFileSource(api, workspacePath)),
+    [api, remote, workspacePath],
+  );
+  const remoteConnector = useRemoteConnector(api);
   const [entries, setEntries] = useState<FileTreeEntry[]>([]);
   const [selected, setSelected] = useState('');
+  const [focused, setFocused] = useState('');
   const [expandedKeys, setExpandedKeys] = useState<Selection>(new Set());
   const [file, setFile] = useState<PreviewFile | null>(null);
   const [fileLoading, setFileLoading] = useState(false);
@@ -967,24 +1131,27 @@ function FilesPane({ session, target, onTargetChange }: { session: TodeXSession;
   const fileDirtyRef = useRef(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [busy, setBusy] = useState(false);
   const [treeCollapsed, setTreeCollapsed] = useState(false);
   const treePanelRef = useRef<PanelImperativeHandle>(null);
+  const uploadInputRef = useRef<HTMLInputElement>(null);
   const appliedTargetRef = useRef<OpenPanelOptions | undefined>(undefined);
-  const defaultPath = session.activeWorkspace?.path || '';
+  const defaultPath = source.rootPath;
   const [currentPath, setCurrentPath] = useState(defaultPath);
   const [pathDraft, setPathDraft] = useState(defaultPath);
+  const [operation, setOperation] = useState<FileOperationDialog | null>(null);
+  const [operationName, setOperationName] = useState('');
   useNoticeToast(error, { variant: 'danger', scope: currentPath });
 
   useEffect(() => {
-    const next = session.activeWorkspace?.path || '';
-    setCurrentPath(next);
-    setPathDraft(next);
-  }, [session.activeWorkspace?.path]);
+    setCurrentPath(source.rootPath);
+    setPathDraft(source.rootPath);
+  }, [source.key, source.rootPath]);
 
   const rootName = useMemo(() => {
-    if (!currentPath) return 'workspace';
+    if (!currentPath) return remote ? remote.label : 'workspace';
     return currentPath.split(/[/\\]/).filter(Boolean).pop() || currentPath;
-  }, [currentPath]);
+  }, [currentPath, remote]);
 
   const readFile = useCallback(async (path: string, sourceTarget?: OpenPanelOptions) => {
     if (fileDirtyRef.current && path !== selected && !window.confirm(t('filePreview.discardChanges'))) return;
@@ -994,21 +1161,19 @@ function FilesPane({ session, target, onTargetChange }: { session: TodeXSession;
     setFile(null);
     setFileLoading(true);
     setError('');
-    const api = new V2ApiClient({ serverUrl: session.settings.serverUrl, device: deviceIdentityFromSecret(session.settings.deviceSecret) });
     try {
-      const next = await api.readWorkspaceFile(path);
+      const next = await source.read(path);
       if (request === fileRequestRef.current) setFile(next);
     } catch (reason) {
       if (request === fileRequestRef.current) setError(reason instanceof Error ? reason.message : t('workbench.fileReadFailed'));
     } finally {
       if (request === fileRequestRef.current) setFileLoading(false);
     }
-  }, [selected, session.settings.deviceSecret, session.settings.serverUrl, t]);
+  }, [selected, source, t]);
 
-  const saveWorkspaceFile = useCallback(async (path: string, text: string, expectedText: string): Promise<WorkspaceFileSaveOutcome> => {
-    const api = new V2ApiClient({ serverUrl: session.settings.serverUrl, device: deviceIdentityFromSecret(session.settings.deviceSecret) });
+  const saveFile = useCallback(async (path: string, text: string, expectedText: string): Promise<WorkspaceFileSaveOutcome> => {
     try {
-      const result = await api.saveWorkspaceFile(path, text, expectedText);
+      const result = await source.save(path, text, expectedText);
       if (!result?.saved) {
         setError(t('workbench.fileSaveFailed'));
         return 'failed';
@@ -1020,18 +1185,17 @@ function FilesPane({ session, target, onTargetChange }: { session: TodeXSession;
       setError(reason instanceof Error ? reason.message : t('workbench.fileSaveFailed'));
       return 'failed';
     }
-  }, [session.settings.deviceSecret, session.settings.serverUrl, t]);
+  }, [source, t]);
 
-  const reloadWorkspaceFile = useCallback(async (path: string): Promise<PreviewFile | null> => {
-    const api = new V2ApiClient({ serverUrl: session.settings.serverUrl, device: deviceIdentityFromSecret(session.settings.deviceSecret) });
+  const reloadFile = useCallback(async (path: string): Promise<PreviewFile | null> => {
     try {
-      const latest = await api.readWorkspaceFile(path);
+      const latest = await source.read(path);
       setFile((current) => (current && current.path === path ? latest : current));
       return latest;
     } catch {
       return null;
     }
-  }, [session.settings.deviceSecret, session.settings.serverUrl]);
+  }, [source]);
 
   useEffect(() => () => { fileRequestRef.current += 1; }, []);
 
@@ -1058,27 +1222,26 @@ function FilesPane({ session, target, onTargetChange }: { session: TodeXSession;
     toast.success(t('workbench.referenceAdded', { name }));
   }, [file, session]);
 
-  const loadDirectory = useCallback(async (directory: string) => {
+  const loadDirectory = useCallback(async (directory: string, quiet = false): Promise<boolean> => {
     setLoading(true);
-    setError('');
-    const api = new V2ApiClient({ serverUrl: session.settings.serverUrl, device: deviceIdentityFromSecret(session.settings.deviceSecret) });
+    if (!quiet) setError('');
     try {
-      const snapshot = await api.listWorkspaceEntries(directory, '', 100);
-      const children = snapshot.entries
-        .map((entry) => ({ ...entry, path: absoluteEntryPath(directory, entry.path) }))
-        .sort((left, right) => Number(right.kind === 'directory') - Number(left.kind === 'directory') || left.name.localeCompare(right.name));
+      const children = await source.list(directory);
       setEntries((current) => directory === currentPath ? children : replaceFileTreeChildren(current, directory, children));
       setExpandedKeys((current) => new Set([...current, directory]));
+      return true;
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : t('workbench.dirReadFailed'));
+      if (!quiet) setError(reason instanceof Error ? reason.message : t('workbench.dirReadFailed'));
+      return false;
     } finally {
       setLoading(false);
     }
-  }, [currentPath, session.settings.deviceSecret, session.settings.serverUrl]);
+  }, [currentPath, source]);
 
   useEffect(() => {
     setEntries([]);
     setSelected('');
+    setFocused('');
     setFile(null);
     setExpandedKeys(new Set());
     appliedTargetRef.current = undefined;
@@ -1106,18 +1269,106 @@ function FilesPane({ session, target, onTargetChange }: { session: TodeXSession;
   const handleAction = async (key: string) => {
     const entry = findFileTreeEntry(entries, key);
     if (!entry) return;
-    if (entry.kind === 'directory') {
+    if (entry.kind === 'directory' || entry.children) {
       if (!entry.children) await loadDirectory(entry.path);
       setExpandedKeys((current) => new Set([...current, entry.path]));
+    } else if (entry.kind === 'symlink') {
+      // A link may point at a directory or a file; listing tells them apart.
+      if (!(await loadDirectory(entry.path, true))) await readFile(entry.path);
     } else {
       await readFile(entry.path);
     }
   };
 
+  // File operations act on the focused tree entry (the last one clicked,
+  // directory or file); directories receive uploads and new folders.
+  const hasFileOperations = Boolean(source.upload || source.download || source.mkdir || source.rename || source.remove);
+  const focusedPath = focused || selected;
+  const selectedEntry = focusedPath ? findFileTreeEntry(entries, focusedPath) : undefined;
+  const selectedIsDirectory = focusedPath === currentPath || selectedEntry?.kind === 'directory' || Boolean(selectedEntry?.children);
+  const targetDirectory = selectedIsDirectory && focusedPath ? focusedPath : selectedEntry ? source.parentPath(selectedEntry.path) : currentPath;
+  const refreshDirectory = (directory: string) => loadDirectory(directory === currentPath || findFileTreeEntry(entries, directory) ? directory : currentPath);
+
+  const runOperation = async (label: string, task: () => Promise<void>) => {
+    setBusy(true);
+    try {
+      await task();
+    } catch (reason) {
+      toast.danger(t('ssh.files.operationFailed', { action: label, error: reason instanceof Error ? reason.message : String(reason) }));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const uploadFiles = async (files: File[]) => {
+    const upload = source.upload;
+    if (!upload || !files.length) return;
+    const directory = targetDirectory;
+    await runOperation(t('ssh.files.upload'), async () => {
+      for (const picked of files) {
+        try {
+          await upload(directory, picked, false);
+        } catch (reason) {
+          if (!isConflictError(reason) || !window.confirm(t('ssh.files.overwriteConfirm', { name: picked.name }))) throw reason;
+          await upload(directory, picked, true);
+        }
+      }
+      toast.success(t('ssh.files.uploaded', { count: files.length }));
+      await refreshDirectory(directory);
+    });
+  };
+
+  const submitOperation = async () => {
+    const current = operation;
+    if (!current) return;
+    const name = operationName.trim();
+    if (current.kind !== 'delete' && (!name || /[\\/]/.test(name))) {
+      toast.danger(t('ssh.files.invalidName'));
+      return;
+    }
+    setOperation(null);
+    if (current.kind === 'mkdir' && source.mkdir) {
+      const mkdir = source.mkdir;
+      await runOperation(t('ssh.files.newFolder'), async () => {
+        await mkdir(source.joinPath(current.directory, name));
+        await refreshDirectory(current.directory);
+      });
+    } else if (current.kind === 'rename' && source.rename) {
+      const rename = source.rename;
+      const parent = source.parentPath(current.path);
+      await runOperation(t('ssh.files.rename'), async () => {
+        await rename(current.path, source.joinPath(parent, name));
+        if (selected === current.path) { setSelected(''); setFile(null); }
+        if (focused === current.path) setFocused('');
+        await refreshDirectory(parent);
+      });
+    } else if (current.kind === 'delete' && source.remove) {
+      const remove = source.remove;
+      const parent = source.parentPath(current.path);
+      await runOperation(t('ssh.files.delete'), async () => {
+        await remove(current.path);
+        if (selected === current.path) { setSelected(''); setFile(null); }
+        if (focused === current.path) setFocused('');
+        await refreshDirectory(parent);
+      });
+    }
+  };
+
+  const reconnectRemote = async () => {
+    if (!remote) return;
+    const connection = await remoteConnector.connect(remote.kind === 'sftp'
+      ? { kind: 'sftp', host: remote.host ?? remote.label, label: remote.label }
+      : { kind: 'ftp', siteId: remote.siteId ?? '', label: remote.label, askPassword: true });
+    if (!connection) return;
+    // The previous session is normally gone already; close it in case it is not.
+    void api().closeRemoteConnection(remote.connectionId).catch(() => undefined);
+    onRemoteRebind?.(remoteFilesBinding(connection));
+  };
+
   const renderEntry = (entry: FileTreeEntry): ReactNode => (
     <FileTree.Item
       key={entry.path}
-      icon={entry.kind === 'directory' ? <RiFolder3Line /> : <RiFileTextLine />}
+      icon={entry.kind === 'directory' || entry.children ? <RiFolder3Line /> : entry.kind === 'symlink' ? <RiLinksLine /> : <RiFileTextLine />}
       id={entry.path}
       textValue={entry.name}
       title={entry.name}
@@ -1130,6 +1381,16 @@ function FilesPane({ session, target, onTargetChange }: { session: TodeXSession;
     if (treePanelRef.current?.isCollapsed()) treePanelRef.current.expand();
     else treePanelRef.current?.collapse();
   };
+
+  const toolbarButton = (label: string, icon: ReactNode, onPress: () => void, isDisabled = false) => (
+    <Tooltip delay={200}>
+      <Button isIconOnly size="sm" variant="tertiary" aria-label={label} isDisabled={busy || isDisabled} onPress={onPress}>{icon}</Button>
+      <Tooltip.Content className="text-xs">{label}</Tooltip.Content>
+    </Tooltip>
+  );
+  const selectedRemovable = Boolean(selectedEntry);
+  // Sources with file operations highlight the operation target, others the previewed file.
+  const treeSelection = hasFileOperations ? focusedPath : selected;
 
   return (
     <div className="flex h-full min-h-0 flex-col px-4 pb-4 pt-3">
@@ -1146,6 +1407,7 @@ function FilesPane({ session, target, onTargetChange }: { session: TodeXSession;
           </TextField>
         </form>
         <div className="flex shrink-0 items-center gap-2">
+          {remote ? toolbarButton(t('ssh.files.reconnect'), <RiLink className="size-4" />, () => void reconnectRemote()) : null}
           <Button
             size="sm"
             variant="tertiary"
@@ -1173,6 +1435,43 @@ function FilesPane({ session, target, onTargetChange }: { session: TodeXSession;
           </Button>
         </div>
       </div>
+      {hasFileOperations ? (
+        <div className="mb-3 flex items-center gap-1.5">
+          {busy ? <Spinner size="sm" aria-label={t('ssh.files.working')} /> : null}
+          {source.upload ? toolbarButton(t('ssh.files.upload'), <RiUpload2Line className="size-4" />, () => uploadInputRef.current?.click(), !currentPath) : null}
+          {source.download ? toolbarButton(t('ssh.files.download'), <RiDownload2Line className="size-4" />, () => {
+            const download = source.download;
+            if (!download || !selectedEntry) return;
+            void runOperation(t('ssh.files.download'), () => download(selectedEntry.path));
+          }, !selectedEntry || selectedIsDirectory) : null}
+          {source.mkdir ? toolbarButton(t('ssh.files.newFolder'), <RiFolderAddLine className="size-4" />, () => {
+            setOperationName('');
+            setOperation({ kind: 'mkdir', directory: targetDirectory });
+          }, !currentPath) : null}
+          {source.rename ? toolbarButton(t('ssh.files.rename'), <RiEdit2Line className="size-4" />, () => {
+            if (!selectedEntry) return;
+            setOperationName(selectedEntry.name);
+            setOperation({ kind: 'rename', path: selectedEntry.path });
+          }, !selectedRemovable) : null}
+          {source.remove ? toolbarButton(t('ssh.files.delete'), <RiDeleteBinLine className="size-4" />, () => {
+            if (!selectedEntry) return;
+            setOperation({ kind: 'delete', path: selectedEntry.path, isDirectory: selectedIsDirectory });
+          }, !selectedRemovable) : null}
+          <span className="text-muted ml-1 min-w-0 truncate text-xs">{t('ssh.files.target', { path: targetDirectory || '/' })}</span>
+          <input
+            ref={uploadInputRef}
+            className="hidden"
+            type="file"
+            multiple
+            onChange={(event) => {
+              const picked = Array.from(event.target.files ?? []);
+              // Reset so picking the same file again still fires onChange.
+              event.target.value = '';
+              void uploadFiles(picked);
+            }}
+          />
+        </div>
+      ) : null}
       <Resizable autoSaveId="todex.files-pane" className="min-h-0 flex-1 gap-3" onLayoutChange={() => setTreeCollapsed(Boolean(treePanelRef.current?.isCollapsed()))}>
         <Resizable.Panel
           id="file-tree"
@@ -1188,15 +1487,18 @@ function FilesPane({ session, target, onTargetChange }: { session: TodeXSession;
         >
           <ScrollShadow className="bg-surface-secondary h-full min-h-0 rounded-xl p-2">
           <FileTree
-            aria-label={t('workbench.workspaceFiles')}
+            key={source.key}
+            aria-label={remote ? t('ssh.files.treeLabel', { label: remote.label }) : t('workbench.workspaceFiles')}
             className="w-full"
-            selectedKeys={selected ? new Set([selected]) : new Set()}
+            selectedKeys={treeSelection ? new Set([treeSelection]) : new Set()}
             expandedKeys={expandedKeys}
             selectionMode="single"
             selectionBehavior="replace"
             onSelectionChange={(keys: Selection) => {
               const key = keys === 'all' ? '' : String([...keys][0] ?? '');
-              if (key) void handleAction(key);
+              if (!key) return;
+              if (hasFileOperations) setFocused(key);
+              void handleAction(key);
             }}
             onExpandedChange={setExpandedKeys}
           >
@@ -1210,10 +1512,55 @@ function FilesPane({ session, target, onTargetChange }: { session: TodeXSession;
         <Resizable.Panel defaultSize="70%" minSize="50%" className="min-h-0">
           <ScrollShadow className="bg-surface-secondary h-full min-h-0 rounded-xl p-3">
             <p className="text-muted mb-2 truncate text-xs">{selected || t('workbench.selectFile')}</p>
-            {fileLoading ? <Spinner size="sm" aria-label={t('workbench.readingFile')} /> : error ? null : <WorkspaceFilePreview file={file} onAddReference={addReferenceToChat} onSaveFile={saveWorkspaceFile} onReloadFile={reloadWorkspaceFile} onDirtyChange={(dirty) => { fileDirtyRef.current = dirty; }} />}
+            {fileLoading ? <Spinner size="sm" aria-label={t('workbench.readingFile')} /> : error ? null : <WorkspaceFilePreview file={file} onAddReference={source.canAddReference ? addReferenceToChat : undefined} onSaveFile={saveFile} onReloadFile={reloadFile} onDirtyChange={(dirty) => { fileDirtyRef.current = dirty; }} />}
           </ScrollShadow>
         </Resizable.Panel>
       </Resizable>
+      <Modal isOpen={operation?.kind === 'mkdir' || operation?.kind === 'rename'} onOpenChange={(open) => { if (!open) setOperation(null); }}>
+        <Modal.Backdrop>
+          <Modal.Container>
+            <Modal.Dialog className="sm:max-w-sm">
+              <Modal.CloseTrigger />
+              <Modal.Header>
+                <Modal.Heading>{operation?.kind === 'rename' ? t('ssh.files.rename') : t('ssh.files.newFolder')}</Modal.Heading>
+              </Modal.Header>
+              <Modal.Body>
+                <form id="file-operation-form" onSubmit={(event) => { event.preventDefault(); void submitOperation(); }}>
+                  <TextField className="w-full" value={operationName} onChange={setOperationName} autoFocus>
+                    <Label>{t('ssh.files.name')}</Label>
+                    <Input className="w-full" />
+                  </TextField>
+                </form>
+              </Modal.Body>
+              <Modal.Footer>
+                <Button slot="close" variant="tertiary">{t('common.cancel')}</Button>
+                <Button type="submit" form="file-operation-form">{t('common.save')}</Button>
+              </Modal.Footer>
+            </Modal.Dialog>
+          </Modal.Container>
+        </Modal.Backdrop>
+      </Modal>
+      <AlertDialog isOpen={operation?.kind === 'delete'} onOpenChange={(open) => { if (!open) setOperation(null); }}>
+        <AlertDialog.Backdrop>
+          <AlertDialog.Container>
+            <AlertDialog.Dialog className="sm:max-w-md">
+              <AlertDialog.Header>
+                <AlertDialog.Heading>{t('ssh.files.deleteTitle')}</AlertDialog.Heading>
+              </AlertDialog.Header>
+              <AlertDialog.Body>
+                <p className="text-muted break-all text-sm">
+                  {operation?.kind === 'delete' ? t(operation.isDirectory ? 'ssh.files.deleteDirectoryBody' : 'ssh.files.deleteFileBody', { path: operation.path }) : null}
+                </p>
+              </AlertDialog.Body>
+              <AlertDialog.Footer>
+                <Button slot="close" variant="tertiary">{t('common.cancel')}</Button>
+                <Button variant="danger" onPress={() => void submitOperation()}>{t('common.delete')}</Button>
+              </AlertDialog.Footer>
+            </AlertDialog.Dialog>
+          </AlertDialog.Container>
+        </AlertDialog.Backdrop>
+      </AlertDialog>
+      {remoteConnector.dialog}
     </div>
   );
 }

@@ -261,6 +261,7 @@ export function DemoApp() {
             onOpenUsage={noop}
             onOpenAbout={noop}
             onOpenKanban={noop}
+            onOpenTerminal={noop}
           />
         }
         navbar={

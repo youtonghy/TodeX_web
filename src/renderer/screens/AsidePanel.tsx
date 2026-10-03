@@ -219,7 +219,7 @@ function TerminalAside({ session, terminalId }: { session: TodeXSession; termina
           <p className="text-muted text-xs">{terminal ? terminalStatusLabel(terminal.status) : t('aside.terminalNotStarted')}</p>
         </div>
         <div className="flex gap-2">
-          <Button size="sm" onPress={() => session.startTerminalSession(workspace, conversation, { cwd: workspace.path, shell: '', rows: 24, cols: 80 })}>{t('aside.terminalStart')}</Button>
+          <Button size="sm" onPress={() => session.startTerminalSession({ kind: 'workspace', workspace, conversation }, { cwd: workspace.path, shell: '', rows: 24, cols: 80 })}>{t('aside.terminalStart')}</Button>
           <Button size="sm" variant="danger-soft" onPress={() => session.stopTerminalSession(terminalId, workspace.tenantId || session.settings.tenantId)}>{t('aside.terminalStop')}</Button>
         </div>
       </div>
