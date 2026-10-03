@@ -165,6 +165,28 @@ describe('SSH workbench', () => {
     expect(startTerminal).toHaveBeenCalledWith({ kind: 'ssh', host: 'prod' }, expect.objectContaining({ terminalId, cwd: '', rows: 30, cols: 100, preserveOutput: true }));
   });
 
+  it('auto-connects new SSH tabs but waits for Connect on restored ones', async () => {
+    vi.useFakeTimers();
+    await render();
+    await act(async () => { pushRequest({ id: 1, kind: 'ssh-terminal', host: 'prod' }); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    expect(startTerminal).toHaveBeenCalledWith({ kind: 'ssh', host: 'prod' }, expect.objectContaining({ cwd: '' }));
+
+    // A fresh mount (app restart) restores the tab from storage.
+    act(() => root.unmount());
+    root = createRoot(container);
+    startTerminal.mockClear();
+    status.mockClear();
+    await render();
+    await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
+    expect(status).toHaveBeenCalledWith({ kind: 'ssh', host: 'prod' }, expect.any(String));
+    expect(startTerminal).not.toHaveBeenCalled();
+    const connect = container.querySelector<HTMLButtonElement>('[aria-label="重新连接"]');
+    expect(connect).not.toBeNull();
+    await act(async () => { connect!.click(); });
+    expect(startTerminal).toHaveBeenCalledTimes(1);
+  });
+
   it('binds remote file tabs to their connection and closes it with the tab', async () => {
     const list = vi.spyOn(V2ApiClient.prototype, 'listRemoteEntries').mockResolvedValue({ path: '/home/me', entries: [] } as never);
     const close = vi.spyOn(V2ApiClient.prototype, 'closeRemoteConnection').mockResolvedValue({ closed: true });
