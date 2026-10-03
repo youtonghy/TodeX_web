@@ -7,6 +7,7 @@ import { assemblePairingQrChunkPayload, parsePairingQrFrame, resolvePairingPaylo
 import { BACKEND_LABEL_COLORS, backendLabelColor } from '../session/backendColors';
 import { Field } from '../components/Field';
 import { DevicePairingPanel } from '../components/DevicePairingPanel';
+import { AgentDesktopSettings } from '../components/AgentDesktopSettings';
 import { pairingConnectionPatch } from '../session/pairingImport';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { connectionStateLabel, healthLabelOf, settingsFromProfile } from '../session/helpers';
@@ -233,6 +234,7 @@ export function SettingsPanel({ session }: Props) {
           </Description>
         </Select>
       </Surface>
+      <AgentDesktopSettings session={session} />
       <Surface className="flex flex-col gap-4 rounded-2xl p-5">
         <h3 className="font-semibold">{t('settings.notifications')}</h3>
         <Switch
