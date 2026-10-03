@@ -555,6 +555,14 @@ export const zhCN = {
   'runStatus.approve': '同意',
   'runStatus.answerOnDevice': '请在 {devices} 上确认',
   'runStatus.answerOnOtherDevice': '请在将执行它的桌面端上确认',
+  'agentBrowser.noShots': '暂无截图。Agent 在 {device} 上浏览，它截取的画面会显示在这里。',
+  'agentBrowser.desktopDevice': '桌面端',
+  'agentBrowser.shotFailed': '无法加载截图',
+  'agentBrowser.recent': '最近操作',
+  'agentBrowser.title': 'Agent 浏览器',
+  'agentBrowser.controlled': 'Agent 控制中',
+  'agentBrowser.stop': '停止',
+  'agentBrowser.stopFailed': '无法停止 Agent 浏览器',
 
   // header
   'header.legacyCodex': '历史 Codex',

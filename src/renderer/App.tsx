@@ -211,6 +211,21 @@ export function App() {
     persistAsideOpen(true);
   }, [persistAsideOpen, queueWorkbenchRequest, scopeKey, sshActive, viewedConversationId, viewedRecovering, viewedRuntime]);
 
+  // A new agent desktop-browser action in the viewed conversation opens its
+  // screenshot tab; actions already present when the conversation became the
+  // viewed one (history, replay) do not.
+  const agentBrowserWatchRef = useRef({ conversationId: '', actionId: '' });
+  const newestAgentAction = viewedRuntime?.desktopBrowser.actions.at(-1)?.actionId ?? '';
+  useEffect(() => {
+    const watch = agentBrowserWatchRef.current;
+    const fresh = watch.conversationId === viewedConversationId && !viewedRecovering
+      && newestAgentAction && newestAgentAction !== watch.actionId;
+    agentBrowserWatchRef.current = { conversationId: viewedConversationId, actionId: newestAgentAction };
+    if (!fresh || sshActive || !scopeKey) return;
+    queueWorkbenchRequest(id => ({ id, kind: 'agent-browser', conversationId: viewedConversationId }));
+    persistAsideOpen(true);
+  }, [newestAgentAction, persistAsideOpen, queueWorkbenchRequest, scopeKey, sshActive, viewedConversationId, viewedRecovering]);
+
   useEffect(() => {
     const reportStorageFailure = () => toast.danger(t('app.storageQuota'));
     window.addEventListener('todex-storage-error', reportStorageFailure);

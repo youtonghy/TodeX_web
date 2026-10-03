@@ -555,6 +555,14 @@ export const en: Messages = {
   'runStatus.approve': 'Approve',
   'runStatus.answerOnDevice': 'Confirm this on {devices}',
   'runStatus.answerOnOtherDevice': 'Confirm this on the desktop that will run it',
+  'agentBrowser.noShots': 'No screenshots yet. The agent browses on {device}; screenshots it takes appear here.',
+  'agentBrowser.desktopDevice': 'the desktop',
+  'agentBrowser.shotFailed': 'Could not load the screenshot',
+  'agentBrowser.recent': 'Recent actions',
+  'agentBrowser.title': 'Agent browser',
+  'agentBrowser.controlled': 'Agent in control',
+  'agentBrowser.stop': 'Stop',
+  'agentBrowser.stopFailed': 'Could not stop the agent browser',
 
   // header
   'header.legacyCodex': 'Legacy Codex',

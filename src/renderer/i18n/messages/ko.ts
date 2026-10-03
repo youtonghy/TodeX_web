@@ -555,6 +555,14 @@ export const ko: Messages = {
   'runStatus.approve': '동의',
   'runStatus.answerOnDevice': '{devices}에서 확인하세요',
   'runStatus.answerOnOtherDevice': '실행할 데스크톱에서 확인하세요',
+  'agentBrowser.noShots': '아직 스크린샷이 없습니다. 에이전트는 {device}에서 탐색하며, 찍은 화면이 여기에 표시됩니다.',
+  'agentBrowser.desktopDevice': '데스크톱',
+  'agentBrowser.shotFailed': '스크린샷을 불러올 수 없습니다',
+  'agentBrowser.recent': '최근 작업',
+  'agentBrowser.title': '에이전트 브라우저',
+  'agentBrowser.controlled': '에이전트 제어 중',
+  'agentBrowser.stop': '중지',
+  'agentBrowser.stopFailed': '에이전트 브라우저를 중지할 수 없습니다',
 
   // header
   'header.legacyCodex': '이전 Codex',

@@ -555,6 +555,14 @@ export const ja: Messages = {
   'runStatus.approve': '承認',
   'runStatus.answerOnDevice': '{devices} で確認してください',
   'runStatus.answerOnOtherDevice': '実行するデスクトップで確認してください',
+  'agentBrowser.noShots': 'スクリーンショットはまだありません。エージェントは {device} で閲覧し、撮影した画面がここに表示されます。',
+  'agentBrowser.desktopDevice': 'デスクトップ',
+  'agentBrowser.shotFailed': 'スクリーンショットを読み込めません',
+  'agentBrowser.recent': '最近の操作',
+  'agentBrowser.title': 'エージェントブラウザー',
+  'agentBrowser.controlled': 'エージェントが操作中',
+  'agentBrowser.stop': '停止',
+  'agentBrowser.stopFailed': 'エージェントブラウザーを停止できません',
 
   // header
   'header.legacyCodex': '従来の Codex',
