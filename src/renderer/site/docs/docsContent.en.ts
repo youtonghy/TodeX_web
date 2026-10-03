@@ -522,7 +522,7 @@ is identical — the desktop app adds native integrations on top.
   badges, thread lifecycle (New, Rename, Fork, Delete), and quick settings.
 - **Center chat** — streaming Markdown timeline with Shiki highlighting and
   KaTeX math, interactive approval cards (commands, diffs, tool calls), and
-  a prompt box with model + reasoning-effort pickers, \`@\` file mentions,
+  a prompt box with model + reasoning-effort pickers, \`@\` reference menu (files, folders, chats, skills, MCP),
   \`/\` slash commands, \`#\` skill/MCP suggestions, and Codex Fast mode.
 - **Right workbench** — tabbed drawer with Slash Commands reference, live
   Git Diff, an embedded xterm.js PTY terminal, the Skills/MCP Capabilities
@@ -664,8 +664,9 @@ workspace root and are trusted explicitly.
 - Streaming Markdown with Shiki code highlighting and KaTeX math.
 - Approval cards for commands, file diffs, and tool calls — resolve them
   inline while the turn runs.
-- Prompt box: \`@\` mentions a workspace file, \`@chat:\` attaches another
-  conversation of the workspace as a Markdown file, \`/\` runs a provider slash
+- Prompt box: \`@\` opens a reference menu — pick a type, then search it:
+  \`@file:\`, \`@folder:\`, \`@chat:\` (attaches another conversation of the
+  workspace as a Markdown file), \`@skill:\` and \`@mcp:\`; \`/\` runs a provider slash
   command, \`#\` references a skill or MCP capability. The model picker
   matches names case-insensitively and carries a draggable reasoning-effort
   control plus Codex Fast mode where the provider supports it.

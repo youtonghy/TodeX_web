@@ -196,7 +196,6 @@ import {
   type PermissionPreset,
   type TimelineEntry,
   type SlashCommand,
-  type MentionSuggestion,
   type WorkspaceMentionHistory,
   type MentionReference,
   type ThreadMenuAction,
@@ -286,7 +285,6 @@ import {
   parseJsonArrayPrompt,
   nativeThreadPatchFromNotification,
   findMentionTrigger,
-  buildMentionSuggestions,
   insertMention,
   parseMentionReferences,
   summarizeMentionReferences,
@@ -8322,9 +8320,9 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   // Kept referentially stable: the composer @-mention effect depends on this
   // callback, and a new identity per render would re-fire (and discard) the
   // lookup on every unrelated session update.
-  const fetchWorkspaceEntries = useCallback(async (cwd: string, query: string) => {
+  const fetchWorkspaceEntries = useCallback(async (cwd: string, query: string, limit?: number) => {
     const api = new V2ApiClient({ serverUrl: settings.serverUrl, device: deviceIdentityFromSecret(settings.deviceSecret) });
-    return api.listWorkspaceEntries(cwd, query);
+    return api.listWorkspaceEntries(cwd, query, limit);
   }, [settings.serverUrl, settings.deviceSecret]);
 
   return {
