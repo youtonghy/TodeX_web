@@ -6,7 +6,8 @@ import { V2ApiClient } from '@todex/protocol/v2';
 import { WorkbenchPanel } from '../../src/renderer/screens/WorkbenchPanel';
 import { sshWorkbenchScopeKey } from '../../src/renderer/session/workbenchLayout';
 import { SETTINGS_STORAGE_KEY } from '../../src/renderer/session/helpers';
-import { normalizeRemoteFilesBinding, remoteFileSource, workspaceFileSource, type RemoteFilesBinding } from '../../src/renderer/session/fileSources';
+import { normalizeRemoteFilesBinding, remoteFileSource, uploadRemoteFile, workspaceFileSource, type RemoteFilesBinding } from '../../src/renderer/session/fileSources';
+import { REMOTE_UPLOAD_CHUNK_BYTES } from '@todex/protocol/ssh';
 import type { TodeXSession } from '../../src/renderer/session/useTodeXSession';
 import type { WorkbenchItem, WorkbenchRequest, WorkbenchTab } from '../../src/renderer/lib/panels';
 
@@ -40,8 +41,8 @@ describe('file sources', () => {
       createRemoteDirectory: vi.fn().mockResolvedValue({ ok: true }),
       renameRemoteEntry: vi.fn().mockResolvedValue({ ok: true }),
       deleteRemoteEntry: vi.fn().mockResolvedValue({ ok: true }),
-      uploadRemoteFile: vi.fn().mockResolvedValue(undefined),
-      downloadRemoteFile: vi.fn().mockResolvedValue({ name: 'a.bin', data: btoa('hi') }),
+      uploadRemoteChunk: vi.fn().mockResolvedValue({ sizeBytes: 5 }),
+      downloadRemoteFile: vi.fn().mockResolvedValue(new Uint8Array([104, 105])),
     };
     const source = remoteFileSource(() => api as unknown as V2ApiClient, binding);
     expect(source.rootPath).toBe('/home/me');
@@ -57,7 +58,10 @@ describe('file sources', () => {
 
     const uploaded = await source.upload?.('/home/me', new File(['hello'], 'hello.txt'), true);
     expect(uploaded).toBe('/home/me/hello.txt');
-    expect(api.uploadRemoteFile).toHaveBeenCalledWith('conn-1', '/home/me/hello.txt', btoa('hello'), true);
+    expect(api.uploadRemoteChunk).toHaveBeenCalledTimes(1);
+    const [connectionId, path, offset, bytes, overwrite] = api.uploadRemoteChunk.mock.calls[0];
+    expect([connectionId, path, offset, overwrite]).toEqual(['conn-1', '/home/me/hello.txt', 0, true]);
+    expect(new TextDecoder().decode(bytes as Uint8Array)).toBe('hello');
 
     // Browser downloads go through a temporary <a download> link.
     Object.assign(URL, { createObjectURL: vi.fn(() => 'blob:test'), revokeObjectURL: vi.fn() });
@@ -68,6 +72,14 @@ describe('file sources', () => {
     await source.download?.('/home/me/a.bin');
     expect(api.downloadRemoteFile).toHaveBeenCalledWith('conn-1', '/home/me/a.bin');
     expect(click).toHaveBeenCalledTimes(1);
+  });
+
+  it('uploads large files in ordered raw chunks and only overwrites on the first', async () => {
+    const api = { uploadRemoteChunk: vi.fn().mockResolvedValue({ sizeBytes: 0 }) };
+    const size = REMOTE_UPLOAD_CHUNK_BYTES + 3;
+    await uploadRemoteFile(api as unknown as V2ApiClient, 'conn-1', '/srv/big.bin', new File([new Uint8Array(size)], 'big.bin'), true);
+    const calls = api.uploadRemoteChunk.mock.calls.map(([, , offset, bytes, overwrite]) => [offset, (bytes as Uint8Array).length, overwrite]);
+    expect(calls).toEqual([[0, REMOTE_UPLOAD_CHUNK_BYTES, true], [REMOTE_UPLOAD_CHUNK_BYTES, 3, false]]);
   });
 
   it('drops malformed stored remote bindings', () => {
