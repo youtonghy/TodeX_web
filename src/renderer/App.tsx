@@ -139,6 +139,27 @@ export function App() {
     { variant: 'warning', timeout: 12000 },
   );
 
+  const openPanel = useCallback((name: string, params?: OpenPanelOptions) => {
+    const next = panelFromRoute(name);
+    if (!next) {
+      return;
+    }
+    panelScopeRef.current = scopeKey;
+    setSlashCommand(params?.command);
+    setPanelTarget({ url: params?.url, filePath: params?.filePath });
+    setPanel(next);
+    if (isWorkbenchTab(next)) {
+      setWorkbenchTab(next);
+    }
+    if (next !== 'settings' && next !== 'usage' && next !== 'quota' && next !== 'about' && next !== 'cli-manager' && next !== 'agent-providers') {
+      persistAsideOpen(true);
+    }
+  }, [persistAsideOpen, scopeKey, setPanelTarget, setWorkbenchTab]);
+  openPanelHandlerRef.current = openPanel;
+
+  const consumePanelTarget = useCallback(() => setPanelTarget({}), [setPanelTarget]);
+  const changeWorkbenchTab = useCallback((next: WorkbenchTab) => { setWorkbenchTab(next); setPanelTarget({}); }, [setWorkbenchTab, setPanelTarget]);
+
   const [workbenchRequests, setWorkbenchRequests] = useState<WorkbenchRequest[]>([]);
   const [workbenchItems, setWorkbenchItems] = useState<WorkbenchItem[]>([]);
   const workbenchRequestIdRef = useRef(0);
@@ -159,32 +180,6 @@ export function App() {
     persistAsideOpen(true);
   }, [persistAsideOpen, queueWorkbenchRequest]);
   const closeWorkbenchItem = useCallback((itemId: string) => queueWorkbenchRequest(id => ({ id, kind: 'close', itemId })), [queueWorkbenchRequest]);
-
-  const openPanel = useCallback((name: string, params?: OpenPanelOptions) => {
-    // An SSH alias summons a Workbench terminal instead of a routed panel.
-    if (params?.sshHost) {
-      openSshTerminal(params.sshHost);
-      return;
-    }
-    const next = panelFromRoute(name);
-    if (!next) {
-      return;
-    }
-    panelScopeRef.current = scopeKey;
-    setSlashCommand(params?.command);
-    setPanelTarget({ url: params?.url, filePath: params?.filePath });
-    setPanel(next);
-    if (isWorkbenchTab(next)) {
-      setWorkbenchTab(next);
-    }
-    if (next !== 'settings' && next !== 'usage' && next !== 'quota' && next !== 'about' && next !== 'cli-manager' && next !== 'agent-providers') {
-      persistAsideOpen(true);
-    }
-  }, [openSshTerminal, persistAsideOpen, scopeKey, setPanelTarget, setWorkbenchTab]);
-  openPanelHandlerRef.current = openPanel;
-
-  const consumePanelTarget = useCallback(() => setPanelTarget({}), [setPanelTarget]);
-  const changeWorkbenchTab = useCallback((next: WorkbenchTab) => { setWorkbenchTab(next); setPanelTarget({}); }, [setWorkbenchTab, setPanelTarget]);
   const toggleSshView = useCallback(() => {
     // Git actions belong to the conversation view, not the SSH view.
     setGitOpen(false);
