@@ -1,6 +1,7 @@
 import { PiExtensionPanel } from '../components/PiExtensionPanel';
 import { piCommandCompatibility, piTodexCommands } from '../session/providerCommands';
 import { ConversationControls } from '../components/ConversationControls';
+import { ComputerLiveView } from '../components/ComputerLiveView';
 import { NoticeToast } from '../components/NoticeToast';
 import { RiArrowDownDoubleLine, RiAttachment2, RiBarChartBoxLine, RiClipboardLine, RiCpuLine, RiGitBranchLine, RiListCheck2, RiShieldLine, RiStopCircleLine } from '@remixicon/react';
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
@@ -1305,6 +1306,7 @@ export function ChatPanel({ session }: Props) {
       />
       <div className="border-separator border-t px-5 py-4">
         <div className="composer-container mx-auto max-w-2xl">
+          <ComputerLiveView session={session} conversationId={conversation.id} state={session.conversationRuntimeById[conversation.id]?.desktopComputer} />
           {currentProvider === 'pi' && runtime ? <PiExtensionPanel placement="aboveEditor"
             extensionUi={runtime.extensionUi} providerRuntime={runtime.providerRuntime}
             pendingEditorRequest={session.pendingPluginDrafts[conversation.id]}

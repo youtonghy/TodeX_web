@@ -19,9 +19,9 @@ async function render() {
 }
 
 it('toggles desktop tools and lists online desktops', async () => {
-  vi.spyOn(V2ApiClient.prototype, 'getAgentDesktop').mockResolvedValue({ enabled: false, executors: [] });
+  vi.spyOn(V2ApiClient.prototype, 'getAgentDesktop').mockResolvedValue({ enabled: false, computerEnabled: false, executors: [] });
   const set = vi.spyOn(V2ApiClient.prototype, 'setAgentDesktopEnabled').mockResolvedValue({
-    enabled: true, executors: [{ executorId: 1, deviceId: 'dev', deviceName: 'Studio Mac', platform: 'darwin', capabilities: ['browser'] }],
+    enabled: true, computerEnabled: false, executors: [{ executorId: 1, deviceId: 'dev', deviceName: 'Studio Mac', platform: 'darwin', capabilities: ['browser'] }],
   });
   await render();
   const toggle = container.querySelector<HTMLInputElement>('input[type="checkbox"], [role="switch"]');
@@ -29,6 +29,14 @@ it('toggles desktop tools and lists online desktops', async () => {
   await act(async () => { toggle!.click(); });
   expect(set).toHaveBeenCalledWith(true);
   expect(container.textContent).toContain('Studio Mac');
+  // Once desktop tools are on, Computer Use has its own switch.
+  const computer = vi.spyOn(V2ApiClient.prototype, 'setAgentComputerEnabled').mockResolvedValue({
+    enabled: true, computerEnabled: true, executors: [],
+  });
+  const switches = container.querySelectorAll<HTMLInputElement>('input[type="checkbox"], [role="switch"]');
+  expect(switches.length).toBe(2);
+  await act(async () => { switches[1].click(); });
+  expect(computer).toHaveBeenCalledWith(true);
 });
 
 it('explains when the backend predates desktop tools', async () => {

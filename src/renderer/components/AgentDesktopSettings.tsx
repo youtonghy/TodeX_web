@@ -46,6 +46,17 @@ export function AgentDesktopSettings({ session }: { session: TodeXSession }) {
     }
   };
 
+  const setComputerEnabled = async (computerEnabled: boolean) => {
+    setSaving(true);
+    try {
+      setSettings(await api.setAgentComputerEnabled(computerEnabled));
+    } catch (error) {
+      toast.danger(error instanceof Error ? error.message : t('agentDesktop.saveFailed'));
+    } finally {
+      setSaving(false);
+    }
+  };
+
   if (settings === null) {
     return (
       <Surface className="flex flex-col gap-2 rounded-2xl p-5">
@@ -79,6 +90,19 @@ export function AgentDesktopSettings({ session }: { session: TodeXSession }) {
             </div>
           ) : <p className="text-muted text-xs">{t('agentDesktop.noExecutors')}</p>}
         </div>
+      ) : null}
+      {settings?.enabled ? (
+        <Switch isSelected={settings.computerEnabled} isDisabled={saving} onChange={selected => { void setComputerEnabled(selected); }}>
+          <Switch.Content>
+            <Switch.Control>
+              <Switch.Thumb />
+            </Switch.Control>
+            <div>
+              <p className="text-sm font-medium">{t('computerSettings.enable')}</p>
+              <p className="text-muted text-xs">{t('computerSettings.enableHint')}</p>
+            </div>
+          </Switch.Content>
+        </Switch>
       ) : null}
     </Surface>
   );
