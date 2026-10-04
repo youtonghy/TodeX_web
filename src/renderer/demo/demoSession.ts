@@ -13,6 +13,7 @@ const rejected = () => false;
 const resolved = async () => {};
 const resolvedFalse = async () => false;
 const noEntries = async () => ({ entries: [] });
+const noSshHosts = async () => ({ hosts: [], ftpSites: [] });
 const noCatalog = () => undefined;
 
 const modelCatalog: CodexModelCatalogItem[] = [{
@@ -75,6 +76,7 @@ export function buildDemoSession(state: DemoState, backend: ReturnType<typeof de
     pendingRequests: [],
     getProviderCommandCatalog: noCatalog,
     fetchWorkspaceEntries: noEntries,
+    fetchSshHosts: noSshHosts,
     hydrateProcessGroup: resolvedFalse,
     loadEarlierHistory: resolvedFalse,
     recoverConversation: resolved,
