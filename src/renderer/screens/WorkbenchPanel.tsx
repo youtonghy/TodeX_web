@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { RiCloseLine, RiDeleteBinLine, RiDownload2Line, RiEdit2Line, RiFolderAddLine, RiLinksLine, RiLink, RiServerLine, RiTerminalBoxLine, RiTerminalWindowLine, RiUpload2Line, RiGitBranchLine, RiAddLine, RiArrowLeftDoubleLine, RiArrowRightDoubleLine, RiFileTextLine, RiFolder3Line, RiGlobalLine, RiFocus3Line, RiLayoutColumnLine, RiLayoutRowLine, RiRefreshLine, RiStopCircleLine } from '@remixicon/react';
-import { AlertDialog, Button, Chip, Dropdown, Input, Label, Modal, ScrollShadow, Spinner, TextField, Tooltip, toast } from '@heroui/react';
+import { AlertDialog, Badge, Button, Chip, Dropdown, Input, Label, Modal, ScrollShadow, Spinner, TextField, Tooltip, toast } from '@heroui/react';
 import type { Selection } from '@heroui/react';
 import { FileTree } from '@heroui-pro/react';
 import { Resizable } from '@heroui-pro/react/resizable';
@@ -12,7 +12,7 @@ import type { TodeXSession } from '../session/useTodeXSession';
 import { useRemoteConnector } from '../components/ssh/useRemoteConnector';
 import { SshExecPane } from '../components/ssh/SshExecPane';
 import { AgentBrowserShotsPane } from '../components/AgentBrowserShotsPane';
-import { capSshExecTabs, rememberSessionSshExecTabs, sessionSshExecTabsFor, sshExecTabTitle } from '../session/sshExecTabs';
+import { rememberSessionSshExecTabs, sessionSshExecTabsFor, useSshExecClear, visibleSshExecs } from '../session/sshExecTabs';
 import { normalizeRemoteFilesBinding, remoteFileSource, remoteFilesBinding, workspaceFileSource, type FileSource, type FileSourceEntry, type RemoteFilesBinding } from '../session/fileSources';
 import { latencyLabelOf, terminalIdForConversation, terminalStatusLabel, type TerminalTarget } from '../session/helpers';
 import type { OpenPanelOptions, WorkbenchItem, WorkbenchRequest, WorkbenchTab } from '../lib/panels';
@@ -22,7 +22,7 @@ import { SETTINGS_STORAGE_KEY, attachmentId, referenceToken, uniqueReferenceName
 import { V2ApiClient } from '@todex/protocol/v2';
 import { deviceIdentityFromSecret } from '@todex/protocol/deviceAuth';
 import { isConflictError } from '@todex/protocol/connectionError';
-import { isNotFoundError } from '@todex/protocol/ssh';
+import { isNotFoundError, type SshExecRun } from '@todex/protocol/ssh';
 import { t, useT, type MessageKey } from '../i18n';
 
 type Props = {
@@ -78,7 +78,7 @@ type WorkbenchTabAxis = 'horizontal' | 'vertical';
 
 const WORKBENCH_TAB_AXIS_KEY = `${SETTINGS_STORAGE_KEY}.workbenchTabAxis.v1`;
 
-/** `sessionItems` are this app session's 'ssh-exec' tabs for the scope; they
+/** `sessionItems` are this app session's 'ssh-exec' tab for the scope; they
  * follow the stored tabs and may hold the stored active tab. */
 function parseStoredWorkbenchState(value: unknown, sessionItems: WorkbenchItem[] = []): StoredWorkbenchState {
   if (!value || typeof value !== 'object') return { items: sessionItems, activeId: sessionItems[0]?.id ?? '' };
@@ -265,10 +265,6 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
 
   useEffect(() => { onItemsChange?.(items); }, [items, onItemsChange]);
 
-  const sshExecRun = useCallback((item: WorkbenchItem) => item.sshExec
-    ? session.conversationRuntimeById[item.sshExec.conversationId]?.sshExecs.find(run => run.id === item.sshExec!.execId)
-    : undefined, [session.conversationRuntimeById]);
-  const isSshExecRunning = useCallback((item: WorkbenchItem) => sshExecRun(item)?.status === 'running', [sshExecRun]);
 
   const handledRequestRef = useRef(0);
   /** SSH tabs opened during this mount connect at once; restored ones wait for Connect. */
@@ -298,13 +294,13 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
         continue;
       }
       if (request.kind === 'ssh-exec') {
-        const binding = { conversationId: request.conversationId, execId: request.execId };
-        const existing = [...items, ...added].find(item => item.sshExec?.conversationId === binding.conversationId && item.sshExec.execId === binding.execId);
+        // One log per conversation: reuse it, or re-create it if it was closed.
+        const existing = [...items, ...added].find(item => item.sshExec?.conversationId === request.conversationId);
         if (existing) {
           opened = existing;
           continue;
         }
-        const item: WorkbenchItem = { id: `ssh-exec-${Date.now()}-${request.id}`, type: 'ssh-exec', title: request.title, sshExec: binding };
+        const item: WorkbenchItem = { id: `ssh-exec-${Date.now()}-${request.id}`, type: 'ssh-exec', title: t('workbench.tabSshExec'), sshExec: { conversationId: request.conversationId } };
         added.push(item);
         opened = item;
         continue;
@@ -317,15 +313,12 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
       added.push(item);
       opened = item;
     }
-    if (added.length) {
-      const keep = new Set(added.map(item => item.id));
-      setItems(current => capSshExecTabs([...current, ...added], isSshExecRunning, keep));
-    }
+    if (added.length) setItems(current => [...current, ...added]);
     if (opened) {
       setActiveId(opened.id);
       onTabChange(opened.type);
     }
-  }, [closeTab, isSshExecRunning, items, onRequestsHandled, onTabChange, requests, restored]);
+  }, [closeTab, items, onRequestsHandled, onTabChange, requests, restored, t]);
 
   const closeActiveTab = useCallback(() => {
     if (!activeId) return false;
@@ -373,9 +366,8 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
   const tabStrip = items.map((item) => {
     const Icon = item.ssh || item.remote ? REMOTE_ICONS[item.type === 'terminal' ? 'terminal' : 'files'] : WORKBENCH_ICONS[item.type];
     const workspacePath = session.activeWorkspace?.path;
-    const execRun = item.type === 'ssh-exec' ? sshExecRun(item) : undefined;
     const location = item.type === 'ssh-exec'
-      ? (execRun && sshExecTabTitle(execRun)) || item.title
+      ? ''
       : item.type === 'agent-browser'
       ? ''
       : item.ssh
@@ -387,8 +379,9 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
           : item.type === 'browser'
             ? item.target?.url || item.target?.filePath || 'http://127.0.0.1:7345'
             : item.target?.filePath || workspacePath;
-    const title = location ? `${workbenchLabel(item.type)} ${location}` : item.title;
+    const title = item.type === 'ssh-exec' ? workbenchLabel(item.type) : location ? `${workbenchLabel(item.type)} ${location}` : item.title;
     const isActive = item.id === activeId;
+    const tabIconClass = `size-4 transition-opacity${isActive ? ' group-hover:opacity-0 group-focus-within:opacity-0 [@media(hover:none)]:opacity-0' : ''}`;
     return (
       <div
         key={item.id}
@@ -404,7 +397,9 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
               : 'size-10 min-w-10 rounded-none text-inherit'}
             onPress={() => { setActiveId(item.id); onTabChange(item.type); }}
           >
-            <Icon aria-hidden="true" className={`size-4 transition-opacity${isActive ? ' group-hover:opacity-0 group-focus-within:opacity-0 [@media(hover:none)]:opacity-0' : ''}`} />
+            {item.sshExec ? (
+              <SshExecTabIcon conversationId={item.sshExec.conversationId} runs={session.conversationRuntimeById[item.sshExec.conversationId]?.sshExecs} className={tabIconClass} />
+            ) : <Icon aria-hidden="true" className={tabIconClass} />}
           </Button>
           <Tooltip.Content placement={vertical ? 'right' : 'bottom'} className="max-w-sm break-all text-xs">
             {title}
@@ -490,12 +485,26 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
             {item.type === 'browser' ? <BrowserPane workspacePath={session.activeWorkspace?.path} session={session} target={item.type === tab && item.id === active?.id && (target?.filePath || target?.url) ? target : item.target} onTargetChange={next => updateTabTarget(item.id, next)} /> : null}
             {item.type === 'files' ? <FilesPane session={session} remote={item.remote} onRemoteRebind={next => updateRemoteBinding(item.id, next)} target={item.type === tab && item.id === active?.id && (target?.filePath || target?.url) ? target : item.target} onTargetChange={next => updateTabTarget(item.id, next)} /> : null}
             {item.type === 'git-diff' ? <GitDiffPane session={session} /> : null}
-            {item.type === 'ssh-exec' ? <SshExecPane run={sshExecRun(item)} isActive={item.id === active?.id} onClose={() => closeTab(item.id)} /> : null}
+            {item.type === 'ssh-exec' && item.sshExec ? <SshExecPane conversationId={item.sshExec.conversationId} runs={session.conversationRuntimeById[item.sshExec.conversationId]?.sshExecs ?? NO_SSH_EXECS} isActive={item.id === active?.id} /> : null}
             {item.type === 'agent-browser' && item.agentBrowser ? <AgentBrowserShotsPane state={session.conversationRuntimeById[item.agentBrowser.conversationId]?.desktopBrowser} session={session} conversationId={item.agentBrowser.conversationId} /> : null}
           </div>
         ))}
       </div>
     </div>
+  );
+}
+
+const NO_SSH_EXECS: SshExecRun[] = [];
+
+/** The Agent SSH tab icon carries the number of calls in its log view. */
+function SshExecTabIcon({ conversationId, runs = NO_SSH_EXECS, className }: { conversationId: string; runs?: SshExecRun[]; className: string }) {
+  const clear = useSshExecClear(conversationId);
+  const count = useMemo(() => visibleSshExecs(runs, clear).length, [clear, runs]);
+  return (
+    <Badge.Anchor className={className}>
+      <RiTerminalWindowLine aria-hidden="true" className="size-4" />
+      {count ? <Badge color="accent" variant="soft" size="sm" className="tabular-nums">{count > 99 ? '99+' : count}</Badge> : null}
+    </Badge.Anchor>
   );
 }
 
