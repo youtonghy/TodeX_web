@@ -18,25 +18,48 @@ async function render() {
   await act(async () => { root.render(createElement(AgentDesktopSettings, { session })); });
 }
 
+const host = (permissions: { screen: boolean; accessibility: boolean }) => ({
+  supported: true, available: permissions.screen && permissions.accessibility, host: 'Studio Mac', platform: 'macos', permissions,
+});
+
 it('toggles desktop tools and lists online desktops', async () => {
   vi.spyOn(V2ApiClient.prototype, 'getAgentDesktop').mockResolvedValue({ enabled: false, computerEnabled: false, executors: [] });
   const set = vi.spyOn(V2ApiClient.prototype, 'setAgentDesktopEnabled').mockResolvedValue({
-    enabled: true, computerEnabled: false, executors: [{ executorId: 1, deviceId: 'dev', deviceName: 'Studio Mac', platform: 'darwin', capabilities: ['browser'] }],
+    enabled: true, computerEnabled: false, executors: [{ executorId: 1, deviceId: 'dev', deviceName: 'Desk', platform: 'darwin', capabilities: ['browser'] }],
+    computer: host({ screen: false, accessibility: true }),
   });
   await render();
   const toggle = container.querySelector<HTMLInputElement>('input[type="checkbox"], [role="switch"]');
   expect(toggle).not.toBeNull();
   await act(async () => { toggle!.click(); });
   expect(set).toHaveBeenCalledWith(true);
-  expect(container.textContent).toContain('Studio Mac');
-  // Once desktop tools are on, Computer Use has its own switch.
+  expect(container.textContent).toContain('Desk');
+  // Computer Use controls the backend's own computer, named by the backend.
+  expect(container.textContent).toContain('允许 Agent 控制 Studio Mac');
+  expect(container.textContent).toContain('需要屏幕录制权限');
   const computer = vi.spyOn(V2ApiClient.prototype, 'setAgentComputerEnabled').mockResolvedValue({
-    enabled: true, computerEnabled: true, executors: [],
+    enabled: true, computerEnabled: true, executors: [], computer: host({ screen: false, accessibility: true }),
   });
   const switches = container.querySelectorAll<HTMLInputElement>('input[type="checkbox"], [role="switch"]');
   expect(switches.length).toBe(2);
   await act(async () => { switches[1].click(); });
   expect(computer).toHaveBeenCalledWith(true);
+  // Missing permissions are requested on the host.
+  const request = vi.spyOn(V2ApiClient.prototype, 'requestComputerPermissions').mockResolvedValue({
+    enabled: true, computerEnabled: true, executors: [], computer: host({ screen: true, accessibility: true }),
+  });
+  const grant = [...container.querySelectorAll('button')].find(button => button.textContent?.includes('请求授权'))!;
+  await act(async () => { grant.click(); });
+  expect(request).toHaveBeenCalled();
+  expect(container.textContent).toContain('已授予屏幕录制');
+  expect([...container.querySelectorAll('button')].some(button => button.textContent?.includes('请求授权'))).toBe(false);
+});
+
+it('asks to update a backend that still runs Computer Use on desktops', async () => {
+  vi.spyOn(V2ApiClient.prototype, 'getAgentDesktop').mockResolvedValue({ enabled: true, computerEnabled: false, executors: [] });
+  await render();
+  expect(container.textContent).toContain('请升级后端');
+  expect(container.querySelectorAll('[role="switch"], input[type="checkbox"]').length).toBe(1);
 });
 
 it('explains when the backend predates desktop tools', async () => {

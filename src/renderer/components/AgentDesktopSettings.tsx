@@ -6,11 +6,13 @@ import { deviceIdentityFromSecret } from '@todex/protocol/deviceAuth';
 import { V2ApiClient } from '@todex/protocol/v2';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { useT } from '../i18n';
+import { ComputerUseSettings } from './ComputerUseSettings';
 
 /**
- * Agent desktop tools for the active backend: the switch and the desktops
- * online to run them. The browser itself runs on a TodeX desktop, so the
- * executor and browser-profile settings live there.
+ * Agent desktop tools for the active backend: the switch, the desktops
+ * online to run the browser, and Computer Use on the backend's computer.
+ * The browser itself runs on a TodeX desktop, so the executor and
+ * browser-profile settings live there.
  */
 export function AgentDesktopSettings({ session }: { session: TodeXSession }) {
   const t = useT();
@@ -57,6 +59,17 @@ export function AgentDesktopSettings({ session }: { session: TodeXSession }) {
     }
   };
 
+  const requestComputerPermissions = async () => {
+    setSaving(true);
+    try {
+      setSettings(await api.requestComputerPermissions());
+    } catch (error) {
+      toast.danger(error instanceof Error ? error.message : t('agentDesktop.saveFailed'));
+    } finally {
+      setSaving(false);
+    }
+  };
+
   if (settings === null) {
     return (
       <Surface className="flex flex-col gap-2 rounded-2xl p-5">
@@ -92,17 +105,12 @@ export function AgentDesktopSettings({ session }: { session: TodeXSession }) {
         </div>
       ) : null}
       {settings?.enabled ? (
-        <Switch isSelected={settings.computerEnabled} isDisabled={saving} onChange={selected => { void setComputerEnabled(selected); }}>
-          <Switch.Content>
-            <Switch.Control>
-              <Switch.Thumb />
-            </Switch.Control>
-            <div>
-              <p className="text-sm font-medium">{t('computerSettings.enable')}</p>
-              <p className="text-muted text-xs">{t('computerSettings.enableHint')}</p>
-            </div>
-          </Switch.Content>
-        </Switch>
+        <ComputerUseSettings
+          settings={settings}
+          saving={saving}
+          onEnable={selected => { void setComputerEnabled(selected); }}
+          onRequestPermissions={() => { void requestComputerPermissions(); }}
+        />
       ) : null}
     </Surface>
   );
