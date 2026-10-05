@@ -11,7 +11,7 @@ import { useNoticeToast } from '../components/NoticeToast';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { useRemoteConnector } from '../components/ssh/useRemoteConnector';
 import { SshExecPane } from '../components/ssh/SshExecPane';
-import { AgentBrowserShotsPane } from '../components/AgentBrowserShotsPane';
+import { AgentBrowserLiveView } from '../components/AgentBrowserLiveView';
 import { rememberSessionSshExecTabs, sessionSshExecTabsFor, useSshExecClear, visibleSshExecs } from '../session/sshExecTabs';
 import { normalizeRemoteFilesBinding, remoteFileSource, remoteFilesBinding, workspaceFileSource, type FileSource, type FileSourceEntry, type RemoteFilesBinding } from '../session/fileSources';
 import { latencyLabelOf, terminalIdForConversation, terminalStatusLabel, type TerminalTarget } from '../session/helpers';
@@ -486,7 +486,7 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
             {item.type === 'files' ? <FilesPane session={session} remote={item.remote} onRemoteRebind={next => updateRemoteBinding(item.id, next)} target={item.type === tab && item.id === active?.id && (target?.filePath || target?.url) ? target : item.target} onTargetChange={next => updateTabTarget(item.id, next)} /> : null}
             {item.type === 'git-diff' ? <GitDiffPane session={session} /> : null}
             {item.type === 'ssh-exec' && item.sshExec ? <SshExecPane conversationId={item.sshExec.conversationId} runs={session.conversationRuntimeById[item.sshExec.conversationId]?.sshExecs ?? NO_SSH_EXECS} isActive={item.id === active?.id} /> : null}
-            {item.type === 'agent-browser' && item.agentBrowser ? <AgentBrowserShotsPane state={session.conversationRuntimeById[item.agentBrowser.conversationId]?.desktopBrowser} session={session} conversationId={item.agentBrowser.conversationId} /> : null}
+            {item.type === 'agent-browser' && item.agentBrowser ? <AgentBrowserLiveView session={session} isActive={item.id === active?.id} conversationId={item.agentBrowser.conversationId} /> : null}
           </div>
         ))}
       </div>

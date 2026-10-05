@@ -1,18 +1,18 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Chip, Surface, Switch, toast } from '@heroui/react';
+import { Surface, Switch, toast } from '@heroui/react';
 import type { AgentDesktopSettings as Settings } from '@todex/protocol/agentDesktop';
 import { ConnectionError } from '@todex/protocol/connectionError';
 import { deviceIdentityFromSecret } from '@todex/protocol/deviceAuth';
 import { V2ApiClient } from '@todex/protocol/v2';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { useT } from '../i18n';
+import { AgentBrowserSettings } from './AgentBrowserSettings';
 import { ComputerUseSettings } from './ComputerUseSettings';
 
 /**
- * Agent desktop tools for the active backend: the switch, the desktops
- * online to run the browser, and Computer Use on the backend's computer.
- * The browser itself runs on a TodeX desktop, so the executor and
- * browser-profile settings live there.
+ * Agent desktop tools for the active backend. The agent browser and
+ * Computer Use both run on the backend's computer; this app only watches
+ * them, so everything here is backend state.
  */
 export function AgentDesktopSettings({ session }: { session: TodeXSession }) {
   const t = useT();
@@ -93,16 +93,7 @@ export function AgentDesktopSettings({ session }: { session: TodeXSession }) {
         </Switch.Content>
       </Switch>
       {settings?.enabled ? (
-        <div className="flex flex-col gap-1">
-          <p className="text-sm font-medium">{t('agentDesktop.executors')}</p>
-          {settings.executors.length ? (
-            <div className="flex flex-wrap gap-2">
-              {settings.executors.map(executor => (
-                <Chip key={executor.executorId} size="sm" variant="soft" color="success">{executor.deviceName}</Chip>
-              ))}
-            </div>
-          ) : <p className="text-muted text-xs">{t('agentDesktop.noExecutors')}</p>}
-        </div>
+        <AgentBrowserSettings session={session} api={api} settings={settings} onSettings={setSettings} />
       ) : null}
       {settings?.enabled ? (
         <ComputerUseSettings
