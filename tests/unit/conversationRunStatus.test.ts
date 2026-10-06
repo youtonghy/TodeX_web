@@ -5,7 +5,7 @@ import { classifyPendingRequest } from '@todex/protocol/todex';
 import { toast } from '@heroui/react';
 import { createConversationRuntime } from '@todex/protocol/conversationRuntime';
 import { PromptInput } from '@heroui-pro/react/prompt-input';
-import { ConversationPermissionActions, ConversationPromptInput, ConversationRunStatus, TurnUsageSummary } from '../../src/renderer/components/ConversationRunStatus';
+import { ConversationPermissionActions, ConversationPromptInput, ConversationRunStatus, PermissionRequestCard, TurnUsageSummary } from '../../src/renderer/components/ConversationRunStatus';
 
 let root: Root | undefined;
 let container: HTMLDivElement | undefined;
@@ -75,6 +75,13 @@ describe('conversation run status rendering', () => {
     expect(dom.textContent).toContain('正在压缩上下文');
     expect(dom.textContent).not.toContain('建议压缩上下文');
     expect(dom.querySelector('button')).toBeNull();
+  });
+
+  it('does not recommend manual compaction for providers with automatic compaction', () => {
+    const dom = render(createElement(ConversationRunStatus, { ...base,
+      automaticCompaction: true,
+      compaction: { status: 'idle', recommended: true, updatedAt: '2026-09-06T00:00:00Z' } }));
+    expect(dom.textContent).not.toContain('建议压缩上下文');
   });
 
   it('uses one transient toast after locally observed quiet time, never an inline alert', () => {
@@ -170,6 +177,31 @@ describe('permission decision rendering', () => {
     const button = [...dom.querySelectorAll('button')].find(item => item.textContent === '拒绝并停止本轮')!;
     await act(async () => button.click());
     expect(select).toHaveBeenCalledWith(abort);
+  });
+
+  it('shows the full command, the safety-check reason and green/red actions', async () => {
+    const command = `cd /repo && L=/tmp/checks && rm -f $L/*; ${'run step; '.repeat(40)}cat $L/summary`;
+    const allow = { optionId: 'allow_once', name: 'Allow once', kind: 'allow_once' };
+    const reject = { optionId: 'reject_once', name: 'Reject', kind: 'reject_once' };
+    const request = classifyPendingRequest({ type: 'conversation.permission.request', payload: {
+      requestId: 'p', permissionId: 'p', kind: 'tool', title: 'Allow Claude tool Bash?', options: [allow, reject],
+      details: { tool_name: 'Bash', command, reason: 'Dangerous rm operation on possibly-empty variable path',
+        decision_reason_type: 'safetyCheck', input: { command, description: 'Run full checks' } },
+    } })!;
+    const select = vi.fn();
+    const dom = render(createElement(PermissionRequestCard, { request, fallbackTitle: 'fallback', onSelect: select }));
+    expect(dom.querySelector('pre')?.textContent).toBe(command);
+    expect(dom.textContent).toContain('请求运行命令');
+    expect(dom.textContent).toContain('Run full checks');
+    expect(dom.textContent).toContain('安全检查');
+    expect(dom.textContent).toContain('Dangerous rm operation');
+    const buttons = [...dom.querySelectorAll('button')];
+    const allowButton = buttons.find(item => item.textContent === '允许本次')!;
+    expect(allowButton.className).toContain('bg-success');
+    expect(allowButton.querySelector('svg')).not.toBeNull();
+    expect(buttons.find(item => item.textContent === '拒绝')?.querySelector('svg')).not.toBeNull();
+    await act(async () => allowButton.click());
+    expect(select).toHaveBeenCalledWith(allow);
   });
 
   const answerOption = { optionId: 'answer', name: 'Answer', kind: 'answer' };

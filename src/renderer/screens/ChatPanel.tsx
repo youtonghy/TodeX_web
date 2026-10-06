@@ -7,13 +7,13 @@ import { RiArrowDownDoubleLine, RiAttachment2, RiBarChartBoxLine, RiClipboardLin
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { Dispatch, KeyboardEvent, SetStateAction } from 'react';
 import { Button, Label, ListBox, Popover, ScrollShadow, Select, Spinner, Tooltip, toast } from '@heroui/react';
-import { ChainOfThought, ChatAttachment, ChatAttachmentGroup, ChatAttachmentInput, ChatMessage, HoverCard, PromptInput } from '@heroui-pro/react';
+import { ChainOfThought, ChatAttachment, ChatAttachmentGroup, ChatAttachmentInput, ChatMessage, HoverCard, PromptInput, TextShimmer } from '@heroui-pro/react';
 import { ChatMessageActions } from '@heroui-pro/react/chat-message-actions';
 import { ChatTool, type ToolPartState } from '@heroui-pro/react/chat-tool';
 import { Markdown, type MarkdownProps } from '@heroui-pro/react/markdown';
 import { baseMarkdownComponents } from '../components/markdownComponents';
 import { providerDisplayName, type ProviderKind, type PermissionMode, type SkillCatalogDescriptor } from '@todex/protocol/v2';
-import { ConversationPermissionActions, ConversationPromptInput, ConversationRunStatus, TurnUsageSummary } from '../components/ConversationRunStatus';
+import { ConversationPermissionActions, ConversationPromptInput, ConversationRunStatus, PermissionRequestCard, TurnUsageSummary } from '../components/ConversationRunStatus';
 import { ReferenceComposer, type ReferenceComposerHandle } from '../components/ReferenceComposer';
 import { ComposerAttachmentPreview } from '../components/ComposerAttachmentPreview';
 import { SentAttachmentPreview } from '../components/SentAttachmentPreview';
@@ -690,6 +690,7 @@ export function ChatPanel({ session }: Props) {
   }), [workspacePath, session.openPanel]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const atBottomRef = useRef(true);
+  const lastScrollRef = useRef({ top: 0, height: 0 });
   const [isAtBottom, setIsAtBottom] = useState(true);
   const scrollToLatest = (behavior: ScrollBehavior = 'auto') => {
     const element = scrollRef.current;
@@ -753,7 +754,14 @@ export function ChatPanel({ session }: Props) {
   const updateScrollPosition = () => {
     const element = scrollRef.current;
     if (!element) return;
-    const atBottom = element.scrollHeight - element.scrollTop - element.clientHeight < 120;
+    const previous = lastScrollRef.current;
+    lastScrollRef.current = { top: element.scrollTop, height: element.scrollHeight };
+    // Distance alone cannot tell a reader from the follow mode: a slow scroll
+    // up stays inside the bottom band, so the next streamed event snapped it
+    // back down. Any upward move by the reader leaves follow mode at once;
+    // a shrinking scrollHeight clamps scrollTop without the reader moving.
+    const scrolledUp = element.scrollTop < previous.top && element.scrollHeight >= previous.height;
+    const atBottom = !scrolledUp && element.scrollHeight - element.scrollTop - element.clientHeight < 120;
     atBottomRef.current = atBottom;
     setIsAtBottom(atBottom);
     if (atBottom) {
@@ -799,6 +807,7 @@ export function ChatPanel({ session }: Props) {
   }, [session.timeline, firstMountedKey, earlierHistoryStatus?.loading, conversation?.id]);
   useEffect(() => {
     atBottomRef.current = true;
+    lastScrollRef.current = { top: 0, height: 0 };
     setIsAtBottom(true);
     setChatWindowStart(null);
     historyAnchorRef.current = null;
@@ -938,6 +947,11 @@ export function ChatPanel({ session }: Props) {
   const executionUnknown = submissionStatus === 'unknown';
   const runtime = session.conversationRuntimeById[conversation.id];
   const latestProcessGroupId = activeChatProcessId(items, runtime?.activeTurnId || session.turnIds[conversation.id]);
+  // Once the agent has replied after its last steps, the live status moves
+  // below that reply instead of staying on the finished group above it.
+  const lastItem = items[items.length - 1];
+  const showTrailingStatus = thinking && !latestProcessGroupId && items.length > 0
+    && !(lastItem?.type === 'entry' && lastItem.entry.subtitle === STREAMING_REPLY_PLACEHOLDER);
   const sessionPermissionIds = new Set((runtime?.pendingPermissions ?? []).filter(item => item.scope === 'session').map(item => item.id));
   const pendingPermissionIds = new Set((runtime?.pendingPermissions ?? []).map(item => item.id));
   const permissionRequests = session.pendingRequests.filter(item => item.requestId && pendingPermissionIds.has(item.requestId));
@@ -1264,6 +1278,11 @@ export function ChatPanel({ session }: Props) {
               />
             );
           })}
+          {showTrailingStatus ? (
+            <p className="text-muted min-h-7 py-1 text-xs" role="status">
+              <TextShimmer>{t('chat.working')}</TextShimmer>
+            </p>
+          ) : null}
         </div>
         </ScrollShadow>
         {isAtBottom ? null : (
@@ -1320,10 +1339,13 @@ export function ChatPanel({ session }: Props) {
             onStopRuntime={providerDescriptor?.capabilities.runtimeStop ? () => { void session.stopProviderRuntime(conversation.id); } : undefined}
             isStopping={session.stoppingProviderRuntimes[conversation.id]}
             isConnected={session.connectionState === 'open'} /> : null}
-          {permissionRequests.map(request => <div key={request.requestId} className="mb-3 rounded-xl border border-separator p-3">
-            <p className="mb-2 text-xs font-medium">{sessionPermissionIds.has(request.requestId) ? t('chat.piPluginRequest') : request.title || t('chat.permissionApproval')}</p>
-            <ConversationPermissionActions request={request} deviceSecret={session.settings.deviceSecret} onSelect={(option, data) => { session.sendApprovalResponse(option, request, data); }} />
-          </div>)}
+          {permissionRequests.map(request => <PermissionRequestCard
+            key={request.requestId}
+            request={request}
+            fallbackTitle={sessionPermissionIds.has(request.requestId) ? t('chat.piPluginRequest') : request.title || t('chat.permissionApproval')}
+            deviceSecret={session.settings.deviceSecret}
+            onSelect={(option, data) => { session.sendApprovalResponse(option, request, data); }}
+          />)}
           {currentProvider === 'pi' && slashTrigger ? <div className="mb-2 flex items-center gap-2 text-xs text-muted">
             <span>{commandCatalog?.status === 'ready' ? (commandCatalog.source === 'session' ? t('chat.piCommandsSession') : t('chat.piCommandsWorkspace'))
               : commandCatalog?.status === 'error' ? t('chat.commandCatalogFailed') : t('chat.piCommandsLoading')}</span>
@@ -1415,6 +1437,7 @@ export function ChatPanel({ session }: Props) {
             submissionStatus={submissionStatus}
             runtime={runtime}
             compaction={compaction}
+            automaticCompaction={agentProvider === 'codex'}
             onRecover={() => session.reconcilePendingSubmission(conversation.id)}
           />
           {conversation.v2ConversationId ? <ConversationControls

@@ -77,6 +77,13 @@ describe('turn-based process layout', () => {
     expect(new Set(groups.map(item => item.id)).size).toBe(2);
     expect(activeChatProcessId(updated, 't2')).toBe(groups[1].id);
   });
+  it('stops marking a group live once the agent replies after it', () => {
+    const items = buildChatRenderItems([prompt('u', 't'), step('one', 't'), entry('narration', 'incoming', 't'),
+      step('bg', 't'), entry('waiting', 'incoming', 't')]);
+    expect(activeChatProcessId(items, 't')).toBe('');
+    const live = buildChatRenderItems([prompt('u', 't'), step('one', 't'), entry('narration', 'incoming', 't'), step('bg', 't')]);
+    expect(activeChatProcessId(live, 't')).toBe(live[3].id);
+  });
   it('preserves orphan tool and approval records when history has no prompt', () => {
     const items = buildChatRenderItems([step('tool', 'old'), step('approval', 'old', 'approval'), prompt('new', 'new')]);
     expect(items[0]).toMatchObject({ entries: [{ id: 'tool' }, { id: 'approval' }] });
