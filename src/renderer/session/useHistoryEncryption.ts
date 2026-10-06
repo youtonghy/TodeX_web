@@ -283,8 +283,9 @@ export function useHistoryEncryption({ activeBackendId, connected, sendCommand, 
       if (!recipient) throw new Error(t('history.grantRecipientMissing'));
       const controller = new AbortController();
       grantControllers.current.set(grant.grantId, controller);
+      // An interrupted run resumes from its cursor; a finished one starts over.
       const previous = grantRunsRef.current[grant.grantId]?.progress;
-      const start: HistoryRewrapProgress = previous ?? { processed: 0, added: 0, skipped: 0 };
+      const start: HistoryRewrapProgress = previous?.cursor ? previous : { processed: 0, added: 0, skipped: 0 };
       const update = (run: HistoryGrantRun) => setGrantRuns((runs) => ({ ...runs, [grant.grantId]: run }));
       update({ running: true, progress: start });
       const seed = await ownSeed().catch((error: unknown) => {
