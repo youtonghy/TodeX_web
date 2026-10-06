@@ -83,6 +83,7 @@ export function buildDemoSession(state: DemoState, backend: ReturnType<typeof de
     reconcilePendingSubmission: resolved,
     controlConversation: resolvedFalse,
     resumeQueuedFollowUps: resolved,
+    editFollowUpQueue: resolvedFalse,
     stopProviderRuntime: resolved,
     applyConversationPermissionMode: resolvedFalse,
     applyConversationWorkMode: resolvedFalse,
