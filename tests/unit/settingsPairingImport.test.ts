@@ -32,6 +32,7 @@ function render() {
     activeBackendConnectionId: 'a', backendConnections: [{ id: 'a', name: 'Backend A', serverUrl: 'https://a.test', deviceSecret: 'device-secret', tenantId: '', encryptionProtocol: 'x25519', encryptionPublicKey: '' }],
     settings: { serverUrl: 'https://a.test', deviceSecret: 'device-secret', tenantId: '', encryptionProtocol: 'x25519', encryptionPublicKey: '' },
     connectionState: 'idle', connectionHealth: { state: 'idle' }, updateBackendConnection, setSettings,
+    historyEncryption: { view: { backendId: 'a', status: 'idle' }, grantRuns: {} },
   } as unknown as TodeXSession;
   container = document.createElement('div');
   document.body.append(container);

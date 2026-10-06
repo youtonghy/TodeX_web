@@ -6,7 +6,7 @@ export { latestIncomingEntryIds };
 
 /** Both clients render semantic errors and tools from the same projection. */
 export function isChatTimelineEntry(entry: TimelineEntry): boolean {
-  return entry.kind !== 'system' || isStepProgressEntry(entry) || entry.category === 'error' || entry.category === 'extension'
+  return entry.kind !== 'system' || isStepProgressEntry(entry) || entry.category === 'error' || entry.category === 'extension' || entry.detailLocked === true
     || entry.title === 'turn.failed';
 }
 
