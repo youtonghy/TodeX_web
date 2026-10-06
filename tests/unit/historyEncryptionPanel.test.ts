@@ -69,6 +69,8 @@ it('enabling shows the 24 words and QR, requires confirmation, then uploads the 
   const history = session();
   await render(history);
   expect(container!.textContent).toContain('未加密');
+  // Opening the panel re-reads the state (grants are not pushed).
+  expect(history.refresh).toHaveBeenCalled();
   await press('开启端到端加密');
   const words = document.querySelector('ol[aria-label="恢复单词"]');
   expect(words?.querySelectorAll('li')).toHaveLength(24);

@@ -19,6 +19,8 @@ import type { ConversationManifest } from '@todex/protocol/v2';
 import { buildChatRenderItems, isChatTimelineEntry } from '../../src/renderer/components/conversationTimeline';
 import { useHistoryEncryption, type HistoryEncryptionSession } from '../../src/renderer/session/useHistoryEncryption';
 import type { TimelineEntry } from '../../src/renderer/session/helpers';
+import { ProtocolCommandError } from '../../src/renderer/session/protocolCommands';
+import { historyRecipientKeyPairFromSeed } from '@todex/protocol/historyCrypto';
 
 const seeds = vi.hoisted(() => new Map<string, Uint8Array>());
 vi.mock('../../src/renderer/lib/historyKeyStore', () => ({
@@ -43,6 +45,7 @@ const json = (value: unknown) => new TextEncoder().encode(JSON.stringify(value))
 /** A backend stand-in for the §7 commands this client sends. */
 function fakeBackend() {
   const state = { mode: 'off', epoch: 1, recipients: [] as Record<string, unknown>[], grants: [] as unknown[], myRid: undefined as string | undefined };
+  const revokedKeys = new Set<string>();
   let devicePublicKey: Uint8Array | null = null;
   const keys = new Map<string, HistorySegmentKey>();
   const wrapsFetched: string[][] = [];
@@ -51,6 +54,7 @@ function fakeBackend() {
   const sendCommand = vi.fn(async ({ type, payload }: { type: string; payload: Record<string, unknown> }) => {
     if (type === 'history.encryption.get') return { ...state };
     if (type === 'history.recipient.register') {
+      if (revokedKeys.has(payload.publicKey as string)) throw new ProtocolCommandError('[CONFLICT] recipient revoked', 'rejected', 'id', 'CONFLICT');
       devicePublicKey = decodeBase64UrlBytes(payload.publicKey as string);
       const rid = b64(historyRecipientId(devicePublicKey));
       state.myRid = rid;
@@ -70,7 +74,7 @@ function fakeBackend() {
     throw new Error(`unexpected ${type}`);
   });
   return {
-    state, sendCommand, wrapsFetched,
+    state, sendCommand, wrapsFetched, revokedKeys,
     /** A DEK the backend wrapped for this device (or kept from it). */
     key(granted = true) {
       const key = newHistorySegmentKey();
@@ -82,17 +86,17 @@ function fakeBackend() {
   };
 }
 
-async function mount(backend: ReturnType<typeof fakeBackend>, onUnlocked = vi.fn()) {
+async function mount(backend: ReturnType<typeof fakeBackend>, { supported = true, status = 'ready' }: { supported?: boolean; status?: string } = {}) {
   let api!: HistoryEncryptionSession;
   function Harness() {
-    api = useHistoryEncryption({ activeBackendId: 'b1', connected: true, sendCommand: backend.sendCommand, onUnlocked });
+    api = useHistoryEncryption({ activeBackendId: 'b1', connected: true, supported, sendCommand: backend.sendCommand, onUnlocked: vi.fn() });
     return null;
   }
   container = document.createElement('div');
   document.body.append(container);
   root = createRoot(container);
   await act(async () => { root!.render(createElement(Harness)); });
-  await act(async () => { await vi.waitFor(() => expect(api.view.status).toBe('ready')); });
+  await act(async () => { await vi.waitFor(() => expect(api.view.status).toBe(status)); });
   return () => api;
 }
 
@@ -191,4 +195,23 @@ it('renders the recovery QR code so jsQR reads the payload back', () => {
     }
   }));
   expect(jsQR(pixels, dim, dim)?.data).toBe(payload);
+});
+
+it('a backend without history encryption is never asked', async () => {
+  const backend = fakeBackend();
+  await mount(backend, { supported: false, status: 'unavailable' });
+  expect(backend.sendCommand).not.toHaveBeenCalled();
+  expect(seeds.has('b1')).toBe(false);
+});
+
+it('replaces a revoked device key with a fresh one when registration conflicts', async () => {
+  const backend = fakeBackend();
+  const revoked = new Uint8Array(32).fill(9);
+  seeds.set('b1', Uint8Array.from(revoked));
+  backend.revokedKeys.add(encodeBase64Url(historyRecipientKeyPairFromSeed(revoked).publicKey));
+  const api = await mount(backend);
+  expect(seeds.get('b1')).not.toEqual(revoked);
+  expect(api().view.localRid).toBe(backend.state.myRid);
+  expect(api().view.keyError).toBeUndefined();
+  expect(backend.sendCommand.mock.calls.filter(([frame]) => frame.type === 'history.recipient.register')).toHaveLength(2);
 });

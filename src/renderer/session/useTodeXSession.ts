@@ -3684,6 +3684,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const historyEncryption = useHistoryEncryption({
     activeBackendId: activeBackendConnectionId,
     connected: connectionState === 'open' && connectedBackendIdRef.current === activeBackendConnectionId,
+    supported: serverVersion ? serverVersion.historyEncryption === 1 : undefined,
     sendCommand: sendProtocolCommand,
     // Keys arrived: drop projections that may hold locked rows and reopen
     // the visible conversation so it decrypts now.
@@ -3979,6 +3980,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
             version: probe.version.version,
             data_dir: probe.version.dataDir || '',
             workspace_root: probe.version.workspaceRoot || '',
+            historyEncryption: probe.version.historyEncryption,
           });
         }
         if (probe.providers.length) {
@@ -3994,6 +3996,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           version: probe.version.version,
           data_dir: probe.version.dataDir || '',
           workspace_root: probe.version.workspaceRoot || '',
+          historyEncryption: probe.version.historyEncryption,
         });
       }
       setConnectionHealth({
