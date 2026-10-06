@@ -30,7 +30,7 @@ function session(state: Partial<HistoryEncryptionState> = {}, extra: Partial<His
   return {
     view: {
       backendId: 'b1', status: 'ready', localRid: 'me',
-      state: { mode: 'off', epoch: 1, myRid: 'me', grants: [],
+      state: { mode: 'off', epoch: 1, myRid: 'me', grants: [], revokedDevices: [],
         recipients: [{ rid: 'me', kind: 'device', deviceId: 'dev_me', publicKey: 'pk', addedAt: 'a', revokedAt: null }], ...state },
     },
     e2e: state.mode === 'e2e',
@@ -40,6 +40,7 @@ function session(state: Partial<HistoryEncryptionState> = {}, extra: Partial<His
     enable: vi.fn(async () => ({} as HistoryEncryptionState)),
     disable: vi.fn(async () => ({} as HistoryEncryptionState)),
     revoke: vi.fn(async () => ({} as HistoryEncryptionState)),
+    restoreDevice: vi.fn(async () => ({} as HistoryEncryptionState)),
     requestGrant: vi.fn(async () => 'grt_new'),
     dismissGrant: vi.fn(async () => {}),
     authorizeGrant: vi.fn(async () => {}),
@@ -69,7 +70,7 @@ it('enabling shows the 24 words and QR, requires confirmation, then uploads the 
   const history = session();
   await render(history);
   expect(container!.textContent).toContain('未加密');
-  // Opening the panel re-reads the state (grants are not pushed).
+  // Opening the panel re-reads the state (an update may have been missed).
   expect(history.refresh).toHaveBeenCalled();
   await press('开启端到端加密');
   const words = document.querySelector('ol[aria-label="恢复单词"]');
@@ -141,4 +142,54 @@ it('shows an unavailable backend and grant progress', async () => {
   expect(container!.textContent).toContain('已处理 500 个密钥，新增授权 480 个，跳过 20 个');
   await press('暂停');
   expect(pauseGrant).toHaveBeenCalledWith('grt_1');
+});
+
+const buttons = (label: string) => [...document.querySelectorAll('button')].filter((item) => item.textContent === label);
+const isDisabled = (item: HTMLButtonElement) => item.disabled || item.getAttribute('data-disabled') === 'true';
+
+it('revoking a device warns that it is permanent; revoked devices are restored after confirmation', async () => {
+  const history = session({
+    mode: 'e2e',
+    recipients: [
+      { rid: 'me', kind: 'device', deviceId: 'dev_me', publicKey: 'pk', addedAt: 'a', revokedAt: null },
+      { rid: 'r2', kind: 'device', deviceId: 'dev_new', publicKey: 'pk2', addedAt: 'a', revokedAt: null },
+    ],
+    revokedDevices: [{ deviceId: 'dev_old', revokedAt: '2026-10-05' }],
+  });
+  await render(history);
+  await press('吊销');
+  expect(document.body.textContent).toContain('将被永久吊销');
+  expect(document.body.textContent).toContain('直到由其他已授权设备恢复访问');
+  await act(async () => { buttons('取消')[0].click(); });
+
+  expect(container!.textContent).toContain('已吊销的设备');
+  expect(container!.textContent).toContain('设备 dev_old，吊销于 2026-10-05');
+  await press('恢复访问');
+  expect(document.body.textContent).toContain('恢复此设备的历史访问？');
+  expect(history.restoreDevice).not.toHaveBeenCalled();
+  // The dialog's confirm button comes after the list's.
+  await act(async () => { buttons('恢复访问').at(-1)!.click(); });
+  expect(history.restoreDevice).toHaveBeenCalledWith('dev_old');
+});
+
+it('a revoked device shows why and offers no history actions', async () => {
+  const history = session({
+    mode: 'e2e',
+    myAccess: 'revoked',
+    recipients: [
+      { rid: 'me', kind: 'device', deviceId: 'dev_me', publicKey: 'pk', addedAt: 'a', revokedAt: 'r' },
+      { rid: 'r2', kind: 'device', deviceId: 'dev_new', publicKey: 'pk2', addedAt: 'a', revokedAt: null },
+    ],
+    grants: [{ grantId: 'grt_1', rid: 'r3', deviceId: 'dev_x', requestedAt: 'x', status: 'pending' }],
+    revokedDevices: [{ deviceId: 'dev_me', revokedAt: 'r' }, { deviceId: 'dev_old', revokedAt: 'r' }],
+  });
+  Object.assign(history, { view: { ...history.view, accessRevoked: true } });
+  await render(history);
+  expect(container!.querySelector('[role="alert"]')?.textContent).toBe('此设备的历史访问已被吊销，需由其他已授权设备恢复');
+  expect(container!.textContent).not.toContain('尚未登记');
+  expect(container!.textContent).toContain('此设备，吊销于 r');
+  expect(buttons('恢复访问')).toHaveLength(0);
+  for (const label of ['吊销', '关闭加密', '请求访问旧历史', '授权', '忽略', '创建恢复密钥']) {
+    for (const item of buttons(label)) expect(isDisabled(item), label).toBe(true);
+  }
 });

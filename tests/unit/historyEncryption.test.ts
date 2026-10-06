@@ -44,7 +44,11 @@ const json = (value: unknown) => new TextEncoder().encode(JSON.stringify(value))
 
 /** A backend stand-in for the §7 commands this client sends. */
 function fakeBackend() {
-  const state = { mode: 'off', epoch: 1, recipients: [] as Record<string, unknown>[], grants: [] as unknown[], myRid: undefined as string | undefined };
+  const state = { mode: 'off', epoch: 1, recipients: [] as Record<string, unknown>[], grants: [] as unknown[], myRid: undefined as string | undefined,
+    myAccess: undefined as string | undefined, revokedDevices: [] as unknown[] };
+  /** Commands other than `history.encryption.get` fail as for a revoked device. */
+  let blocked = false;
+  const revokedError = () => new ProtocolCommandError('[HISTORY_ACCESS_REVOKED] revoked', 'rejected', 'id', 'HISTORY_ACCESS_REVOKED');
   const revokedKeys = new Set<string>();
   let devicePublicKey: Uint8Array | null = null;
   const keys = new Map<string, HistorySegmentKey>();
@@ -53,11 +57,13 @@ function fakeBackend() {
   let open: () => void = () => {};
   const sendCommand = vi.fn(async ({ type, payload }: { type: string; payload: Record<string, unknown> }) => {
     if (type === 'history.encryption.get') return { ...state };
+    if (blocked) throw revokedError();
     if (type === 'history.recipient.register') {
       if (revokedKeys.has(payload.publicKey as string)) throw new ProtocolCommandError('[CONFLICT] recipient revoked', 'rejected', 'id', 'CONFLICT');
       devicePublicKey = decodeBase64UrlBytes(payload.publicKey as string);
       const rid = b64(historyRecipientId(devicePublicKey));
       state.myRid = rid;
+      state.myAccess = 'active';
       state.recipients = [{ rid, kind: 'device', deviceId: 'dev_self', publicKey: payload.publicKey, addedAt: 'now', revokedAt: null }];
       return { rid };
     }
@@ -75,6 +81,9 @@ function fakeBackend() {
   });
   return {
     state, sendCommand, wrapsFetched, revokedKeys,
+    block(value: boolean) { blocked = value; },
+    /** Wraps a key for this device later (a grant batch). */
+    grant(key: HistorySegmentKey) { keys.set(b64(key.kid), key); },
     /** A DEK the backend wrapped for this device (or kept from it). */
     key(granted = true) {
       const key = newHistorySegmentKey();
@@ -86,10 +95,10 @@ function fakeBackend() {
   };
 }
 
-async function mount(backend: ReturnType<typeof fakeBackend>, { supported = true, status = 'ready' }: { supported?: boolean; status?: string } = {}) {
+async function mount(backend: ReturnType<typeof fakeBackend>, { supported = true, status = 'ready', onUnlocked = vi.fn() }: { supported?: boolean; status?: string; onUnlocked?: (ids?: readonly string[]) => void } = {}) {
   let api!: HistoryEncryptionSession;
   function Harness() {
-    api = useHistoryEncryption({ activeBackendId: 'b1', connected: true, supported, sendCommand: backend.sendCommand, onUnlocked: vi.fn() });
+    api = useHistoryEncryption({ activeBackendId: 'b1', connected: true, supported, sendCommand: backend.sendCommand, onUnlocked });
     return null;
   }
   container = document.createElement('div');
@@ -214,4 +223,107 @@ it('replaces a revoked device key with a fresh one when registration conflicts',
   expect(api().view.localRid).toBe(backend.state.myRid);
   expect(api().view.keyError).toBeUndefined();
   expect(backend.sendCommand.mock.calls.filter(([frame]) => frame.type === 'history.recipient.register')).toHaveLength(2);
+});
+
+const commandTypes = (backend: ReturnType<typeof fakeBackend>) => backend.sendCommand.mock.calls.map(([frame]) => frame.type);
+
+it('a pushed grant update unlocks the listed conversations without polling', async () => {
+  const backend = fakeBackend();
+  backend.state.mode = 'e2e';
+  const onUnlocked = vi.fn();
+  const api = await mount(backend, { onUnlocked });
+  const rid = backend.state.myRid!;
+  backend.state.grants = [{ grantId: 'grt_1', rid, deviceId: 'dev_self', requestedAt: 't', status: 'pending' }];
+  await act(async () => { await api().refresh(); });
+  const key = backend.key(false);
+  const page = () => ({ conversationId: 'conv', events: [encryptedEvent(key, 1, { turnId: 't1' }, { delta: { text: 'old' } })] });
+  expect((await api().decryptPage('b1', 'conv', page(), 'full')).events[0].payload).toEqual({ turnId: 't1', detailLocked: true });
+
+  // Waiting for the grant does not poll the state.
+  vi.useFakeTimers();
+  const reads = commandTypes(backend).filter((type) => type === 'history.encryption.get').length;
+  await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+  expect(commandTypes(backend).filter((type) => type === 'history.encryption.get').length).toBe(reads);
+
+  // Another device re-wraps a batch: the update names the conversations.
+  backend.grant(key);
+  await act(async () => {
+    api().receiveUpdate('b1', { epoch: 2, mode: 'e2e', reason: 'grant.progress', rid, grantId: 'grt_1', conversationIds: ['conv'] });
+    api().receiveUpdate('b1', { epoch: 2, mode: 'e2e', reason: 'grant.progress', rid, grantId: 'grt_1', conversationIds: ['conv2'] });
+    // Updates for another recipient or backend unlock nothing.
+    api().receiveUpdate('b1', { epoch: 2, mode: 'e2e', reason: 'grant.progress', rid: 'someone_else', conversationIds: ['x'] });
+    api().receiveUpdate('b2', { epoch: 2, mode: 'e2e', reason: 'grant.fulfilled', rid });
+    await vi.advanceTimersByTimeAsync(300);
+  });
+  vi.useRealTimers();
+  // Bursts fold into one unlock and one state read.
+  expect(onUnlocked).toHaveBeenCalledTimes(1);
+  expect(onUnlocked).toHaveBeenCalledWith(['conv', 'conv2']);
+  await act(async () => { await vi.waitFor(() => expect(commandTypes(backend).filter((type) => type === 'history.encryption.get').length).toBe(reads + 1)); });
+  // The negative cache was dropped: the same page opens now.
+  expect((await api().decryptPage('b1', 'conv', page(), 'full')).events[0].payload).toEqual({ turnId: 't1', delta: { text: 'old' } });
+
+  // The final update unlocks everything still locked, once.
+  backend.state.grants = [{ grantId: 'grt_1', rid, deviceId: 'dev_self', requestedAt: 't', status: 'fulfilled' }];
+  await act(async () => {
+    api().receiveUpdate('b1', { epoch: 3, mode: 'e2e', reason: 'grant.fulfilled', rid, grantId: 'grt_1' });
+    await vi.waitFor(() => expect(onUnlocked).toHaveBeenCalledTimes(2));
+  });
+  expect(onUnlocked).toHaveBeenLastCalledWith(undefined);
+  await act(async () => { await vi.waitFor(() => expect(api().view.state?.grants[0].status).toBe('fulfilled')); });
+  expect(onUnlocked).toHaveBeenCalledTimes(2);
+});
+
+it('a revoked device never registers or re-keys, locks its rows and registers afresh once restored', async () => {
+  const backend = fakeBackend();
+  const old = new Uint8Array(32).fill(5);
+  seeds.set('b1', Uint8Array.from(old));
+  backend.revokedKeys.add(encodeBase64Url(historyRecipientKeyPairFromSeed(old).publicKey));
+  backend.state.mode = 'e2e';
+  backend.state.myAccess = 'revoked';
+  backend.state.revokedDevices = [{ deviceId: 'dev_self', revokedAt: 't' }];
+  backend.block(true);
+  const api = await mount(backend);
+  expect(api().revoked).toBe(true);
+  expect(api().view.keyError).toBeUndefined();
+  expect(commandTypes(backend)).toEqual(['history.encryption.get']);
+  expect(seeds.get('b1')).toEqual(old);
+  // Encrypted rows project locked; no wraps are asked for.
+  const key = backend.key();
+  const opened = await api().decryptPage('b1', 'conv', { events: [encryptedEvent(key, 1, {}, { text: 'x' })] }, 'full');
+  expect(opened.events[0].payload).toEqual({ detailLocked: true });
+  expect(backend.wrapsFetched).toEqual([]);
+  // Other devices' updates re-read the state but never register.
+  await act(async () => {
+    api().receiveUpdate('b1', { epoch: 2, mode: 'e2e', reason: 'grant.requested' });
+    await vi.waitFor(() => expect(commandTypes(backend)).toEqual(['history.encryption.get', 'history.encryption.get']));
+  });
+  expect(api().revoked).toBe(true);
+
+  // Another device restores this one: it registers a fresh key.
+  backend.block(false);
+  backend.state.myAccess = 'unregistered';
+  backend.state.revokedDevices = [];
+  await act(async () => {
+    api().receiveUpdate('b1', { epoch: 3, mode: 'e2e', reason: 'device.restored', deviceId: 'dev_self' });
+    // The kept key was revoked (CONFLICT): a fresh one is registered.
+    await vi.waitFor(() => expect(commandTypes(backend).slice(3)).toEqual(['history.recipient.register', 'history.recipient.register', 'history.encryption.get']));
+  });
+  expect(api().view.localRid).toBe(backend.state.myRid);
+  expect(api().revoked).toBe(false);
+  expect(seeds.get('b1')).not.toEqual(old);
+});
+
+it('a command refused as revoked stops registration without a re-key loop', async () => {
+  const backend = fakeBackend();
+  backend.block(true);
+  const api = await mount(backend);
+  // The state did not say so yet; the refused registration does.
+  expect(api().revoked).toBe(true);
+  expect(api().view.keyError).toBeUndefined();
+  expect(commandTypes(backend)).toEqual(['history.encryption.get', 'history.recipient.register']);
+  backend.state.myAccess = 'revoked';
+  await act(async () => { await api().refresh(); });
+  expect(commandTypes(backend).filter((type) => type === 'history.recipient.register')).toHaveLength(1);
+  expect(api().revoked).toBe(true);
 });
