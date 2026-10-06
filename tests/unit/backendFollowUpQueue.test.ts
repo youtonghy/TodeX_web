@@ -192,3 +192,27 @@ it('keeps candidates local on a backend without a queue while its manifest repor
     provider.capabilities.backendQueue = true;
   }
 });
+
+it('leaves the rate-limit continuation to a backend that holds the queue', async () => {
+  const socket = await mount();
+  await act(async () => { session.setConversationChatDraft('c', 'long task'); });
+  await act(async () => { session.submitChat('c'); });
+  const prompt = framesOf(socket, 'conversation.prompt').at(-1)!;
+  await act(async () => {
+    socket.reply({ id: prompt.id, type: 'server.result', payload: { conversationId: 'c', turnId: 't1' } });
+    socket.reply({ type: 'conversation.event', delivery: 'live', payload: event(1, 'turn.started', {
+      turnId: 't1', clientRequestId: prompt.payload.clientRequestId }) });
+    await vi.advanceTimersByTimeAsync(50);
+  });
+  await act(async () => {
+    socket.reply({ type: 'conversation.event', delivery: 'live', payload: event(2, 'turn.failed', {
+      turnId: 't1', clientRequestId: prompt.payload.clientRequestId, code: 'PROVIDER_UNAVAILABLE',
+      message: "provider unavailable: You've hit your session limit · resets 5:30pm (Australia/Perth)" }) });
+    await vi.advanceTimersByTimeAsync(100);
+  });
+  // The daemon inserts the continuation itself; a local copy would run twice.
+  expect(session.queuedChatDrafts.c ?? []).toHaveLength(0);
+  expect(framesOf(socket, 'conversation.queue.add')).toHaveLength(0);
+  expect(session.chatDrafts.c).toBe('');
+  expect(session.rateLimitedUntilByConversation.c).toBeDefined();
+});
