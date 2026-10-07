@@ -5,7 +5,8 @@ import { createRoot, type Root } from 'react-dom/client';
 import { toast } from '@heroui/react';
 import { useTodeXSession, type TodeXSession } from '../../src/renderer/session/useTodeXSession';
 import { loadJson } from '../../src/renderer/lib/storage';
-import { defaultSettings, SETTINGS_STORAGE_KEY, WORKSPACES_STORAGE_KEY, CONVERSATIONS_STORAGE_KEY,
+import { applyConversationRuntimeEvents } from '@todex/protocol/conversationRuntime';
+import { defaultSettings, MAX_PENDING_SOCKET_FRAMES, SETTINGS_STORAGE_KEY, WORKSPACES_STORAGE_KEY, CONVERSATIONS_STORAGE_KEY,
   ACTIVE_SELECTION_STORAGE_KEY, BACKEND_CONNECTIONS_STORAGE_KEY } from '../../src/renderer/session/helpers';
 
 vi.mock('../../src/renderer/lib/storage', () => ({
@@ -16,6 +17,10 @@ vi.mock('../../src/renderer/lib/storage', () => ({
 vi.mock('@todex/protocol/secureTransport', async importOriginal => ({
   ...await importOriginal<typeof import('@todex/protocol/secureTransport')>(), verifyTransportPolicy: vi.fn().mockResolvedValue(undefined),
 }));
+vi.mock('@todex/protocol/conversationRuntime', async importOriginal => {
+  const actual = await importOriginal<typeof import('@todex/protocol/conversationRuntime')>();
+  return { ...actual, applyConversationRuntimeEvents: vi.fn(actual.applyConversationRuntimeEvents) };
+});
 vi.mock('@todex/protocol/connectionProbe', async importOriginal => ({
   ...await importOriginal<typeof import('@todex/protocol/connectionProbe')>(),
   probeBackendConnection: vi.fn(async () => ({ ok: true, error: null, providers: [], version: null })),
@@ -159,4 +164,87 @@ it('releases a runtime live frames created for a background conversation once it
   expect(session.timeline.some((entry) => entry.conversationId === 'cb')).toBe(false);
   // The active conversation keeps its projection.
   expect(session.conversationRuntimeById.ca?.appliedSequence).toBe(HIGH_WATER);
+});
+
+const liveMessage = (event: ReturnType<typeof frame>) => ({ data: JSON.stringify({ type: 'conversation.event', delivery: 'live', payload: event }) });
+const sentTypes = (socket: TestSocket) => socket.send.mock.calls.map(([text]) => {
+  try { return (JSON.parse(String(text)) as { type?: string }).type ?? ''; } catch { return ''; }
+});
+
+it('projects a burst of live deltas once per frame, in order', async () => {
+  const socket = await mount();
+  await deliver(socket, frame('ca', HIGH_WATER + 1, 'turn.started', { turnId: 'live' }));
+  const apply = vi.mocked(applyConversationRuntimeEvents);
+  apply.mockClear();
+  await act(async () => {
+    for (let index = 2; index <= 6; index++) {
+      socket.onmessage?.(liveMessage(frame('ca', HIGH_WATER + index, 'message.delta', { turnId: 'live', content: `d${index} ` })));
+    }
+    await vi.advanceTimersByTimeAsync(25);
+  });
+  const liveBatches = apply.mock.calls.filter(([, events]) => events.some((event) => event.sequence > HIGH_WATER + 1));
+  expect(liveBatches).toHaveLength(1);
+  expect(liveBatches[0][1].map((event) => event.sequence)).toEqual([2, 3, 4, 5, 6].map((index) => HIGH_WATER + index));
+  expect(session.conversationRuntimeById.ca?.appliedSequence).toBe(HIGH_WATER + 6);
+  expect(session.timeline.find((entry) => entry.conversationId === 'ca' && entry.subtitle.includes('d2'))?.subtitle)
+    .toContain('d2 d3 d4 d5 d6');
+});
+
+it('projects buffered events before handling the next non-event message', async () => {
+  const socket = await mount();
+  await act(async () => {
+    socket.onmessage?.(liveMessage(frame('ca', HIGH_WATER + 1, 'turn.started', { turnId: 'live' })));
+    socket.onmessage?.({ data: JSON.stringify({ type: 'server.result', id: 'unknown-request', payload: {} }) });
+    // Message tasks run, the animation frame does not.
+    await vi.advanceTimersByTimeAsync(1);
+  });
+  expect(session.conversationRuntimeById.ca?.activeTurnId).toBe('live');
+});
+
+it('drops a socket backlog the renderer cannot drain and reconnects', async () => {
+  const socket = await mount();
+  await act(async () => {
+    for (let index = 0; index <= MAX_PENDING_SOCKET_FRAMES; index++) {
+      socket.onmessage?.({ data: JSON.stringify({ type: 'server.result', id: `r${index}`, payload: {} }) });
+    }
+  });
+  expect(socket.close).toHaveBeenCalled();
+  expect(session.lastError).toBe('待处理的消息积压过多，已重新连接以同步最新状态。');
+  await act(async () => { await vi.advanceTimersByTimeAsync(2_500); });
+  expect(TestSocket.instances.length).toBeGreaterThan(1);
+});
+
+it('never starts the legacy Codex adapter for v2 conversations', async () => {
+  const socket = await mount();
+  await act(async () => { await vi.advanceTimersByTimeAsync(20_000); });
+  expect(sentTypes(socket)).not.toContain('codex.local.start');
+});
+
+it('starts a legacy thread adapter once per connection, even when the start fails', async () => {
+  const legacy = { id: 'cl', workspaceId: 'wa', title: 'legacy', sessionId: 'cdxs_legacy', threadId: 'thread-1',
+    mode: 'implement' as const, preview: 'native history', createdAt: 1, updatedAt: 1 };
+  vi.mocked(loadJson).mockImplementation(async (key, fallback) => ({
+    [SETTINGS_STORAGE_KEY]: { ...defaultSettings, serverUrl: 'http://127.0.0.1' },
+    [BACKEND_CONNECTIONS_STORAGE_KEY]: [profile],
+    [WORKSPACES_STORAGE_KEY]: [workspace],
+    [CONVERSATIONS_STORAGE_KEY]: [conversation('ca'), conversation('cb'), legacy],
+    [ACTIVE_SELECTION_STORAGE_KEY]: { workspaceId: 'wa', conversationId: 'ca' },
+  }[key] ?? fallback) as never);
+  const socket = await mount();
+  // Answer liveness pings so the watchdog keeps this connection.
+  socket.send.mockImplementation((text: string) => {
+    const message = JSON.parse(text) as { id: string; type: string };
+    if (message.type === 'server.ping') {
+      queueMicrotask(() => socket.onmessage?.({ data: JSON.stringify({ type: 'server.result', id: message.id, payload: {} }) }));
+    }
+  });
+  await act(async () => { session.selectConversation('wa', 'cl'); await vi.advanceTimersByTimeAsync(50); });
+  expect(sentTypes(socket).filter((type) => type === 'codex.local.start')).toHaveLength(1);
+  // The start times out (state 'error'); that must not trigger another one.
+  const sockets = TestSocket.instances.length;
+  await act(async () => { await vi.advanceTimersByTimeAsync(16_000); });
+  expect(session.lastError).toBe('本地会话启动超时，请先确认 Codex 本地 adapter 可用。');
+  expect(TestSocket.instances).toHaveLength(sockets);
+  expect(session.conversations.find((item) => item.id === 'cl')?.localAdapterState).toBe('error');
+  expect(sentTypes(socket).filter((type) => type === 'codex.local.start')).toHaveLength(1);
 });

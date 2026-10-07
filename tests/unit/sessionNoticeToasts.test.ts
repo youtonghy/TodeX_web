@@ -3,9 +3,9 @@ import * as React from 'react';
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { toast } from '@heroui/react';
-import { connectionFailureLabel } from '@todex/protocol/connectionError';
 import { SessionNoticeToasts } from '../../src/renderer/components/SessionNoticeToasts';
-import type { ConnectionHealth } from '../../src/renderer/session/helpers';
+import { connectionFailureLabel, type ConnectionHealth } from '../../src/renderer/session/helpers';
+import { setLocale } from '../../src/renderer/i18n';
 
 let root: Root;
 let container: HTMLDivElement;
@@ -88,4 +88,17 @@ it('dismisses the previous backend failure while the new backend is being checke
   expect(toast.danger).toHaveBeenCalledOnce();
   render(health('offline', '健康检查超时'), '', 'backend-b');
   expect(toast.danger).toHaveBeenCalledTimes(2);
+});
+
+it('labels connection failures in the interface language', () => {
+  setLocale('en');
+  try {
+    expect(connectionFailureLabel('backend_unreachable')).toBe('Backend not running or wrong port');
+    expect(connectionFailureLabel('encryption_required')).toBe('Encrypted pairing required');
+    expect(connectionFailureLabel('')).toBe('');
+    render({ ...health('offline', 'raw failure'), code: 'authentication_failed' });
+    expect(toast.danger).toHaveBeenCalledExactlyOnceWith('Token missing or invalid', expect.any(Object));
+  } finally {
+    setLocale('zh-CN');
+  }
 });

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { ConversationRecovery, REOPEN_GAP_EVENTS } from '../../src/renderer/session/conversationRecovery';
+import { ConversationRecovery, GAP_RETRY_BASE_MS, GAP_RETRY_CAP_MS, REOPEN_GAP_EVENTS } from '../../src/renderer/session/conversationRecovery';
 import { canAutoLoadEarlierHistory, capTimelinePerConversation, MAX_CONVERSATION_TIMELINE_ITEMS, mergeSequenceRanges } from '../../src/renderer/session/helpers';
 import type { ConversationEvent, ConversationReplay } from '@todex/protocol/v2';
 
@@ -414,4 +414,72 @@ describe('shared conversation recovery', () => {
       .toEqual([[2, 9], [12, 12]]);
   });
 
+});
+
+describe('gap recovery backoff', () => {
+  it('backs off after a failed gap recovery instead of refetching on every live frame', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.spyOn(Math, 'random').mockReturnValue(0.999);
+      let fail = true;
+      const replay = vi.fn(async (_id: string, after: number) => {
+        if (fail) throw new Error('offline');
+        return page([start, hello, world, event(4, 'message.delta', { turnId: 't', content: '!' })].filter((item) => item.sequence > after));
+      });
+      const errors: string[] = [];
+      const recovery = new ConversationRecovery(replay, () => {}, (message) => errors.push(message));
+      recovery.receive('c', 'w', [start]);
+      recovery.receive('c', 'w', [world]);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(replay).toHaveBeenCalledTimes(1);
+      expect(errors).toEqual(['offline']);
+      // Frames above the gap only buffer while the retry is pending.
+      recovery.receive('c', 'w', [event(4, 'message.delta', { turnId: 't', content: '!' })]);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(replay).toHaveBeenCalledTimes(1);
+      // First retry after ~1 s, the next one after ~2 s.
+      await vi.advanceTimersByTimeAsync(GAP_RETRY_BASE_MS);
+      expect(replay).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(GAP_RETRY_BASE_MS);
+      expect(replay).toHaveBeenCalledTimes(2);
+      fail = false;
+      await vi.advanceTimersByTimeAsync(GAP_RETRY_BASE_MS);
+      expect(replay).toHaveBeenCalledTimes(3);
+      expect(recovery.get('c')?.appliedSequence).toBe(4);
+      expect(recovery.isRecovering('c')).toBe(false);
+      // Recovered: nothing else is scheduled, and a new gap recovers at once.
+      await vi.advanceTimersByTimeAsync(GAP_RETRY_CAP_MS);
+      expect(replay).toHaveBeenCalledTimes(3);
+      recovery.receive('c', 'w', [event(6, 'message.delta', { turnId: 't', content: '?' })]);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(replay).toHaveBeenCalledTimes(4);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('caps the retry delay and drops pending retries on reset', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.spyOn(Math, 'random').mockReturnValue(0.999);
+      const replay = vi.fn(async () => { throw new Error('offline'); });
+      const recovery = new ConversationRecovery(replay, () => {}, () => {});
+      recovery.receive('c', 'w', [start]);
+      recovery.receive('c', 'w', [world]);
+      await vi.advanceTimersByTimeAsync(0);
+      // 1, 2, 4, ... 32 s, then capped: once the delay saturates, ten cap
+      // intervals hold ten attempts.
+      await vi.advanceTimersByTimeAsync(GAP_RETRY_CAP_MS * 3);
+      const warm = replay.mock.calls.length;
+      expect(warm).toBe(8);
+      await vi.advanceTimersByTimeAsync(GAP_RETRY_CAP_MS * 10);
+      expect(replay.mock.calls.length - warm).toBe(10);
+      const calls = replay.mock.calls.length;
+      recovery.reset();
+      await vi.advanceTimersByTimeAsync(GAP_RETRY_CAP_MS * 2);
+      expect(replay).toHaveBeenCalledTimes(calls);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
