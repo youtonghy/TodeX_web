@@ -356,7 +356,6 @@ export const en: Messages = {
 
   // storage
   'storage.insecureBackend': 'A public HTTPS page can only connect to remote Backends over HTTPS/WSS',
-  'storage.browserReadFile': 'The browser preview cannot read local files',
   'storage.browserGit': 'The browser preview does not support Git operations',
 
   // chat

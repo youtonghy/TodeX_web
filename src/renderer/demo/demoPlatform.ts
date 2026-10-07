@@ -41,9 +41,6 @@ export function installDemoPlatformBridge(): void {
       get: async (key) => (memory.has(key) ? memory.get(key) : defaultValue(key)),
       set: async (key, value) => { memory.set(key, value); },
     },
-    fs: {
-      readFile: async () => { throw new Error('The demo has no file system.'); },
-    },
     app: { focus: () => {}, windowChrome: 'native' },
     theme: {
       shouldUseDark: async () => false,

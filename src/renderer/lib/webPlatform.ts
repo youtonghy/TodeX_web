@@ -65,11 +65,6 @@ export function installWebPlatformBridge(): void {
         writeLocalStorage(key, value);
       },
     },
-    fs: {
-      readFile: async () => {
-        throw new Error(t('storage.browserReadFile'));
-      },
-    },
     app: {
       focus: () => window.focus(),
       windowChrome: 'native' as const,

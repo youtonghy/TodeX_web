@@ -356,7 +356,6 @@ export const zhCN = {
 
   // storage
   'storage.insecureBackend': '公开 HTTPS 页面只能连接使用 HTTPS/WSS 的远程 Backend',
-  'storage.browserReadFile': '浏览器预览不支持读取本机文件',
   'storage.browserGit': '浏览器预览不支持 Git 操作',
 
   // chat
