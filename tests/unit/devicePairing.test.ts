@@ -33,6 +33,9 @@ let cancelProof: string;
 let transcript: Uint8Array;
 let wrapKey: Uint8Array;
 let approved: Record<string, unknown>;
+// The transport the create response offers; the transcript binds it.
+let transportProtocol: string;
+let transportPublicKey: string;
 let fetchMock: ReturnType<typeof vi.fn<typeof fetch>>;
 
 function response(value: unknown, status = 200) {
@@ -44,8 +47,12 @@ function createResponse(body: string) {
   const request = JSON.parse(body);
   expect(request.clientPublicKey).toBeUndefined();
   expect(request.devicePublicKey).toBe(device.publicKey);
+  expect(request.transportBinding).toBe(1);
   commitment = request.clientCommitment;
-  return response({ requestId: id, serverPublicKey: encode(serverPublic), expiresAt: startTime + 300_000, pollIntervalMs: 1000 });
+  return response({
+    requestId: id, serverPublicKey: encode(serverPublic), transportProtocol, transportPublicKey,
+    expiresAt: startTime + 300_000, pollIntervalMs: 1000,
+  });
 }
 
 function revealResponse(body: string) {
@@ -59,6 +66,7 @@ function revealResponse(body: string) {
   transcript = new Uint8Array(Buffer.concat([
     Buffer.from(`${domain}transcript\0${id}\0`), clientPublic, serverPublic,
     Buffer.from([0]), devicePublic, clientNonce,
+    lp(utf8(transportProtocol)), lp(Buffer.from(transportPublicKey, 'base64url')),
   ]));
   const salt = sha256(transcript);
   const secret = x25519.getSharedSecret(serverSecret, clientPublic);
@@ -68,13 +76,17 @@ function revealResponse(body: string) {
   const nonce = new Uint8Array(24).fill(11);
   approved = {
     status: 'approved', expiresAt: startTime + 300_000, nonce: encode(nonce),
-    ciphertext: encode(xchacha20poly1305(wrapKey, nonce, transcript).encrypt(utf8(JSON.stringify({ deviceId: device.deviceId })))),
+    ciphertext: encode(xchacha20poly1305(wrapKey, nonce, transcript).encrypt(utf8(JSON.stringify({
+      deviceId: device.deviceId, transportProtocol, transportPublicKey,
+    })))),
   };
   return response({ status: 'pending' });
 }
 
 beforeEach(() => {
   now = startTime;
+  transportProtocol = 'none';
+  transportPublicKey = '';
   vi.spyOn(Date, 'now').mockImplementation(() => now);
   fetchMock = vi.fn<typeof fetch>().mockImplementation(async (input, init) => {
     const path = new URL(String(input)).pathname;
@@ -93,7 +105,10 @@ it('computes its own verification code and decrypts the approved device id once'
   expect(request.verificationCode).toBe(`${code.slice(0, 5)}-${code.slice(5)}`);
   expect(await request.poll()).toEqual({ status: 'pending' });
   fetchMock.mockResolvedValueOnce(response(approved));
-  expect(await request.poll()).toEqual({ status: 'approved', deviceId: device.deviceId });
+  expect(request.transportFingerprint).toBe('none');
+  expect(await request.poll()).toEqual({
+    status: 'approved', deviceId: device.deviceId, pin: { encryptionProtocol: 'none', encryptionPublicKey: '' },
+  });
   expect(await request.poll()).toEqual({ status: 'expired' });
   expect(fetchMock.mock.calls.map(([input]) => new URL(String(input)).pathname)).toEqual([
     '/v2/device-pairing/create', '/v2/device-pairing/reveal', '/v2/device-pairing/poll', '/v2/device-pairing/poll',
@@ -181,7 +196,43 @@ it('rejects a reveal the server does not accept, before showing a code', async (
   await expect(beginDevicePairing('http://localhost', 'Web', device)).rejects.toThrow('409');
 });
 
-it('matches the shared pairing v3 vector (commitment, code, proofs) and decrypts its approval', async () => {
+it('binds the offered transport key: a mismatching credential pins nothing', async () => {
+  const request = await beginDevicePairing('http://localhost', 'Web', device);
+  const nonce = new Uint8Array(24).fill(12);
+  const forged = { deviceId: device.deviceId, transportProtocol: 'x25519', transportPublicKey: encode(serverPublic) };
+  const ciphertext = xchacha20poly1305(wrapKey, nonce, transcript).encrypt(utf8(JSON.stringify(forged)));
+  fetchMock.mockResolvedValueOnce(response({ ...approved, nonce: encode(nonce), ciphertext: encode(ciphertext) }));
+  await expect(request.poll()).rejects.toThrow('未保存任何内容');
+  expect(await request.poll()).toEqual({ status: 'expired' });
+});
+
+it('refuses a credential enrolled for another device', async () => {
+  const request = await beginDevicePairing('http://localhost', 'Web', device);
+  const nonce = new Uint8Array(24).fill(13);
+  const other = { deviceId: 'dev_AAAAAAAAAAAAAAAA', transportProtocol, transportPublicKey };
+  const ciphertext = xchacha20poly1305(wrapKey, nonce, transcript).encrypt(utf8(JSON.stringify(other)));
+  fetchMock.mockResolvedValueOnce(response({ ...approved, nonce: encode(nonce), ciphertext: encode(ciphertext) }));
+  await expect(request.poll()).rejects.toThrow('未保存任何内容');
+});
+
+it('refuses a plaintext transport for a remote address before revealing anything', async () => {
+  await expect(beginDevicePairing('http://192.168.1.20:7345', 'Web', device)).rejects.toThrow('未加密');
+  expect(fetchMock.mock.calls.map(([input]) => new URL(String(input)).pathname)).toEqual(['/v2/device-pairing/create']);
+});
+
+it.each([
+  ['a missing transport', {}],
+  ['an unknown protocol', { transportProtocol: 'X25519', transportPublicKey: encode(new Uint8Array(32).fill(9)) }],
+  ['a short x25519 key', { transportProtocol: 'x25519', transportPublicKey: encode(new Uint8Array(31).fill(9)) }],
+  ['a low-order x25519 key', { transportProtocol: 'x25519', transportPublicKey: encode(new Uint8Array(32)) }],
+  ['a key for none', { transportProtocol: 'none', transportPublicKey: 'AA' }],
+])('rejects %s before showing a code', async (_label, transport) => {
+  fetchMock.mockResolvedValueOnce(response({ requestId: id, serverPublicKey: encode(serverPublic), expiresAt: now + 300_000, ...transport }));
+  await expect(beginDevicePairing('http://localhost', 'Web', device)).rejects.toThrow('传输加密公钥无效');
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+});
+
+it('matches the shared pairing v3 vector (commitment, transport binding, code, proofs) and pins its key', async () => {
   const fixture = JSON.parse(readFileSync(new URL('../../../TodeX_protocol/tests/fixtures/transport-v2.json', import.meta.url), 'utf8')).pairingV3;
   const hex = (value: string) => new Uint8Array(Buffer.from(value, 'hex'));
   const b64 = (value: string) => Buffer.from(value, 'hex').toString('base64url');
@@ -195,26 +246,51 @@ it('matches the shared pairing v3 vector (commitment, code, proofs) and decrypts
     (array as unknown as Uint8Array).set(hex(fixture.clientNonce));
     return array;
   };
-  random.mockImplementationOnce(fixedNonce);
-  const created = { requestId: fixture.requestId, serverPublicKey: b64(fixture.serverPublicKey), expiresAt: startTime + 300_000, pollIntervalMs: 1000 };
-  fetchMock.mockResolvedValueOnce(response(created)).mockResolvedValueOnce(response({ status: 'pending' }));
-  const request = await beginDevicePairing('http://localhost', 'Interop test', fixtureDevice);
+  const created = (transport: { transportProtocol: string; transportPublicKey: string }) => ({
+    requestId: fixture.requestId, serverPublicKey: b64(fixture.serverPublicKey), expiresAt: startTime + 300_000, pollIntervalMs: 1000,
+    transportProtocol: transport.transportProtocol, transportPublicKey: transport.transportPublicKey,
+  });
+  const begin = async (transport: { transportProtocol: string; transportPublicKey: string }, name: string) => {
+    random.mockImplementationOnce(fixedNonce);
+    fetchMock.mockResolvedValueOnce(response(created(transport))).mockResolvedValueOnce(response({ status: 'pending' }));
+    return beginDevicePairing('http://localhost', name, fixtureDevice);
+  };
+
+  const request = await begin(fixture, 'Interop test');
   expect(request.verificationCode).toBe(fixture.verificationCode);
+  expect(request.transportFingerprint).toBe(fixture.fingerprint);
   const createBody = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
-  expect(createBody).toMatchObject({ clientCommitment: fixture.commitmentBase64Url, devicePublicKey: b64(fixture.devicePublicKey) });
+  expect(createBody).toMatchObject({ transportBinding: 1, clientCommitment: fixture.commitmentBase64Url, devicePublicKey: b64(fixture.devicePublicKey) });
   expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).toEqual({
     requestId: fixture.requestId, clientPublicKey: b64(fixture.clientPublicKey), clientNonce: b64(fixture.clientNonce),
   });
-  const nonce = new Uint8Array(24).fill(7);
-  const ciphertext = xchacha20poly1305(hex(fixture.wrapKey), nonce, hex(fixture.transcript))
-    .encrypt(utf8(JSON.stringify({ deviceId: fixtureDevice.deviceId })));
-  fetchMock.mockResolvedValueOnce(response({ status: 'approved', nonce: encode(nonce), ciphertext: encode(ciphertext) }));
-  expect(await request.poll()).toEqual({ status: 'approved', deviceId: fixtureDevice.deviceId });
+  // The vector's own credential decrypts under this transcript but names
+  // another device ("dev_vector"), so it is refused and nothing is pinned.
+  fetchMock.mockResolvedValueOnce(response({ status: 'approved', nonce: fixture.credential.nonceBase64Url, ciphertext: fixture.credential.ciphertextBase64Url }));
+  await expect(request.poll()).rejects.toThrow('校验失败');
   expect(JSON.parse(String(fetchMock.mock.calls[2][1]?.body)).proof).toBe(b64(fixture.pollProof));
 
-  random.mockImplementationOnce(fixedNonce);
-  fetchMock.mockResolvedValueOnce(response(created)).mockResolvedValueOnce(response({ status: 'pending' }));
-  const cancelled = await beginDevicePairing('http://localhost', 'Interop cancellation', fixtureDevice);
+  const approvedRequest = await begin(fixture, 'Interop approval');
+  const nonce = new Uint8Array(24).fill(7);
+  const credential = JSON.parse(fixture.credential.plaintext);
+  const ciphertext = xchacha20poly1305(hex(fixture.wrapKey), nonce, hex(fixture.transcript))
+    .encrypt(utf8(JSON.stringify({ ...credential, deviceId: fixtureDevice.deviceId })));
+  fetchMock.mockResolvedValueOnce(response({ status: 'approved', nonce: encode(nonce), ciphertext: encode(ciphertext) }));
+  expect(await approvedRequest.poll()).toEqual({
+    status: 'approved', deviceId: fixtureDevice.deviceId,
+    pin: { encryptionProtocol: fixture.transportProtocol, encryptionPublicKey: fixture.transportPublicKey },
+  });
+
+  // A different transport key yields a different code, so a substituted key
+  // shows up when the user compares codes.
+  const tampered = await begin(fixture.tampered, 'Interop tampered');
+  expect(tampered.verificationCode).toBe(fixture.tampered.verificationCode);
+  await tampered.cancel();
+  const none = await begin(fixture.noneCase, 'Interop none');
+  expect(none.verificationCode).toBe(fixture.noneCase.verificationCode);
+  expect(none.transportFingerprint).toBe(fixture.noneCase.fingerprint);
+
+  const cancelled = await begin(fixture, 'Interop cancellation');
   await cancelled.cancel();
   expect(JSON.parse(String(fetchMock.mock.calls.at(-1)?.[1]?.body)).proof).toBe(b64(fixture.cancelProof));
 });

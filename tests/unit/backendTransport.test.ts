@@ -32,9 +32,11 @@ const serverPublic = x25519.getPublicKey(serverSecret);
 const device = generateDeviceIdentity();
 const pinned = (serverUrl: string) => ({
   serverUrl, deviceSecret: device.secretKey, encryptionProtocol: 'x25519' as const,
-  encryptionPublicKey: Buffer.from(serverPublic).toString('base64url'),
+  encryptionPublicKey: Buffer.from(serverPublic).toString('base64url'), transportVerified: true,
 });
-const unpaired = (serverUrl: string) => ({ serverUrl, deviceSecret: device.secretKey, encryptionProtocol: 'none' as const, encryptionPublicKey: '' });
+/** A key saved before pairing bound the transport (manual import): never trusted. */
+const unverified = (serverUrl: string) => ({ ...pinned(serverUrl), transportVerified: false });
+const unpaired = (serverUrl: string) => ({ serverUrl, deviceSecret: device.secretKey, encryptionProtocol: 'none' as const, encryptionPublicKey: '', transportVerified: false });
 
 type Inner = ReturnType<typeof decodeInnerRequest>;
 /** A `fetch` that only answers `/v2/sealed`, the way the backend tunnel does. */
@@ -69,6 +71,20 @@ it('selects the transport per profile: pinned key -> v2 (loopback too), unpaired
   expect(backendTransport(unpaired('http://192.168.1.20:7345')).mode).toBe('refused');
   expect(backendTransport(unpaired('http://localhost:7345')).mode).toBe('plaintext');
   expect(backendTransport(pinned('http://10.1.1.1:7345'))).toBe(backendTransport(pinned('http://10.1.1.1:7345')));
+});
+
+it('refuses an unverified pin on every host, loopback included, without touching the network', async () => {
+  const fetchImpl = vi.fn();
+  vi.stubGlobal('fetch', fetchImpl);
+  for (const serverUrl of ['http://127.0.0.1:7345', 'http://localhost:7345', 'http://192.168.1.20:7345']) {
+    expect(backendTransport(unverified(serverUrl)).mode).toBe('refused');
+    const failure = await backendFetch(unverified(serverUrl), { method: 'GET', path: '/v2/workspaces' }).catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(TransportRepairRequiredError);
+    expect(failure).toMatchObject({ required: null });
+    expect(describeTransportFailure(failure)).toMatchObject({ retryable: false, code: 'encryption_required' });
+    expect(describeTransportFailure(failure)?.message).toContain('重新配对');
+  }
+  expect(fetchImpl).not.toHaveBeenCalled();
 });
 
 it('refuses REST calls to an unpaired remote backend without touching the network', async () => {
@@ -118,6 +134,9 @@ it('maps every transport failure to a localized message and retry policy', () =>
   expect(describeTransportFailure(new EncryptionRequiredError('http://x'))).toMatchObject({ retryable: false, code: 'encryption_required' });
   expect(describeTransportFailure(new InvalidPinnedKeyError('x25519'))).toMatchObject({ retryable: false, code: 'encryption_required' });
   expect(describeTransportFailure(new TransportRepairRequiredError('x25519', 'ml-kem-768'))?.message).toContain('ml-kem-768');
+  expect(describeTransportFailure(new TransportRepairRequiredError('x25519', 'ml-kem-768'))?.message).toContain('重新配对');
+  expect(describeTransportFailure(new InvalidPinnedKeyError('x25519'))?.message).toContain('重新配对');
+  expect(describeTransportFailure(new EncryptionRequiredError('http://x'))?.message).not.toMatch(/二维码|粘贴/);
   expect(describeTransportFailure(new TransportPolicyError('outdated', false))).toMatchObject({ retryable: false });
   expect(describeTransportFailure(new TransportPolicyError('unreachable', true))).toMatchObject({ retryable: true, code: 'backend_unreachable' });
   expect(describeTransportFailure(new TransportPolicyError('timeout', true))).toMatchObject({ retryable: true });

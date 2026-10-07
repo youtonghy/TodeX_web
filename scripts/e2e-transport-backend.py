@@ -3,14 +3,16 @@
 
 The backend listens on 0.0.0.0 with `pairing_encryption = "ml-kem-768"`,
 temporary state, fake Codex/Claude CLIs and no enrolled devices, so the test
-must pair with device pairing v3. Reach it through this machine's LAN address:
-the peer is then non-loopback and the backend only accepts transport v2.
+must pair with device pairing v3, which also delivers and verifies the
+backend's ML-KEM transport key (nothing is imported by hand). Reach it through
+this machine's LAN address: the peer is then non-loopback and the backend only
+accepts transport v2.
 
     start --backend-binary <todex-agentd> --fake-provider <fake_provider.py> --port <free port>
     approve --fixture <root>          # approves the pending pairing request
     stop --fixture <root>
 
-`start` prints the fixture JSON (root, url, lanUrl, pairing link); the
+`start` prints the fixture JSON (root, url, lanUrl, transport key); the
 Playwright spec `tests/e2e/transport-v2.spec.ts` reads it from
 `TODEX_E2E_TRANSPORT_FIXTURE`. Never point this at the user's :7345 daemon.
 """
@@ -102,10 +104,10 @@ def start(binary, fake_provider, port):
         time.sleep(0.2)
     keys = json.loads((root / "data/pairing_keys.json").read_text())
     lan_url = f"http://{lan_address()}:{port}"
-    pairing = {"kind": "todex-pairing-link", "version": 1, "serverUrl": lan_url, "preferredEncryption": "ml-kem-768",
-               "protocol": {"id": "ml-kem-768", "publicKey": keys["mlKemPublic"]}}
+    # Only for assertions: the browser must learn this key from device pairing.
     manifest = {"kind": "todex-web-e2e-transport-v2", "root": str(root), "pid": child.pid, "url": url,
-                "lanUrl": lan_url, "workspace": str(workspace), "dataDir": str(root / "data"), "pairing": pairing}
+                "lanUrl": lan_url, "workspace": str(workspace), "dataDir": str(root / "data"),
+                "transportPublicKey": keys["mlKemPublic"]}
     (root / "fixture.json").write_text(json.dumps(manifest, indent=2) + "\n")
     return manifest
 

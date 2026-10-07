@@ -854,7 +854,7 @@ function BrowserPane({ workspacePath, session, target, onTargetChange }: { works
       setSrcDoc('');
       setError(reason instanceof Error ? reason.message : t('workbench.snapshotFailed'));
     }
-  }, [session.settings.deviceSecret, session.settings.encryptionProtocol, session.settings.encryptionPublicKey, session.settings.serverUrl]);
+  }, [session.settings.deviceSecret, session.settings.encryptionProtocol, session.settings.encryptionPublicKey, session.settings.transportVerified, session.settings.serverUrl]);
 
   useEffect(() => {
     if (target?.url) {
@@ -1184,8 +1184,8 @@ function FilesPane({ session, target, onTargetChange, remote, onRemoteRebind }: 
   const t = useT();
   const targetChangeRef = useRef(onTargetChange);
   targetChangeRef.current = onTargetChange;
-  const { serverUrl, deviceSecret, encryptionProtocol, encryptionPublicKey } = session.settings;
-  const api = useCallback(() => backendApi({ serverUrl, deviceSecret, encryptionProtocol, encryptionPublicKey }), [deviceSecret, encryptionProtocol, encryptionPublicKey, serverUrl]);
+  const { serverUrl, deviceSecret, encryptionProtocol, encryptionPublicKey, transportVerified } = session.settings;
+  const api = useCallback(() => backendApi({ serverUrl, deviceSecret, encryptionProtocol, encryptionPublicKey, transportVerified }), [deviceSecret, encryptionProtocol, encryptionPublicKey, serverUrl, transportVerified]);
   const workspacePath = session.activeWorkspace?.path || '';
   const source: FileSource = useMemo(
     () => (remote ? remoteFileSource(api, remote) : workspaceFileSource(api, workspacePath)),

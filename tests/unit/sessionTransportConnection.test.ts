@@ -113,9 +113,10 @@ afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
 });
-function render(profile: { serverUrl: string; encryptionProtocol: 'none' | 'x25519' | 'ml-kem-768'; encryptionPublicKey: string } = {
-  serverUrl: 'https://backend.test', encryptionProtocol: 'x25519', encryptionPublicKey: pinnedKey,
-}) {
+type Profile = { serverUrl: string; encryptionProtocol: 'none' | 'x25519' | 'ml-kem-768'; encryptionPublicKey: string; transportVerified?: boolean };
+function render(input: Profile = { serverUrl: 'https://backend.test', encryptionProtocol: 'x25519', encryptionPublicKey: pinnedKey }) {
+  // Keys in these tests were pinned by device pairing unless a test says otherwise.
+  const profile = { transportVerified: input.encryptionProtocol !== 'none', ...input };
   function Harness() { session = useTodeXSession(() => {}); return null; }
   container = document.createElement('div'); document.body.append(container); root = createRoot(container);
   act(() => root.render(createElement(Harness)));
@@ -158,7 +159,8 @@ it('refuses a remote backend without a pinned key before any request and asks fo
   expect(TestSocket.instances).toHaveLength(0);
   expect(session.connectionState).toBe('error');
   expect(session.connectionHealth).toMatchObject({ status: 'offline', code: 'encryption_required' });
-  expect(session.lastError).toContain('配对二维码');
+  expect(session.lastError).toContain('设置 → 设备验证');
+  expect(session.lastError).not.toMatch(/二维码|粘贴|导入/);
   await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
   expect(TestSocket.instances).toHaveLength(0);
 });
@@ -173,7 +175,7 @@ it.each([
   expect(TestSocket.instances).toHaveLength(0);
   expect(session.connectionHealth).toMatchObject({ status: 'offline', code: 'encryption_required' });
   expect(session.lastError).toContain(protocol);
-  expect(session.lastError).toContain('重新导入');
+  expect(session.lastError).toContain('重新配对');
 });
 
 it('reports an outdated backend that does not speak transport v2', async () => {
@@ -191,12 +193,23 @@ it('rejects an unusable pinned key without touching the network', async () => {
   expect(session.lastError).toContain('加密公钥无效');
 });
 
+it.each(['http://127.0.0.1:7345', 'https://backend.test'])('refuses a pin device pairing did not verify (%s) and asks to re-pair', async (serverUrl) => {
+  render({ serverUrl, encryptionProtocol: 'x25519', encryptionPublicKey: pinnedKey, transportVerified: false });
+  await connect();
+  expect(fetchMock).not.toHaveBeenCalled();
+  expect(probeBackendConnection).not.toHaveBeenCalled();
+  expect(TestSocket.instances).toHaveLength(0);
+  expect(session.connectionHealth).toMatchObject({ status: 'offline', code: 'encryption_required' });
+  expect(session.lastError).toContain('未经设备配对验证');
+  expect(session.lastError).toContain('重新配对');
+});
+
 it('maps a 4400 close to a retryable transport error and reconnects with a fresh handshake', async () => {
   vi.mocked(loadJson).mockImplementation((_key, fallback) => Promise.resolve(fallback));
   vi.mocked(loadSecret).mockResolvedValue('');
   render(); await act(async () => {});
   // Hydration restored the stored (default) profile; pin the key again.
-  act(() => session.setSettings(value => ({ ...value, serverUrl: 'https://backend.test', encryptionProtocol: 'x25519', encryptionPublicKey: pinnedKey })));
+  act(() => session.setSettings(value => ({ ...value, serverUrl: 'https://backend.test', encryptionProtocol: 'x25519', encryptionPublicKey: pinnedKey, transportVerified: true })));
   await connect();
   const socket = TestSocket.instances[0];
   await act(async () => { socket.open(); socket.hello(); });
@@ -269,4 +282,28 @@ it('moves the socket to the newly active backend profile', async () => {
   expect(TestSocket.instances).toHaveLength(2);
   expect(TestSocket.instances[0].close).toHaveBeenCalled();
   expect(TestSocket.instances[1].url.host).toBe('127.0.0.2:7346');
+});
+
+it('an approved pairing pins the transport in one profile update and connects encrypted; a new backend inherits nothing', async () => {
+  vi.mocked(loadJson).mockImplementation((_key, fallback) => Promise.resolve(fallback));
+  vi.mocked(loadSecret).mockResolvedValue('');
+  render({ serverUrl: 'http://127.0.0.1:7345', encryptionProtocol: 'none', encryptionPublicKey: '' });
+  await act(async () => {});
+  const id = session.activeBackendConnectionId;
+  const pin = { deviceSecret: 'paired-secret', encryptionProtocol: 'x25519' as const, encryptionPublicKey: pinnedKey, transportVerified: true };
+  await act(async () => { session.onDevicePairingApproved(id, pin); });
+  expect(session.backendConnections.find((profile) => profile.id === id)).toMatchObject(pin);
+  expect(session.settings).toMatchObject(pin);
+  expect(TestSocket.instances).toHaveLength(1);
+  expect(TestSocket.instances[0].url.searchParams.get('tv')).toBe('2');
+  expect(TestSocket.instances[0].url.searchParams.get('enc')).toBe('x25519');
+
+  await act(async () => { session.updateBackendConnection(id, { serverUrl: 'http://127.0.0.1:7346' }); });
+  expect(session.backendConnections.find((profile) => profile.id === id)).toMatchObject({
+    serverUrl: 'http://127.0.0.1:7346', deviceSecret: '', encryptionProtocol: 'none', encryptionPublicKey: '', transportVerified: false,
+  });
+  await act(async () => { session.onDevicePairingApproved(id, pin); });
+  await act(async () => { session.addBackendConnection({ serverUrl: 'http://127.0.0.2:7345' }); });
+  expect(session.settings).toMatchObject({ serverUrl: 'http://127.0.0.2:7345', deviceSecret: '', encryptionProtocol: 'none', encryptionPublicKey: '', transportVerified: false });
+  expect(session.backendConnections.at(-1)).toMatchObject({ deviceSecret: '', encryptionProtocol: 'none', encryptionPublicKey: '', transportVerified: false });
 });

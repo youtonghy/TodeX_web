@@ -50,7 +50,7 @@ export const DEMO_PROVIDERS: ProviderDescriptor[] = [provider('codex', 'Codex'),
 export function demoBackend(now: number): BackendConnectionProfile {
   return {
     id: DEMO_BACKEND_ID, name: t('demo.backendName'), serverUrl: DEMO_SETTINGS.serverUrl, deviceSecret: '',
-    tenantId: DEMO_SETTINGS.tenantId, encryptionProtocol: 'x25519', encryptionPublicKey: '', createdAt: now, updatedAt: now,
+    tenantId: DEMO_SETTINGS.tenantId, encryptionProtocol: 'x25519', encryptionPublicKey: '', transportVerified: true, createdAt: now, updatedAt: now,
   };
 }
 
