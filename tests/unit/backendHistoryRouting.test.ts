@@ -12,21 +12,18 @@ vi.mock('../../src/renderer/lib/storage', () => ({
   loadJson: vi.fn(), loadSecret: vi.fn().mockResolvedValue(''),
   saveJson: vi.fn().mockResolvedValue(undefined), saveSecret: vi.fn().mockResolvedValue(undefined),
 }));
-vi.mock('../../src/renderer/session/transportVerification', () => ({
-  ENCRYPTION_VERIFICATION_ERROR: 'verification failed',
-  validateTransportEncryption: vi.fn().mockResolvedValue(undefined), verifyEncryptedSocket: vi.fn().mockResolvedValue(undefined),
+// Loopback profiles without a pinned key: plaintext, policy check skipped.
+vi.mock('@todex/protocol/secureTransport', async importOriginal => ({
+  ...await importOriginal<typeof import('@todex/protocol/secureTransport')>(), verifyTransportPolicy: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock('@todex/protocol/connectionProbe', async importOriginal => ({
   ...await importOriginal<typeof import('@todex/protocol/connectionProbe')>(),
   probeBackendConnection: vi.fn(async () => ({ ok: true, error: null, providers: [], version: null })),
 }));
-vi.mock('@todex/protocol/transportCrypto', async importOriginal => ({
-  ...await importOriginal<typeof import('@todex/protocol/transportCrypto')>(), createTransportCryptoSession: vi.fn(() => null),
-}));
 
 // Two backend profiles, each owning one workspace. The conversation records
 // are untagged, as manifest imports are: their workspace names the backend.
-const profile = (id: string) => ({ id, name: id, serverUrl: `http://${id}.test`, tenantId: 'local', encryptionProtocol: 'none', createdAt: 1, updatedAt: 1 });
+const profile = (id: string) => ({ id, name: id, serverUrl: `http://127.0.0.${id.charCodeAt(0) - 96}`, tenantId: 'local', encryptionProtocol: 'none', createdAt: 1, updatedAt: 1 });
 const workspace = (id: string, backendConnectionId: string) => ({ id, name: id, path: `/${id}`, tenantId: 'local', model: '',
   approvalPolicy: 'on-request', sandboxMode: 'workspace-write', createdAt: 1, updatedAt: 1, backendConnectionId });
 const conversation = (id: string, workspaceId: string) => ({ id, workspaceId, title: id, sessionId: `v2_${id}`, threadId: '',
@@ -40,9 +37,9 @@ class TestSocket {
   onopen: (() => unknown) | null = null;
   onmessage: ((event: { data: string }) => unknown) | null = null;
   onerror: (() => unknown) | null = null;
-  onclose: (() => unknown) | null = null;
+  onclose: ((event: { code: number; reason: string }) => unknown) | null = null;
   send = vi.fn();
-  close = vi.fn(() => { this.readyState = 3; this.onclose?.(); });
+  close = vi.fn(() => { this.readyState = 3; this.onclose?.({ code: 1000, reason: '' }); });
   constructor(public url: string) { TestSocket.instances.push(this); }
   open() { this.readyState = 1; void this.onopen?.(); }
 }
@@ -60,7 +57,7 @@ beforeEach(() => {
   vi.stubGlobal('WebSocket', TestSocket);
   for (const kind of ['warning', 'danger', 'info'] as const) vi.spyOn(toast, kind).mockReturnValue(`toast-${kind}`);
   vi.mocked(loadJson).mockImplementation(async (key, fallback) => ({
-    [SETTINGS_STORAGE_KEY]: { ...defaultSettings, serverUrl: 'http://a.test' },
+    [SETTINGS_STORAGE_KEY]: { ...defaultSettings, serverUrl: 'http://127.0.0.1' },
     [BACKEND_CONNECTIONS_STORAGE_KEY]: [profile('a'), profile('b')],
     [WORKSPACES_STORAGE_KEY]: [workspace('wa', 'a'), workspace('wb', 'b')],
     [CONVERSATIONS_STORAGE_KEY]: storedConversations,
@@ -72,7 +69,7 @@ beforeEach(() => {
     let result: unknown;
     if (url.pathname === '/v2/providers') result = { providers: [] };
     else if (url.pathname === '/v2/conversations') {
-      const workspaceId = url.host === 'a.test' ? 'wa' : 'wb';
+      const workspaceId = url.host === '127.0.0.1' ? 'wa' : 'wb';
       result = { conversations: storedConversations.filter((item) => item.workspaceId === workspaceId).map((item) => ({
         schemaVersion: 2, id: item.v2ConversationId, provider: 'codex', ownerId: 'o', workspace: `/${workspaceId}`, workspaceId,
         title: item.title, status: 'idle', lastSequence: 0, createdAt: '2026-09-24T00:00:00Z', updatedAt: '2026-09-24T00:00:00Z' })) };
@@ -102,31 +99,31 @@ const historyRequests = (host: string, v2Id: string) =>
 it('reads a conversation history from the backend that owns it', async () => {
   await mount();
   await act(async () => { void session.hydrateProcessGroup('cb', [[1, 2]]).catch(() => undefined); });
-  expect(historyRequests('b.test', 'v2-cb')).toHaveLength(1);
-  expect(historyRequests('a.test', 'v2-cb')).toHaveLength(0);
+  expect(historyRequests('127.0.0.2', 'v2-cb')).toHaveLength(1);
+  expect(historyRequests('127.0.0.1', 'v2-cb')).toHaveLength(0);
 });
 
 it('closes the connection when leaving a backend and continues its history when returning', async () => {
   await mount();
   await act(async () => { session.connect(); });
   await act(async () => { TestSocket.instances.at(-1)!.open(); });
-  expect(TestSocket.instances.at(-1)!.url).toContain('a.test');
+  expect(TestSocket.instances.at(-1)!.url).toContain('127.0.0.1');
 
   await act(async () => { session.selectWorkspace('wb'); });
   const [left, away] = TestSocket.instances.slice(-2);
   expect(left.close).toHaveBeenCalled();
-  expect(away.url).toContain('b.test');
+  expect(away.url).toContain('127.0.0.2');
   await act(async () => { away.open(); });
 
   requests.length = 0;
   await act(async () => { session.selectWorkspace('wa'); });
   const back = TestSocket.instances.at(-1)!;
   expect(away.close).toHaveBeenCalled();
-  expect(back.url).toContain('a.test');
+  expect(back.url).toContain('127.0.0.1');
   await act(async () => { back.open(); });
   expect(session.activeConversation?.id).toBe('ca');
-  expect(historyRequests('a.test', 'v2-ca').length).toBeGreaterThan(0);
-  expect(historyRequests('b.test', 'v2-ca')).toHaveLength(0);
+  expect(historyRequests('127.0.0.1', 'v2-ca').length).toBeGreaterThan(0);
+  expect(historyRequests('127.0.0.2', 'v2-ca')).toHaveLength(0);
 });
 
 it('keeps backend conversations whose history is not loaded out of the unused-conversation sweep', async () => {

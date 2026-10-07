@@ -153,7 +153,11 @@ docker buildx build \
 
 ## Device verification
 
-Enter your Backend address, request device verification, then compare the full code in the Backend TUI (`d`) and approve with `a` or reject with `r`. Approval saves the token for that Backend. Encryption public keys still require QR or manual import. See [device verification](docs/device-verification.md) for expiry, compatibility, and credential handling.
+Import the Backend's pairing QR code (it carries the address and pins the transport public key), request device verification, then compare the full code in the Backend TUI (`d`) and approve with `a` or reject with `r`. Approval enrolls this browser's signing key. Pairing uses v3 (commit, then reveal). See [device verification](docs/device-verification.md) for expiry and credential handling.
+
+## Transport encryption
+
+With a pinned key the client always uses transport v2, loopback included: the WebSocket uses `tv=2` binary frames and every REST request goes through the `POST /v2/sealed` tunnel; only `/health`, `/v2/transport-policy` and device verification are called directly. Without a pinned key only a loopback Backend can be reached (in plaintext); a remote address is refused with a prompt to pair with encryption, and a changed Backend protocol asks for re-pairing instead of downgrading. See [device verification](docs/device-verification.md#传输加密transport-v2).
 
 ## Browser data and credentials
 

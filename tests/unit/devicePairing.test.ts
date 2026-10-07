@@ -16,15 +16,17 @@ vi.mock('@noble/curves/ed25519.js', async importOriginal => {
 });
 
 const id = '11111111-2222-4333-8444-555555555555';
-const domain = 'todex.device-pairing.v2/';
+const domain = 'todex.device-pairing.v3/';
 const utf8 = (text: string) => new TextEncoder().encode(text);
 const encode = (bytes: Uint8Array) => Buffer.from(bytes).toString('base64url');
+const lp = (bytes: Uint8Array) => { const out = Buffer.alloc(4 + bytes.length); out.writeUInt32BE(bytes.length); out.set(bytes, 4); return out; };
 const serverSecret = new Uint8Array(32).fill(9);
 const serverPublic = x25519.getPublicKey(serverSecret);
 const device = deviceIdentityFromSecret('FRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRU')!;
 const devicePublic = Buffer.from(device.publicKey, 'base64url');
 const startTime = 1_800_000_000_000;
 let now: number;
+let commitment: string;
 let clientPublic: Uint8Array;
 let pollProof: string;
 let cancelProof: string;
@@ -37,13 +39,26 @@ function response(value: unknown, status = 200) {
   return new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } });
 }
 
+/** `create` only sees the commitment; the server learns the key at `reveal`. */
 function createResponse(body: string) {
   const request = JSON.parse(body);
-  clientPublic = new Uint8Array(Buffer.from(request.clientPublicKey, 'base64url'));
+  expect(request.clientPublicKey).toBeUndefined();
   expect(request.devicePublicKey).toBe(device.publicKey);
+  commitment = request.clientCommitment;
+  return response({ requestId: id, serverPublicKey: encode(serverPublic), expiresAt: startTime + 300_000, pollIntervalMs: 1000 });
+}
+
+function revealResponse(body: string) {
+  const request = JSON.parse(body);
+  expect(request.requestId).toBe(id);
+  clientPublic = new Uint8Array(Buffer.from(request.clientPublicKey, 'base64url'));
+  const clientNonce = new Uint8Array(Buffer.from(request.clientNonce, 'base64url'));
+  expect(clientNonce).toHaveLength(32);
+  // The server checks the commitment before deriving anything.
+  expect(encode(sha256(Buffer.concat([lp(utf8(`${domain}commit`)), clientPublic, clientNonce])))).toBe(commitment);
   transcript = new Uint8Array(Buffer.concat([
     Buffer.from(`${domain}transcript\0${id}\0`), clientPublic, serverPublic,
-    Buffer.from([0]), devicePublic,
+    Buffer.from([0]), devicePublic, clientNonce,
   ]));
   const salt = sha256(transcript);
   const secret = x25519.getSharedSecret(serverSecret, clientPublic);
@@ -55,7 +70,7 @@ function createResponse(body: string) {
     status: 'approved', expiresAt: startTime + 300_000, nonce: encode(nonce),
     ciphertext: encode(xchacha20poly1305(wrapKey, nonce, transcript).encrypt(utf8(JSON.stringify({ deviceId: device.deviceId })))),
   };
-  return response({ requestId: id, serverPublicKey: encode(serverPublic), expiresAt: startTime + 300_000, pollIntervalMs: 1000 });
+  return response({ status: 'pending' });
 }
 
 beforeEach(() => {
@@ -64,6 +79,7 @@ beforeEach(() => {
   fetchMock = vi.fn<typeof fetch>().mockImplementation(async (input, init) => {
     const path = new URL(String(input)).pathname;
     if (path.endsWith('/create')) return createResponse(String(init?.body));
+    if (path.endsWith('/reveal')) return revealResponse(String(init?.body));
     if (path.endsWith('/cancel')) return response({ status: 'cancelled' });
     return response({ status: 'pending', expiresAt: startTime + 300_000 });
   });
@@ -79,7 +95,10 @@ it('computes its own verification code and decrypts the approved device id once'
   fetchMock.mockResolvedValueOnce(response(approved));
   expect(await request.poll()).toEqual({ status: 'approved', deviceId: device.deviceId });
   expect(await request.poll()).toEqual({ status: 'expired' });
-  expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).toEqual({ requestId: id, proof: pollProof });
+  expect(fetchMock.mock.calls.map(([input]) => new URL(String(input)).pathname)).toEqual([
+    '/v2/device-pairing/create', '/v2/device-pairing/reveal', '/v2/device-pairing/poll', '/v2/device-pairing/poll',
+  ]);
+  expect(JSON.parse(String(fetchMock.mock.calls[2][1]?.body))).toEqual({ requestId: id, proof: pollProof });
   for (const [, init] of fetchMock.mock.calls) {
     expect(init).toMatchObject({ credentials: 'omit', redirect: 'error', cache: 'no-store' });
     expect(JSON.stringify(init)).not.toContain(device.secretKey);
@@ -100,7 +119,7 @@ it('binds cancellation to a separate proof and discards an in-flight approval af
   const pending = request.poll();
   await request.cancel();
   expect(cancelProof).not.toBe(pollProof);
-  expect(JSON.parse(String(fetchMock.mock.calls[2][1]?.body))).toEqual({ requestId: id, proof: cancelProof });
+  expect(JSON.parse(String(fetchMock.mock.calls[3][1]?.body))).toEqual({ requestId: id, proof: cancelProof });
   resolve(response(approved));
   expect(await pending).toEqual({ status: 'expired' });
 });
@@ -153,33 +172,49 @@ it('limits unauthenticated response size', async () => {
   await expect(beginDevicePairing('http://localhost', 'Web', device)).rejects.toThrow('响应过大');
 });
 
-it('matches the Rust-generated fixed transcript, proofs, verification code, and encrypted device id', async () => {
-  const fixture = JSON.parse(readFileSync(new URL('../fixtures/device-pairing-v2.json', import.meta.url), 'utf8'));
-  const fixtureDevice = deviceIdentityFromSecret(fixture.deviceSecret)!;
-  vi.spyOn(x25519, 'keygen').mockReturnValue({
-    secretKey: new Uint8Array(Buffer.from(fixture.clientSecret, 'base64url')),
-    publicKey: new Uint8Array(Buffer.from(fixture.clientPublicKey, 'base64url')),
+it('rejects a reveal the server does not accept, before showing a code', async () => {
+  fetchMock.mockImplementation(async (input, init) => {
+    const path = new URL(String(input)).pathname;
+    if (path.endsWith('/create')) return createResponse(String(init?.body));
+    return response({ code: 'CONFLICT' }, 409);
   });
-  fetchMock.mockResolvedValueOnce(response({
-    requestId: fixture.requestId, serverPublicKey: fixture.serverPublicKey,
-    expiresAt: fixture.expiresAt, pollIntervalMs: 1000,
-  }));
+  await expect(beginDevicePairing('http://localhost', 'Web', device)).rejects.toThrow('409');
+});
+
+it('matches the shared pairing v3 vector (commitment, code, proofs) and decrypts its approval', async () => {
+  const fixture = JSON.parse(readFileSync(new URL('../../../TodeX_protocol/tests/fixtures/transport-v2.json', import.meta.url), 'utf8')).pairingV3;
+  const hex = (value: string) => new Uint8Array(Buffer.from(value, 'hex'));
+  const b64 = (value: string) => Buffer.from(value, 'hex').toString('base64url');
+  const fixtureDevice = deviceIdentityFromSecret(b64(fixture.deviceSeed))!;
+  expect(fixtureDevice.publicKey).toBe(b64(fixture.devicePublicKey));
+  const freshKeys = () => ({ secretKey: hex(fixture.clientSecretKey), publicKey: hex(fixture.clientPublicKey) });
+  vi.spyOn(x25519, 'keygen').mockImplementation(freshKeys);
+  // Only the pairing nonce is fixed; noble's own blinding keeps real randomness.
+  const random = vi.spyOn(globalThis.crypto, 'getRandomValues');
+  const fixedNonce = <T extends ArrayBufferView | null>(array: T) => {
+    (array as unknown as Uint8Array).set(hex(fixture.clientNonce));
+    return array;
+  };
+  random.mockImplementationOnce(fixedNonce);
+  const created = { requestId: fixture.requestId, serverPublicKey: b64(fixture.serverPublicKey), expiresAt: startTime + 300_000, pollIntervalMs: 1000 };
+  fetchMock.mockResolvedValueOnce(response(created)).mockResolvedValueOnce(response({ status: 'pending' }));
   const request = await beginDevicePairing('http://localhost', 'Interop test', fixtureDevice);
   expect(request.verificationCode).toBe(fixture.verificationCode);
   const createBody = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
-  expect(createBody.clientPublicKey).toBe(fixture.clientPublicKey);
-  expect(createBody.devicePublicKey).toBe(fixture.devicePublicKey);
-  fetchMock.mockResolvedValueOnce(response({ status: 'approved', expiresAt: fixture.expiresAt, nonce: fixture.nonce, ciphertext: fixture.ciphertext }));
-  expect(await request.poll()).toEqual({ status: 'approved', deviceId: fixture.deviceId });
-  expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).proof).toBe(fixture.pollProof);
-
-  // Generate a fresh private key copy: the helper wipes the first key after deriving.
-  vi.mocked(x25519.keygen).mockReturnValue({
-    secretKey: new Uint8Array(Buffer.from(fixture.clientSecret, 'base64url')),
-    publicKey: new Uint8Array(Buffer.from(fixture.clientPublicKey, 'base64url')),
+  expect(createBody).toMatchObject({ clientCommitment: fixture.commitmentBase64Url, devicePublicKey: b64(fixture.devicePublicKey) });
+  expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).toEqual({
+    requestId: fixture.requestId, clientPublicKey: b64(fixture.clientPublicKey), clientNonce: b64(fixture.clientNonce),
   });
-  fetchMock.mockResolvedValueOnce(response({ requestId: fixture.requestId, serverPublicKey: fixture.serverPublicKey, expiresAt: fixture.expiresAt }));
+  const nonce = new Uint8Array(24).fill(7);
+  const ciphertext = xchacha20poly1305(hex(fixture.wrapKey), nonce, hex(fixture.transcript))
+    .encrypt(utf8(JSON.stringify({ deviceId: fixtureDevice.deviceId })));
+  fetchMock.mockResolvedValueOnce(response({ status: 'approved', nonce: encode(nonce), ciphertext: encode(ciphertext) }));
+  expect(await request.poll()).toEqual({ status: 'approved', deviceId: fixtureDevice.deviceId });
+  expect(JSON.parse(String(fetchMock.mock.calls[2][1]?.body)).proof).toBe(b64(fixture.pollProof));
+
+  random.mockImplementationOnce(fixedNonce);
+  fetchMock.mockResolvedValueOnce(response(created)).mockResolvedValueOnce(response({ status: 'pending' }));
   const cancelled = await beginDevicePairing('http://localhost', 'Interop cancellation', fixtureDevice);
   await cancelled.cancel();
-  expect(JSON.parse(String(fetchMock.mock.calls.at(-1)?.[1]?.body)).proof).toBe(fixture.cancelProof);
+  expect(JSON.parse(String(fetchMock.mock.calls.at(-1)?.[1]?.body)).proof).toBe(b64(fixture.cancelProof));
 });

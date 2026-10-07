@@ -12,20 +12,17 @@ vi.mock('../../src/renderer/lib/storage', () => ({
   loadJson: vi.fn(), loadSecret: vi.fn().mockResolvedValue(''),
   saveJson: vi.fn().mockResolvedValue(undefined), saveSecret: vi.fn().mockResolvedValue(undefined),
 }));
-vi.mock('../../src/renderer/session/transportVerification', () => ({
-  ENCRYPTION_VERIFICATION_ERROR: 'verification failed',
-  validateTransportEncryption: vi.fn().mockResolvedValue(undefined), verifyEncryptedSocket: vi.fn().mockResolvedValue(undefined),
+// Loopback profiles without a pinned key: plaintext, policy check skipped.
+vi.mock('@todex/protocol/secureTransport', async importOriginal => ({
+  ...await importOriginal<typeof import('@todex/protocol/secureTransport')>(), verifyTransportPolicy: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock('@todex/protocol/connectionProbe', async importOriginal => ({
   ...await importOriginal<typeof import('@todex/protocol/connectionProbe')>(),
   probeBackendConnection: vi.fn(async () => ({ ok: true, error: null, providers: [], version: null })),
 }));
-vi.mock('@todex/protocol/transportCrypto', async importOriginal => ({
-  ...await importOriginal<typeof import('@todex/protocol/transportCrypto')>(), createTransportCryptoSession: vi.fn(() => null),
-}));
 
 const HIGH_WATER = 600;
-const profile = { id: 'a', name: 'a', serverUrl: 'http://a.test', tenantId: 'local', encryptionProtocol: 'none', createdAt: 1, updatedAt: 1 };
+const profile = { id: 'a', name: 'a', serverUrl: 'http://127.0.0.1', tenantId: 'local', encryptionProtocol: 'none', createdAt: 1, updatedAt: 1 };
 const workspace = { id: 'wa', name: 'wa', path: '/wa', tenantId: 'local', model: '',
   approvalPolicy: 'on-request', sandboxMode: 'workspace-write', createdAt: 1, updatedAt: 1, backendConnectionId: 'a' };
 const conversation = (id: string) => ({ id, workspaceId: 'wa', title: id, sessionId: `v2_${id}`, threadId: '',
@@ -52,7 +49,7 @@ beforeEach(() => {
   vi.stubGlobal('WebSocket', class { readyState = 0; send = vi.fn(); close = vi.fn(); });
   for (const kind of ['warning', 'danger', 'info'] as const) vi.spyOn(toast, kind).mockReturnValue(`toast-${kind}`);
   vi.mocked(loadJson).mockImplementation(async (key, fallback) => ({
-    [SETTINGS_STORAGE_KEY]: { ...defaultSettings, serverUrl: 'http://a.test' },
+    [SETTINGS_STORAGE_KEY]: { ...defaultSettings, serverUrl: 'http://127.0.0.1' },
     [BACKEND_CONNECTIONS_STORAGE_KEY]: [profile],
     [WORKSPACES_STORAGE_KEY]: [workspace],
     [CONVERSATIONS_STORAGE_KEY]: [conversation('ca'), conversation('cb')],

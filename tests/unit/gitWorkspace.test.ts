@@ -29,9 +29,9 @@ it('posts the operation as structured JSON with the workspace and no shell inter
   const [url, options] = fetcher.mock.calls[0] as unknown as [string, RequestInit];
   expect(new URL(url).pathname).toBe('/v2/git/operation');
   expect(options.method).toBe('POST');
-  expect(options.headers).toMatchObject({ 'x-todex-device-id': device.deviceId, 'Content-Type': 'application/json' });
+  expect(options.headers).toMatchObject({ 'x-todex-device-id': device.deviceId, 'content-type': 'application/json' });
   expect((options.headers as Record<string, string>)['x-todex-auth-sig']).toBeTruthy();
-  expect(JSON.parse(options.body as string)).toEqual({ workspacePath: '/test', operation });
+  expect(JSON.parse(new TextDecoder().decode(options.body as Uint8Array))).toEqual({ workspacePath: '/test', operation });
 });
 
 it.each(['GIT_PARTIAL_SUCCESS', 'GIT_COMMAND_TIMED_OUT'])('preserves uncertain backend error %s and never retries', async code => {

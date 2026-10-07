@@ -106,6 +106,12 @@ docker buildx build \
 
 公开部署应在可信反向代理终止 TLS。HTTPS 页面连接非 loopback Backend 时必须使用 HTTPS/WSS；Backend 还需允许站点来源的 CORS，并按网络位置配置浏览器 Private Network Access。
 
+## 设备验证与传输加密
+
+先导入 Backend 配对二维码（携带地址并固定传输公钥），再申请设备验证，在 Backend TUI（`d`）核对完整验证码后按 `a` 批准或 `r` 拒绝；批准即登记此浏览器的签名密钥。设备验证使用配对 v3（先承诺后揭示）。
+
+固定了公钥时客户端一律走 transport v2，回环地址也一样：WebSocket 使用 `tv=2` 二进制帧，所有 REST 请求经 `POST /v2/sealed` 隧道；只有 `/health`、`/v2/transport-policy` 与设备验证直接请求。未固定公钥时只能以明文连接回环地址上的 Backend；连接远程地址会被拒绝并提示加密配对，Backend 改变加密方式时提示重新配对而不是降级。详见[设备验证](docs/device-verification.md)。
+
 ## 浏览器数据与凭据
 
 连接配置、Backend token、工作区选择、布局偏好、事件 cursor 和有限缓存保存在浏览器 `localStorage` 的 `todex.web.*` 命名空间中。设备签名密钥则用不可导出的 AES-GCM 密钥加密后存入 IndexedDB（旧版本留下的明文会在读取时迁移并删除）；这需要安全上下文（HTTPS 或 localhost），纯 HTTP 页面无法保存新的设备密钥。隔离边界是网站 origin 与浏览器配置文件，而不是 TodeX 账户。

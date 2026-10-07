@@ -12,16 +12,13 @@ vi.mock('../../src/renderer/lib/storage', () => ({
   loadJson: vi.fn(), loadSecret: vi.fn().mockResolvedValue(''),
   saveJson: vi.fn().mockResolvedValue(undefined), saveSecret: vi.fn().mockResolvedValue(undefined),
 }));
-vi.mock('../../src/renderer/session/transportVerification', () => ({
-  ENCRYPTION_VERIFICATION_ERROR: 'verification failed',
-  validateTransportEncryption: vi.fn().mockResolvedValue(undefined), verifyEncryptedSocket: vi.fn().mockResolvedValue(undefined),
+// Loopback profiles without a pinned key: plaintext, policy check skipped.
+vi.mock('@todex/protocol/secureTransport', async importOriginal => ({
+  ...await importOriginal<typeof import('@todex/protocol/secureTransport')>(), verifyTransportPolicy: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock('@todex/protocol/connectionProbe', async importOriginal => ({
   ...await importOriginal<typeof import('@todex/protocol/connectionProbe')>(),
   probeBackendConnection: vi.fn(async () => ({ ok: true, error: null, providers: [provider], version: null })),
-}));
-vi.mock('@todex/protocol/transportCrypto', async importOriginal => ({
-  ...await importOriginal<typeof import('@todex/protocol/transportCrypto')>(), createTransportCryptoSession: vi.fn(() => null),
 }));
 
 const provider = { id: 'pi', displayName: 'Pi', available: true, profiles: [], models: [], capabilities: {
@@ -43,9 +40,9 @@ class TestSocket {
   onopen: (() => unknown) | null = null;
   onmessage: ((event: { data: string }) => unknown) | null = null;
   onerror: (() => unknown) | null = null;
-  onclose: (() => unknown) | null = null;
+  onclose: ((event: { code: number; reason: string }) => unknown) | null = null;
   send = vi.fn();
-  close = vi.fn(() => { this.readyState = 3; this.onclose?.(); });
+  close = vi.fn(() => { this.readyState = 3; this.onclose?.({ code: 1000, reason: '' }); });
   constructor(public url: string) { TestSocket.instances.push(this); }
   open() { this.readyState = 1; void this.onopen?.(); }
 }
@@ -63,7 +60,7 @@ beforeEach(() => {
   vi.stubGlobal('WebSocket', TestSocket);
   for (const kind of ['warning', 'danger', 'info'] as const) vi.spyOn(toast, kind).mockReturnValue(`toast-${kind}`);
   vi.mocked(loadJson).mockImplementation(async (key, fallback) => ({
-    [SETTINGS_STORAGE_KEY]: { ...defaultSettings, serverUrl: 'http://backend.test' },
+    [SETTINGS_STORAGE_KEY]: { ...defaultSettings, serverUrl: 'http://127.0.0.3' },
     [WORKSPACES_STORAGE_KEY]: [workspace], [CONVERSATIONS_STORAGE_KEY]: [conversation],
     [ACTIVE_SELECTION_STORAGE_KEY]: { workspaceId: 'w', conversationId: 'c' },
   }[key] ?? fallback) as never);

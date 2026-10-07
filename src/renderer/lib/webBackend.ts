@@ -1,5 +1,5 @@
-import { buildHttpUrl, type ConnectionSettings } from '@todex/protocol/todex';
-import { deviceAuthHeaders, deviceIdentityFromSecret } from '@todex/protocol/deviceAuth';
+import type { ConnectionSettings } from '@todex/protocol/todex';
+import { backendFetch } from '../session/helpers';
 
 export type WorkspaceTrust = {
   workspacePath: string;
@@ -7,18 +7,15 @@ export type WorkspaceTrust = {
   trustedAt?: string;
 };
 
-async function request<T>(settings: ConnectionSettings, path: string, init: RequestInit = {}): Promise<T> {
-  const headers = new Headers(init.headers);
-  headers.set('Accept', 'application/json');
-  if (init.body) headers.set('Content-Type', 'application/json');
-  const device = deviceIdentityFromSecret(settings.deviceSecret);
-  if (device) {
-    const body = typeof init.body === 'string' ? new TextEncoder().encode(init.body) : new Uint8Array();
-    for (const [name, value] of Object.entries(deviceAuthHeaders(device, init.method ?? 'GET', path, body))) {
-      headers.set(name, value);
-    }
-  }
-  const response = await fetch(buildHttpUrl(settings.serverUrl, path), { ...init, headers });
+async function request<T>(settings: ConnectionSettings, path: string, init: { method?: string; body?: string } = {}): Promise<T> {
+  const response = await backendFetch(settings, {
+    method: init.method ?? 'GET',
+    path,
+    headers: init.body
+      ? { accept: 'application/json', 'content-type': 'application/json' }
+      : { accept: 'application/json' },
+    body: init.body,
+  });
   const body = await response.json().catch(() => null) as Record<string, unknown> | null;
   if (!response.ok) {
     const message = typeof body?.message === 'string' ? body.message : `Backend request failed (${response.status})`;

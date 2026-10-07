@@ -18,9 +18,7 @@ import { latencyLabelOf, terminalIdForConversation, terminalStatusLabel, type Te
 import type { OpenPanelOptions, WorkbenchItem, WorkbenchRequest, WorkbenchTab } from '../lib/panels';
 import { prepareBrowserSnapshot } from '../lib/browserSnapshot';
 import { normalizeWorkbenchLayout } from '../session/workbenchLayout';
-import { SETTINGS_STORAGE_KEY, attachmentId, referenceToken, uniqueReferenceName } from '../session/helpers';
-import { V2ApiClient } from '@todex/protocol/v2';
-import { deviceIdentityFromSecret } from '@todex/protocol/deviceAuth';
+import { SETTINGS_STORAGE_KEY, attachmentId, backendApi, referenceToken, uniqueReferenceName } from '../session/helpers';
 import { isConflictError } from '@todex/protocol/connectionError';
 import { isNotFoundError, type SshExecRun } from '@todex/protocol/ssh';
 import { t, useT, type MessageKey } from '../i18n';
@@ -115,7 +113,7 @@ function normalizeWorkbenchItem(item: WorkbenchItem): WorkbenchItem {
 }
 
 function v2Api(session: TodeXSession) {
-  return new V2ApiClient({ serverUrl: session.settings.serverUrl, device: deviceIdentityFromSecret(session.settings.deviceSecret) });
+  return backendApi(session.settings);
 }
 
 function placeholderFiles(): Record<string, { title: string; language: string; body: string }> {
@@ -264,7 +262,6 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
   }, []);
 
   useEffect(() => { onItemsChange?.(items); }, [items, onItemsChange]);
-
 
   const handledRequestRef = useRef(0);
   /** SSH tabs opened during this mount connect at once; restored ones wait for Connect. */
@@ -844,7 +841,7 @@ function BrowserPane({ workspacePath, session, target, onTargetChange }: { works
       setUrl(parsed.toString());
       setSrcDoc('');
       setError('');
-      const api = new V2ApiClient({ serverUrl: session.settings.serverUrl, device: deviceIdentityFromSecret(session.settings.deviceSecret) });
+      const api = backendApi(session.settings);
       const result = await api.fetchBrowser(parsed.toString());
       if (!result.contentType.toLowerCase().includes('text/html')) {
         throw new Error(t('workbench.cannotPreview', { contentType: result.contentType || t('workbench.nonHtml') }));
@@ -857,7 +854,7 @@ function BrowserPane({ workspacePath, session, target, onTargetChange }: { works
       setSrcDoc('');
       setError(reason instanceof Error ? reason.message : t('workbench.snapshotFailed'));
     }
-  }, [session.settings.deviceSecret, session.settings.serverUrl]);
+  }, [session.settings.deviceSecret, session.settings.encryptionProtocol, session.settings.encryptionPublicKey, session.settings.serverUrl]);
 
   useEffect(() => {
     if (target?.url) {
@@ -873,7 +870,7 @@ function BrowserPane({ workspacePath, session, target, onTargetChange }: { works
     setUrl('');
     setSrcDoc('');
     setError('');
-    const api = new V2ApiClient({ serverUrl: session.settings.serverUrl, device: deviceIdentityFromSecret(session.settings.deviceSecret) });
+    const api = backendApi(session.settings);
     void api.readWorkspaceFile(target.filePath)
       .then((file) => {
         if (!file.text) throw new Error(t('workbench.webFileNotText'));
@@ -1187,9 +1184,8 @@ function FilesPane({ session, target, onTargetChange, remote, onRemoteRebind }: 
   const t = useT();
   const targetChangeRef = useRef(onTargetChange);
   targetChangeRef.current = onTargetChange;
-  const serverUrl = session.settings.serverUrl;
-  const deviceSecret = session.settings.deviceSecret;
-  const api = useCallback(() => new V2ApiClient({ serverUrl, device: deviceIdentityFromSecret(deviceSecret) }), [deviceSecret, serverUrl]);
+  const { serverUrl, deviceSecret, encryptionProtocol, encryptionPublicKey } = session.settings;
+  const api = useCallback(() => backendApi({ serverUrl, deviceSecret, encryptionProtocol, encryptionPublicKey }), [deviceSecret, encryptionProtocol, encryptionPublicKey, serverUrl]);
   const workspacePath = session.activeWorkspace?.path || '';
   const source: FileSource = useMemo(
     () => (remote ? remoteFileSource(api, remote) : workspaceFileSource(api, workspacePath)),

@@ -1,43 +1,28 @@
-import { describe, expect, it } from 'vitest';
-import { x25519 } from '@noble/curves/ed25519.js';
-import { ml_kem768 } from '@noble/post-quantum/ml-kem.js';
+import { describe, expect, it, vi } from 'vitest';
 import { MAX_LEGACY_MESSAGE_BYTES } from '@todex/protocol/transport';
-import { createTransportCryptoSession, encodeBase64Url } from '@todex/protocol/transportCrypto';
-import { utf8ByteLength } from '@todex/protocol/todex';
-import { encodeOutboundFrame, encryptedFrameByteLength } from '../../src/renderer/session/helpers';
-
-function sessions() {
-  return [
-    createTransportCryptoSession({ encryptionProtocol: 'x25519', encryptionPublicKey: encodeBase64Url(x25519.keygen().publicKey) })!,
-    createTransportCryptoSession({ encryptionProtocol: 'ml-kem-768', encryptionPublicKey: encodeBase64Url(ml_kem768.keygen().publicKey) })!,
-  ];
-}
+import { TransportPayloadTooLargeError, assertWsPlaintextFits } from '@todex/protocol/secureChannel';
+import { ConnectionError } from '@todex/protocol/connectionError';
+import type { SecureSocket } from '@todex/protocol/secureTransport';
+import { sendSocketText } from '../../src/renderer/session/helpers';
 
 describe('outbound frame size', () => {
-  it('predicts the exact size of the encrypted envelope', () => {
-    for (const session of sessions()) {
-      for (const text of ['', 'a', 'ab', 'abc', '{"id":"x","type":"t","payload":{}}', '中文😀'.repeat(37)]) {
-        const wire = session.encryptClientText(text);
-        expect(encryptedFrameByteLength(utf8ByteLength(text), session.protocol)).toBe(utf8ByteLength(wire));
-      }
-    }
+  it('rejects an oversize frame before sealing, as a ConnectionError, without sending', () => {
+    const sent: string[] = [];
+    // Mirrors SecureSocket.send: the plaintext pre-check runs before sealing.
+    const socket = { send: (text: string) => { assertWsPlaintextFits(text); sent.push(text); } } as unknown as SecureSocket;
+    // Fits as plaintext but not once the 24-byte frame overhead is added.
+    const oversize = 'x'.repeat(MAX_LEGACY_MESSAGE_BYTES - 10);
+    expect(() => sendSocketText(socket, oversize)).toThrow(ConnectionError);
+    expect(sent).toHaveLength(0);
+    sendSocketText(socket, '{"ok":true}');
+    expect(sent).toEqual(['{"ok":true}']);
   });
 
-  it('rejects an oversize frame before encrypting, so the nonce counter stays in step', () => {
-    const [session] = sessions();
-    let encrypted = 0;
-    const counting = { ...session, encryptClientText: (text: string) => { encrypted += 1; return session.encryptClientText(text); } };
-    // Under the limit as plaintext, over it once base64url-encrypted.
-    const oversize = 'x'.repeat(MAX_LEGACY_MESSAGE_BYTES - 1024);
-    expect(() => encodeOutboundFrame(oversize, counting)).toThrow(/exceeds limit|消息过大/);
-    expect(encrypted).toBe(0);
-    expect(encodeOutboundFrame('{"ok":true}', counting)).toContain('todex.crypto.v1');
-    expect(encrypted).toBe(1);
-  });
-
-  it('passes plaintext frames through and still enforces the limit', () => {
-    expect(encodeOutboundFrame('{"ok":true}', null)).toBe('{"ok":true}');
-    expect(() => encodeOutboundFrame('x'.repeat(MAX_LEGACY_MESSAGE_BYTES + 1), null)).toThrow();
+  it('passes other send failures through unchanged', () => {
+    const failure = new Error('secure socket is not open');
+    const socket = { send: vi.fn(() => { throw failure; }) } as unknown as SecureSocket;
+    expect(() => sendSocketText(socket, '{}')).toThrow(failure);
+    expect(new TransportPayloadTooLargeError(2, 1)).toBeInstanceOf(Error);
   });
 });
 
