@@ -2,6 +2,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { x25519 } from '@noble/curves/ed25519.js';
 import {
+  MAX_REST_BODY_BYTES,
   RecordCipher,
   TRANSPORT_V2_DIRECTION_DOWN,
   TRANSPORT_V2_DIRECTION_UP,
@@ -19,7 +20,7 @@ import {
   TransportPolicyError,
   TransportRepairRequiredError,
 } from '@todex/protocol/secureTransport';
-import { ConnectionError } from '@todex/protocol/connectionError';
+import { ConnectionError, ConnectionErrorType } from '@todex/protocol/connectionError';
 import { SocketVerificationError } from '@todex/protocol/socketVerification';
 import { generateDeviceIdentity } from '@todex/protocol/deviceAuth';
 import { backendApi, backendFetch, backendTransport, describeTransportFailure } from '../../src/renderer/session/helpers';
@@ -127,4 +128,18 @@ it('maps every transport failure to a localized message and retry policy', () =>
   expect(describeTransportFailure(new SocketVerificationError(false))).toMatchObject({ retryable: false });
   expect(describeTransportFailure(new SocketVerificationError(true))).toMatchObject({ retryable: true });
   expect(describeTransportFailure(new Error('other'))).toBeNull();
+});
+
+it('refuses an over-limit REST body before sealing, with a localized error', async () => {
+  const fetchImpl = vi.fn();
+  vi.stubGlobal('fetch', fetchImpl);
+  const body = new Uint8Array(MAX_REST_BODY_BYTES + 1);
+  for (const profile of [pinned('http://10.0.0.5:7345'), unpaired('http://127.0.0.1:7345')]) {
+    const failure = await backendFetch(profile, { method: 'PUT', path: '/v2/remote/files', body }).catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(ConnectionError);
+    expect(failure).toMatchObject({ type: ConnectionErrorType.MESSAGE_TOO_LARGE, retryable: false, code: 'request_failed' });
+    expect((failure as Error).message).toContain('32 MiB');
+  }
+  expect(fetchImpl).not.toHaveBeenCalled();
+  expect(backendTransport(unpaired('http://127.0.0.1:7345'))).toBe(backendTransport(unpaired('http://127.0.0.1:7345')));
 });
