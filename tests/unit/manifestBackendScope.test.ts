@@ -33,3 +33,15 @@ it('attaches path-only manifests to the listing backend workspace', () => {
   expect(merged).toHaveLength(1);
   expect(merged[0].workspaceId).toBe('wa');
 });
+
+it('carries legacyPlaintext from manifests onto new and existing records', () => {
+  const legacy = { ...manifest('old', 'wa'), legacyPlaintext: true };
+  const [created] = mergeManifestConversations([], [legacy], [workspaceA], 'a');
+  expect(created.legacyPlaintext).toBe(true);
+  const [plain] = mergeManifestConversations([], [manifest('new', 'wa')], [workspaceA], 'a');
+  expect('legacyPlaintext' in plain).toBe(false);
+  // An already listed conversation picks the flag up on the next listing.
+  const current = [conversation('ca', 'wa')];
+  const [updated] = mergeManifestConversations(current, [{ ...manifest('ca', 'wa'), legacyPlaintext: true }], [workspaceA], 'a');
+  expect(updated.legacyPlaintext).toBe(true);
+});

@@ -6,7 +6,7 @@ import { NoticeToast } from '../components/NoticeToast';
 import { RiArrowDownDoubleLine, RiAttachment2, RiBarChartBoxLine, RiClipboardLine, RiCpuLine, RiGitBranchLine, RiListCheck2, RiShieldLine, RiStopCircleLine } from '@remixicon/react';
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { Dispatch, KeyboardEvent, SetStateAction } from 'react';
-import { Button, Label, ListBox, Popover, ScrollShadow, Select, Spinner, Tooltip, toast } from '@heroui/react';
+import { Alert, Button, Label, ListBox, Popover, ScrollShadow, Select, Spinner, Tooltip, toast } from '@heroui/react';
 import { ChainOfThought, ChatAttachment, ChatAttachmentGroup, ChatAttachmentInput, ChatMessage, HoverCard, PromptInput, TextShimmer } from '@heroui-pro/react';
 import { ChatMessageActions } from '@heroui-pro/react/chat-message-actions';
 import { ChatTool, type ToolPartState } from '@heroui-pro/react/chat-tool';
@@ -290,6 +290,8 @@ function AgentMessageActions({
   const conversation = session.conversations.find(item => item.id === conversationId);
   const provider = session.v2Providers.find(item => item.id === conversation?.provider);
   const canFork = provider?.capabilities.controlActions?.includes('fork') === true;
+  // Legacy plaintext history is read-only and can never be forked.
+  const readOnly = conversation?.legacyPlaintext === true;
   const records = entry.turnId ? session.usageRecords.filter(record =>
     (record.conversationId === conversationId || record.conversationId === conversation?.v2ConversationId)
     && record.turnId === entry.turnId) : [];
@@ -305,17 +307,19 @@ function AgentMessageActions({
       >
         <RiClipboardLine aria-hidden="true" />
       </ChatMessageActions.Copy>
-      <ChatMessage.Action
-        isIconOnly
-        size="sm"
-        variant="ghost"
-        aria-label={t('chat.forkConversation')}
-        tooltip={canFork ? t('chat.forkConversation') : t('chat.forkUnsupported')}
-        isDisabled={!canFork}
-        onPress={() => session.forkConversation(conversationId)}
-      >
-        <RiGitBranchLine aria-hidden="true" />
-      </ChatMessage.Action>
+      {readOnly ? null : (
+        <ChatMessage.Action
+          isIconOnly
+          size="sm"
+          variant="ghost"
+          aria-label={t('chat.forkConversation')}
+          tooltip={canFork ? t('chat.forkConversation') : t('chat.forkUnsupported')}
+          isDisabled={!canFork}
+          onPress={() => session.forkConversation(conversationId)}
+        >
+          <RiGitBranchLine aria-hidden="true" />
+        </ChatMessage.Action>
+      )}
       <HoverCard>
         <HoverCard.Trigger>
           <ChatMessage.Action isIconOnly size="sm" variant="ghost" aria-label={t('chat.replyStats')}>
@@ -945,6 +949,9 @@ export function ChatPanel({ session }: Props) {
   const thinking = session.thinkingConversations[conversation.id] === true;
   const submissionStatus = session.submissionStatusByConversation[conversation.id];
   const executionUnknown = submissionStatus === 'unknown';
+  // Legacy plaintext history (stored before history became end-to-end
+  // encrypted): viewable, exportable, archivable and deletable, nothing else.
+  const readOnly = conversation.legacyPlaintext === true;
   const runtime = session.conversationRuntimeById[conversation.id];
   const latestProcessGroupId = activeChatProcessId(items, runtime?.activeTurnId || session.turnIds[conversation.id]);
   // Once the agent has replied after its last steps, the live status moves
@@ -1193,7 +1200,7 @@ export function ChatPanel({ session }: Props) {
   };
 
   const submitComposer = () => {
-    if (executionUnknown || submissionStatus === 'sending') return;
+    if (readOnly || executionUnknown || submissionStatus === 'sending') return;
     if (hasBlockedImageAttachment) {
       toast.danger(t('chat.imageSendBlocked'), { description: imageInputSupport.reason });
       return;
@@ -1208,6 +1215,14 @@ export function ChatPanel({ session }: Props) {
       <div className="relative min-h-0 flex-1">
         <ScrollShadow ref={scrollRef} onScroll={updateScrollPosition} className="h-full px-5 py-5">
         <div ref={messagesRef} className="mx-auto flex max-w-2xl flex-col gap-3">
+          {readOnly ? (
+            <Alert status="warning">
+              <Alert.Indicator />
+              <Alert.Content>
+                <Alert.Description>{t('history.readOnlyBanner')}</Alert.Description>
+              </Alert.Content>
+            </Alert>
+          ) : null}
           {earlierHistoryStatus?.loading ? (
             <p className="text-muted flex items-center justify-center gap-2 py-2 text-xs" role="status">
               <Spinner size="sm" />
@@ -1263,7 +1278,7 @@ export function ChatPanel({ session }: Props) {
                 groupPendingCount={item.type === 'executionGroup'
                   ? item.entries.filter((entry) => entry.requestId && session.pendingRequests.some((request) => request.requestId === entry.requestId)).length
                   : 0}
-                request={item.type === 'entry'
+                request={item.type === 'entry' && !readOnly
                   ? session.pendingRequests.find((pendingItem) => !sessionPermissionIds.has(pendingItem.requestId) && pendingItem.requestId && (item.entry.requestId === pendingItem.requestId || item.entry.raw.includes(pendingItem.requestId)))
                   : undefined}
                 isActionable={item.type === 'entry' && actionableIncoming.has(item.entry.id)}
@@ -1339,7 +1354,7 @@ export function ChatPanel({ session }: Props) {
             onStopRuntime={providerDescriptor?.capabilities.runtimeStop ? () => { void session.stopProviderRuntime(conversation.id); } : undefined}
             isStopping={session.stoppingProviderRuntimes[conversation.id]}
             isConnected={session.connectionState === 'open'} /> : null}
-          {permissionRequests.map(request => <PermissionRequestCard
+          {readOnly ? null : permissionRequests.map(request => <PermissionRequestCard
             key={request.requestId}
             request={request}
             fallbackTitle={sessionPermissionIds.has(request.requestId) ? t('chat.piPluginRequest') : request.title || t('chat.permissionApproval')}
@@ -1440,7 +1455,7 @@ export function ChatPanel({ session }: Props) {
             automaticCompaction={agentProvider === 'codex'}
             onRecover={() => session.reconcilePendingSubmission(conversation.id)}
           />
-          {conversation.v2ConversationId ? <ConversationControls
+          {conversation.v2ConversationId && !readOnly ? <ConversationControls
             runtime={runtime}
             reportedError={session.lastError}
             running={thinking}
@@ -1465,7 +1480,7 @@ export function ChatPanel({ session }: Props) {
             description={imageInputSupport.reason} scope={conversation.id} />
           <ChatAttachmentInput
             accept={attachmentAccept}
-            disabled={executionUnknown || attachments.length >= MAX_COMPOSER_ATTACHMENTS}
+            disabled={readOnly || executionUnknown || attachments.length >= MAX_COMPOSER_ATTACHMENTS}
             multiple
             onFilesSelected={(files) => { void addBrowserFiles(files); }}
           >
@@ -1473,7 +1488,7 @@ export function ChatPanel({ session }: Props) {
               submissionStatus={submissionStatus}
               value={draft}
               status={submissionStatus === 'sending' ? 'submitted' : thinking ? 'streaming' : 'ready'}
-              isDisabled={executionUnknown}
+              isDisabled={readOnly || executionUnknown}
               onKeyDownCapture={(event) => {
                 if (event.key === 'Enter' && (isComposingRef.current || isImeCompositionKey(event))) {
                   event.stopPropagation();
@@ -1543,10 +1558,11 @@ export function ChatPanel({ session }: Props) {
                   <ReferenceComposer
                     ref={composerRef}
                     value={draft}
-                    isDisabled={executionUnknown}
-                    placeholder={imageInputSupport.supported
-                      ? t('chat.placeholderFull')
-                      : t('chat.placeholderText')}
+                    isDisabled={readOnly || executionUnknown}
+                    placeholder={readOnly ? t('history.readOnlyPlaceholder')
+                      : imageInputSupport.supported
+                        ? t('chat.placeholderFull')
+                        : t('chat.placeholderText')}
                     onChange={(value) => {
                       setSuggestionIndex(0);
                       session.setConversationChatDraft(conversation.id, value);
@@ -1579,7 +1595,7 @@ export function ChatPanel({ session }: Props) {
                       variant="secondary"
                       placeholder={t('chat.selectAgent')}
                       selectedKey={currentProvider || agentProvider || null}
-                      isDisabled={!canSwitchAgent}
+                      isDisabled={readOnly || !canSwitchAgent}
                       onSelectionChange={(key) => {
                         if (typeof key !== 'string' || !key || key === currentProvider) {
                           return;
@@ -1613,7 +1629,7 @@ export function ChatPanel({ session }: Props) {
                         className={`composer-control composer-model-control__trigger ${displayedReasoningEffort ? 'has-effort' : ''}`}
                         size="sm"
                         variant="secondary"
-                        isDisabled={providerModels.length === 0}
+                        isDisabled={readOnly || providerModels.length === 0}
                         aria-label={t('chat.selectModel')}
                         data-effort={displayedEffortLevel}
                       >
@@ -1652,7 +1668,7 @@ export function ChatPanel({ session }: Props) {
                       className="composer-control"
                       variant="secondary"
                       selectedKey={currentPermission}
-                      isDisabled={thinking || executionUnknown || !canChoosePermission || (fixedPermission && currentPermission !== null)}
+                      isDisabled={readOnly || thinking || executionUnknown || !canChoosePermission || (fixedPermission && currentPermission !== null)}
                       onSelectionChange={(key) => {
                         if (typeof key === 'string' && permissionModes.includes(key as PermissionMode)) {
                           void session.applyConversationPermissionMode(conversation.id, key as PermissionMode);
@@ -1679,7 +1695,7 @@ export function ChatPanel({ session }: Props) {
                       className="composer-control"
                       variant="secondary"
                       selectedKey={conversation.mode === 'plan' ? 'plan' : 'implement'}
-                      isDisabled={thinking || executionUnknown}
+                      isDisabled={readOnly || thinking || executionUnknown}
                       onSelectionChange={(key) => {
                         if (key === 'plan' || key === 'implement') {
                           void session.applyConversationWorkMode(conversation.id, key);
@@ -1725,7 +1741,7 @@ export function ChatPanel({ session }: Props) {
                       cachedInputTokens={contextUsage?.cachedInputTokens ?? 0}
                       cacheWriteTokens={contextUsage?.cacheWriteTokens ?? 0}
                     />
-                    {thinking ? (
+                    {thinking && !readOnly ? (
                       <Button variant="danger-soft" onPress={() => session.stopThinking(conversation.id)}>
                         <RiStopCircleLine className="size-4" />
                         {t('chat.stop')}
