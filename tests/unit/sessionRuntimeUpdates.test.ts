@@ -214,6 +214,32 @@ it('drops a socket backlog the renderer cannot drain and reconnects', async () =
   expect(TestSocket.instances.length).toBeGreaterThan(1);
 });
 
+it('backs off further on repeated backlog drops even though each reconnect succeeds', async () => {
+  vi.spyOn(Math, 'random').mockReturnValue(0);
+  const flood = async (socket: TestSocket) => {
+    await act(async () => {
+      for (let index = 0; index <= MAX_PENDING_SOCKET_FRAMES; index++) {
+        socket.onmessage?.({ data: JSON.stringify({ type: 'server.result', id: `r${index}`, payload: {} }) });
+      }
+    });
+    expect(socket.close).toHaveBeenCalled();
+  };
+  await flood(await mount());
+  const before = TestSocket.instances.length;
+  // First drop: attempt 0, 1 s with zero jitter.
+  await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+  expect(TestSocket.instances).toHaveLength(before + 1);
+  const second = TestSocket.instances.at(-1)!;
+  await act(async () => { second.open(); await vi.advanceTimersByTimeAsync(200); });
+  expect(session.connectionState).toBe('open');
+  await flood(second);
+  // Verified in between, yet the second drop waits attempt 1 (2 s), not 1 s.
+  await act(async () => { await vi.advanceTimersByTimeAsync(1_500); });
+  expect(TestSocket.instances).toHaveLength(before + 1);
+  await act(async () => { await vi.advanceTimersByTimeAsync(600); });
+  expect(TestSocket.instances).toHaveLength(before + 2);
+});
+
 it('never starts the legacy Codex adapter for v2 conversations', async () => {
   const socket = await mount();
   await act(async () => { await vi.advanceTimersByTimeAsync(20_000); });
