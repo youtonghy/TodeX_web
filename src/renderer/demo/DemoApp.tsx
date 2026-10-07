@@ -9,6 +9,7 @@ import { Field } from '../components/Field';
 import { GitStatusDisplay } from '../components/GitStatusIndicator';
 import { ProviderIcon } from '../components/ProviderIcon';
 import { ChatPanel } from '../screens/ChatPanel';
+import { KanbanPanel } from '../screens/KanbanPanel';
 import { WorkbenchPanel } from '../screens/WorkbenchPanel';
 import type { WorkbenchTab } from '../lib/panels';
 import type { TodeXSession } from '../session/useTodeXSession';
@@ -60,9 +61,11 @@ function targetPoint(target: DemoTarget): { x: number; y: number } | null {
   return { x, y: target === 'workspace-name' ? rect.bottom - 18 : rect.top + rect.height / 2 };
 }
 
-/** Drives the scripted walkthrough, pausing while the host page hides the frame. */
-function useDemoPlayback(setState: Dispatch<SetStateAction<DemoState>>, setCursor: Dispatch<SetStateAction<CursorState>>, sidebarRef: RefObject<SidebarControl | null>) {
+/** Drives the scripted walkthrough, pausing while the host page hides the
+ * frame. `paused` skips it entirely for static previews like /demo?kanban. */
+function useDemoPlayback(setState: Dispatch<SetStateAction<DemoState>>, setCursor: Dispatch<SetStateAction<CursorState>>, sidebarRef: RefObject<SidebarControl | null>, paused: boolean) {
   useEffect(() => {
+    if (paused) return;
     const controller = new AbortController();
     // Reduced motion renders the finished walkthrough once, without the pointer.
     const instant = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -132,7 +135,7 @@ function useDemoPlayback(setState: Dispatch<SetStateAction<DemoState>>, setCurso
       controller.abort();
       window.removeEventListener('message', onMessage);
     };
-  }, [setCursor, setState, sidebarRef]);
+  }, [paused, setCursor, setState, sidebarRef]);
 }
 
 function diffStats(diff: string) {
@@ -225,9 +228,11 @@ export function DemoApp() {
   const [backend] = useState(() => demoBackend(Date.now()));
   const [cursor, setCursor] = useState<CursorState>({ x: -40, y: -40, visible: false, pressed: false });
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const session = useMemo(() => buildDemoSession(state, backend), [state, backend]);
+  // /demo?kanban renders the task board instead of the scripted walkthrough.
+  const kanbanPreview = useMemo(() => new URLSearchParams(window.location.search).has('kanban'), []);
+  const session = useMemo(() => buildDemoSession(state, backend, setState), [state, backend]);
   const sidebarRef = useRef<SidebarControl | null>(null);
-  useDemoPlayback(setState, setCursor, sidebarRef);
+  useDemoPlayback(setState, setCursor, sidebarRef, kanbanPreview);
   const changeWorkbenchTab = useCallback((tab: WorkbenchTab) => setState((current) => current.workbenchTab === tab ? current : { ...current, workbenchTab: tab }), []);
   const scopeKey = state.activeConversationId || state.activeWorkspaceId;
 
@@ -294,10 +299,10 @@ export function DemoApp() {
           </Navbar>
         }
       >
-        <ChatPanel session={session} />
+        {kanbanPreview ? <KanbanPanel session={session} onOpenConversation={noop} /> : <ChatPanel session={session} />}
       </AppLayout>
       <DemoWorkspaceModal modal={state.modal} backend={backend} />
-      <DemoCursor {...cursor} />
+      {kanbanPreview ? null : <DemoCursor {...cursor} />}
     </div>
   );
 }

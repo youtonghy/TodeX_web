@@ -1,8 +1,9 @@
+import type { Dispatch, SetStateAction } from 'react';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { defaultConnectionHealth } from '../session/helpers';
 import type { CodexModelCatalogItem } from '@todex/protocol/todex';
-import { DEMO_PROVIDERS, DEMO_SETTINGS, demoBackend } from './demoData';
-import type { DemoState } from './demoState';
+import { DEMO_PROVIDERS, DEMO_SETTINGS, demoBackend, demoConversation } from './demoData';
+import { setDemoDraft, type DemoState } from './demoState';
 
 // The demo is watched, not operated: the iframe ignores pointer input, so
 // every command is an inert stub. Module-level constants keep their identity
@@ -26,8 +27,14 @@ const connectionHealth = { ...defaultConnectionHealth, status: 'online' as const
 const providerModels = Object.fromEntries(DEMO_PROVIDERS.map((provider) => [provider.id, provider.models]));
 
 /** Projects the animated demo state onto the session surface the real
- * sidebar, chat and workbench panels read. */
-export function buildDemoSession(state: DemoState, backend: ReturnType<typeof demoBackend>): TodeXSession {
+ * sidebar, chat and workbench panels read. `setState` powers the few
+ * interactive commands (navigation, drafts, task-board links) so previews
+ * like /demo?kanban respond to clicks instead of being fully inert. */
+export function buildDemoSession(
+  state: DemoState,
+  backend: ReturnType<typeof demoBackend>,
+  setState?: Dispatch<SetStateAction<DemoState>>,
+): TodeXSession {
   const activeWorkspace = state.workspaces.find((item) => item.id === state.activeWorkspaceId) ?? null;
   const activeConversation = state.conversations.find((item) => item.id === state.activeConversationId) ?? null;
   const session = {
@@ -99,16 +106,46 @@ export function buildDemoSession(state: DemoState, backend: ReturnType<typeof de
     sendSlashCommand: noop,
     submitChat: noop,
     stopThinking: noop,
-    setConversationChatDraft: noop,
+    setConversationChatDraft: (conversationId: string, value: SetStateAction<string>) => setState?.((current) => setDemoDraft(
+      current,
+      conversationId,
+      typeof value === 'function' ? value(current.chatDrafts[conversationId] ?? '') : value,
+    )),
     setConversationAttachments: noop,
     setConversationComposerSelection: noop,
     setConversationSelectedSkills: noop,
     openPanel: noop,
-    selectWorkspace: noop,
-    selectConversation: noop,
+    selectWorkspace: (workspaceId: string) => setState?.((current) => ({
+      ...current,
+      activeWorkspaceId: workspaceId,
+      activeConversationId: current.conversations.find((item) => item.workspaceId === workspaceId)?.id ?? '',
+    })),
+    selectConversation: (workspaceId: string, conversationId: string) => setState?.((current) => ({
+      ...current,
+      activeWorkspaceId: workspaceId,
+      activeConversationId: conversationId,
+    })),
     renameWorkspace: noop,
     removeWorkspace: noop,
-    updateWorkspace: noop,
+    updateWorkspace: (id: string, patch: Record<string, unknown>) => setState?.((current) => ({
+      ...current,
+      workspaces: current.workspaces.map((item) => item.id === id ? { ...item, ...patch } : item),
+    })),
+    createConversation: (workspaceId: string, options?: { title?: string }) => {
+      const conversation = {
+        ...demoConversation(
+          `demo-conv-${Date.now().toString(36)}`,
+          workspaceId,
+          options?.title ?? '',
+          'codex',
+          Date.now(),
+        ),
+        permissionMode: undefined,
+        mode: 'implement' as const,
+      };
+      setState?.((current) => ({ ...current, conversations: [conversation, ...current.conversations] }));
+      return conversation;
+    },
     selectedGitRepoByWorkspace: {},
     renameConversation: noop,
     forkConversation: () => null,
