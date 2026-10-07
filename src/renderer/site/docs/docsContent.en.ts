@@ -114,9 +114,8 @@ Quitting the TUI leaves the daemon running in the background.
 ## 3. Connect a client
 
 - **Desktop** — install a package from the release page, open Settings, and
-  enter the backend URL (default \`http://127.0.0.1:7345\`). Complete device
-  verification, then import the encryption public key via QR code or pairing
-  JSON if post-quantum encryption is enabled.
+  enter only the backend URL (default \`http://127.0.0.1:7345\`). Complete
+  device verification, which also pins the backend's encryption key.
 - **Web** — open \`/app\` on a hosted TodeX site, or the page served by your
   own deployment, and point it at your backend the same way.
 
@@ -132,7 +131,7 @@ terminal, and Git state all stream over the same connection.
 | --- | --- |
 | Client can't reach the backend | \`todex-agentd daemon status\`; the port is 7345 by default |
 | \`401\` on every request | Device not approved — redo verification in the TUI |
-| WebSocket fails while REST works | Encryption mismatch — import the backend's public key |
+| WebSocket fails while REST works | Encryption mismatch — re-pair the device in Settings |
 | Agent shows unavailable | The provider CLI isn't installed or logged in on the host |
 `),
     },
@@ -192,8 +191,9 @@ signature, and devices can be revoked individually.
 | \`x25519\` | X25519 + ChaCha20-Poly1305 |
 | \`ml-kem-768\` | NIST post-quantum ML-KEM-768 (default for pairing) |
 
-Encryption keys are exchanged through pairing QR codes or JSON payloads —
-separately from device approval.
+The backend's encryption key is delivered and verified during device
+pairing: the verification code covers the key, so comparing the code also
+authenticates it.
 
 ## Tenants
 
@@ -307,9 +307,10 @@ todex-agentd daemon stop
 todex-agentd daemon autostart enable
 \`\`\`
 
-Quitting the TUI leaves the daemon running. Pairing QR codes render as solid
-terminal cells; press \`b\` in the QR popup to open a square SVG version in
-the browser when the code doesn't fit the terminal.
+Quitting the TUI leaves the daemon running. The pairing QR code carries only
+the server address and renders as solid terminal cells; press \`b\` in the QR
+popup to open a square SVG version in the browser when the code doesn't fit
+the terminal. The credentials popup shows the transport key fingerprint.
 `),
     },
 
@@ -387,16 +388,18 @@ explicitly approved, and every request is cryptographically signed.
 Each client device generates an Ed25519 key pair and requests enrollment. The
 flow is human-verified:
 
-1. The client shows a random verification code and waits.
+1. Enter only the backend URL. The client shows a random verification code
+   and the transport key fingerprint (\`XXXX-XXXX-XXXX-XXXX\`), then waits.
 2. In the backend TUI, press \`d\` to open the device panel and compare the
-   full code.
+   full code; the fingerprint is shown next to it.
 3. Press \`a\` to approve or \`r\` to reject. Approved devices appear in the
    same panel; \`x\` revokes the selected device.
 
 After approval, every HTTP request carries the device signature —
-unauthorized requests are rejected with \`401 Unauthorized\`. Device approval
-and transport encryption are separate: encryption public keys still require
-QR-code or manual import.
+unauthorized requests are rejected with \`401 Unauthorized\`. The code is
+computed over a transcript that includes the transport protocol and public
+key, so approval also authenticates the backend's encryption key: the client
+pins the device key, protocol, and public key in one step and connects.
 
 ## Transport encryption
 
@@ -406,9 +409,11 @@ QR-code or manual import.
 | \`x25519\` | X25519 + ChaCha20-Poly1305 | General remote access |
 | \`ml-kem-768\` | NIST post-quantum ML-KEM | Default for pairing |
 
-Keys are exchanged through pairing QR codes (including multi-frame ML-KEM
-segments rendered as solid terminal cells, or a browser-rendered SVG via the
-\`b\` key) or by importing a pairing JSON payload.
+Keys are delivered only through device pairing — there is no manual key
+import. Settings shows the pinned protocol, key fingerprint, and verified
+state. Profiles holding a key that was saved without pairing verification
+are refused on every host, loopback included, until they are re-paired.
+Plaintext \`none\` is allowed only on loopback.
 
 ## Workspace boundaries
 
@@ -531,8 +536,6 @@ is identical — the desktop app adds native integrations on top.
 ## Desktop-only extras
 
 - Native file and directory pickers for loopback workspaces.
-- **Drag & drop pairing** — drop a QR screenshot onto the window to decode
-  it locally (jsQR), or paste pairing JSON / segmented ML-KEM payloads.
 - Electron \`userData\` persistence, secure IPC via \`contextBridge\`
   (\`nodeIntegration: false\`), and per-build diagnostics logs.
 - Connection diagnostics that distinguish unreachable backends, bad URLs,
@@ -614,14 +617,11 @@ request is signed with the device's enrolled key.
 
 | Method | How |
 | --- | --- |
-| **Device verification** | Connect with host/port; the app shows a code — approve it in the backend TUI (\`d\`, then \`a\`) and the token is saved. |
-| **Drag & drop QR** | Drop a QR screenshot or image file onto the window; decoded locally with jsQR. Supports multi-frame ML-KEM segments. |
-| **Paste pairing JSON** | Paste a full pairing payload, including segmented QR text. |
-| **Manual** | Enter the backend URL and import the encryption public key by hand. |
+| **Device verification** | Enter the backend URL; the app shows a code and the transport key fingerprint — approve it in the backend TUI (\`d\`, then \`a\`); the encryption key is pinned and the app connects. |
 
-Device approval and encryption are separate steps — when pairing encryption
-is \`x25519\` or \`ml-kem-768\` the client still needs the backend's public
-key (QR or manual import) after the device is approved.
+Settings shows the pinned protocol, key fingerprint, and verified state.
+Use **Re-pair** to run verification again; changing the backend address
+clears the pinned key.
 
 ## Managing providers from the client
 
@@ -639,7 +639,7 @@ file contains keys in plain text, so handle it like a secret.
 | Invalid backend URL | URL can't be parsed | Use \`http://127.0.0.1:7345\` form |
 | Authentication failed | HTTP 401/403 | Re-run device verification |
 | Deprecated protocol | URL path contains \`/v1\` | Switch to \`/v2\` |
-| WebSocket failure | REST works, \`/v2/ws\` fails | Firewall, token, or crypto mismatch — re-import the key |
+| WebSocket failure | REST works, \`/v2/ws\` fails | Firewall, token, or crypto mismatch — re-pair the device |
 | Agent unavailable | Provider shows \`available = false\` | Install/authenticate the agent CLI on the backend host |
 `),
     },
@@ -719,9 +719,8 @@ approvals, and terminal sessions in your pocket.
 
 ## Planned
 
-- **Camera pairing** — scan the backend's QR code, including multi-frame
-  ML-KEM segments, or import a pairing JSON; device verification works like
-  the desktop flow.
+- **Camera pairing** — scan the backend's QR code to fill in its address,
+  then complete device verification exactly as on desktop.
 - **Chat + console** — a two-pane layout on wide screens: conversation
   timeline on one side, a workbench with terminal, files, browser preview,
   and Git on the other.
