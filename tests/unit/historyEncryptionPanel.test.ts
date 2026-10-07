@@ -5,6 +5,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { Toast, toast } from '@heroui/react';
 import type { HistoryEncryptionState } from '@todex/protocol/historyEncryption';
 import { HistoryEncryptionPanel } from '../../src/renderer/components/HistoryEncryptionPanel';
+import { HistoryRecoveryNotice } from '../../src/renderer/components/HistoryRecoveryNotice';
 import type { HistoryEncryptionSession, RecoveryKeyDraft } from '../../src/renderer/session/useHistoryEncryption';
 
 vi.hoisted(() => {
@@ -50,11 +51,11 @@ function session(state: Partial<HistoryEncryptionState> = {}, extra: Partial<His
   } as unknown as HistoryEncryptionSession;
 }
 
-async function render(history: HistoryEncryptionSession) {
+async function render(history: HistoryEncryptionSession, autoStartRecovery = false) {
   container = document.createElement('div');
   document.body.append(container);
   root = createRoot(container);
-  await act(async () => { root!.render(createElement(React.Fragment, null, createElement(HistoryEncryptionPanel, { history }), createElement(Toast.Provider))); });
+  await act(async () => { root!.render(createElement(React.Fragment, null, createElement(HistoryEncryptionPanel, { history, autoStartRecovery }), createElement(Toast.Provider))); });
 }
 
 function button(label: string): HTMLButtonElement {
@@ -86,6 +87,13 @@ it('is always end-to-end; without a recovery key it warns, and setting one shows
   await act(async () => { checkbox.click(); });
   await press('保存恢复密钥');
   expect(history.confirmRecoveryKey).toHaveBeenCalledTimes(1);
+});
+
+it('opened from the notice, it starts setting up the recovery key', async () => {
+  const history = session();
+  await render(history, true);
+  expect(history.createRecoveryDraft).toHaveBeenCalledTimes(1);
+  expect(document.querySelector('ol[aria-label="恢复单词"]')?.querySelectorAll('li')).toHaveLength(24);
 });
 
 it('a backend with a recovery key shows no recovery warning', async () => {
@@ -191,4 +199,21 @@ it('a revoked device shows why and offers no history actions', async () => {
   for (const label of ['吊销', '请求访问旧历史', '授权', '忽略', '创建恢复密钥']) {
     for (const item of buttons(label)) expect(isDisabled(item), label).toBe(true);
   }
+});
+
+it('the recovery notice sets up a key or, after a warning, hides itself', async () => {
+  const onSetup = vi.fn();
+  const onDismiss = vi.fn();
+  container = document.createElement('div');
+  document.body.append(container);
+  root = createRoot(container);
+  await act(async () => { root!.render(createElement(HistoryRecoveryNotice, { onSetup, onDismiss })); });
+  expect(container.textContent).toContain('所有设备丢失后历史将无法解密');
+  await press('立即设置');
+  expect(onSetup).toHaveBeenCalledTimes(1);
+  await press('关闭');
+  expect(document.body.textContent).toContain('永久无法读取');
+  expect(onDismiss).not.toHaveBeenCalled();
+  await press('不再提醒');
+  expect(onDismiss).toHaveBeenCalledTimes(1);
 });
