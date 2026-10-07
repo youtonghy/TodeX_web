@@ -157,9 +157,9 @@ Enter your Backend address, request device verification, then compare the full c
 
 ## Browser data and credentials
 
-Connection profiles, Backend tokens, selected workspaces, layout preferences, event cursors, and bounded local caches are stored under `todex.web.*` in the browser's `localStorage`. They are isolated by browser origin and browser profile, not by a TodeX account.
+Connection profiles, Backend tokens, selected workspaces, layout preferences, event cursors, and bounded local caches are stored under `todex.web.*` in the browser's `localStorage`. Device signing keys are instead sealed in IndexedDB under a non-extractable AES-GCM key (plaintext copies from older versions are migrated on load); this needs a secure context (HTTPS or localhost), and on plain-HTTP pages new device keys cannot be saved. All of this is isolated by browser origin and browser profile, not by a TodeX account.
 
-Any script executing on the site origin or a privileged browser extension can read these credentials. Deploy immutable reviewed assets, use the included Content Security Policy, avoid third-party scripts, and use the in-app **Clear data** action on shared devices.
+Any script executing on the site origin or a privileged browser extension can read or use these credentials. Deploy immutable reviewed assets, use the included Content Security Policy, avoid third-party scripts, and use the in-app **Clear data** action on shared devices.
 
 ## Checks
 

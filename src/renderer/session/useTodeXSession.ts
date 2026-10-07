@@ -91,7 +91,6 @@ import {
   insertCapabilityReference,
   sandboxPolicyForMode,
   shortJson,
-  utf8ByteLength,
   type CodexThreadHistoryEntry,
 } from '@todex/protocol/todex';
 import { loadJson, loadSecret, saveJson, saveSecret } from '../lib/storage';
@@ -104,9 +103,6 @@ import {
   type PairingQrChunk,
   type TransportCryptoSession,
 } from '@todex/protocol/transportCrypto';
-import {
-  MAX_LEGACY_MESSAGE_BYTES,
-} from '@todex/protocol/transport';
 import { ConnectionError } from '@todex/protocol/connectionError';
 import { desktopAlert } from '../lib/desktopAlert';
 import { insecureBackendReason } from '../lib/webPlatform';
@@ -215,6 +211,7 @@ import {
   toPersistedSettings,
   fromPersistedSettings,
   authHeaders,
+  encodeOutboundFrame,
   workspaceSyncPayloadEquals,
   createSessionId,
   terminalIdForConversation,
@@ -1208,8 +1205,19 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     };
   }, [flushJsonSave]);
 
+  /** Device keys live in the platform's secure key store; a failed read or
+   * write is shown instead of silently dropping the key. */
+  const reportSecretStoreError = useCallback((error: unknown) => {
+    console.error('[storage] device key store failed', error);
+    setLastError(error instanceof Error ? error.message : t('sess.credentialSaveFailed'));
+  }, [setLastError]);
+
   useEffect(() => {
     let alive = true;
+    const loadSecretOrReport = (key: string) => loadSecret(key).catch((error: unknown) => {
+      if (alive) reportSecretStoreError(error);
+      return '';
+    });
     (async () => {
       const [
         storedSettings,
@@ -1241,8 +1249,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         loadJson<BackendConnectionProfile[]>(BACKEND_CONNECTIONS_STORAGE_KEY, []),
         loadJson<unknown>(PROVIDER_MODEL_PREFERENCES_STORAGE_KEY, {}),
         loadJson<unknown>(WORKSPACE_TOMBSTONES_STORAGE_KEY, []),
-        loadSecret(DEVICE_SECRET_STORAGE_KEY),
-        loadSecret(DEVICE_ORIGIN_STORAGE_KEY),
+        loadSecretOrReport(DEVICE_SECRET_STORAGE_KEY),
+        loadSecretOrReport(DEVICE_ORIGIN_STORAGE_KEY),
       ]);
 
       if (!alive) {
@@ -1255,7 +1263,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       );
       nextSettings.serverUrl = normalizeServerUrl(nextSettings.serverUrl);
       const storedProfiles = (storedBackendConnections as unknown[]).map(normalizeBackendConnectionProfile).filter((profile): profile is BackendConnectionProfile => Boolean(profile));
-      const hydratedProfiles = storedProfiles.length ? await Promise.all(storedProfiles.map(async (profile) => ({ ...profile, deviceSecret: (await loadSecret(`${DEVICE_SECRET_STORAGE_KEY}.${profile.id}`)) || (profile.id === 'default-backend' ? nextSettings.deviceSecret : '') }))) : [];
+      const hydratedProfiles = storedProfiles.length ? await Promise.all(storedProfiles.map(async (profile) => ({ ...profile, deviceSecret: (await loadSecretOrReport(`${DEVICE_SECRET_STORAGE_KEY}.${profile.id}`)) || (profile.id === 'default-backend' ? nextSettings.deviceSecret : '') }))) : [];
       const profiles = hydratedProfiles.length ? hydratedProfiles : [profileFromSettings(nextSettings)];
       const normalizedWorkspaces = storedWorkspaces.map((workspace) => ({
         ...workspace,
@@ -1355,7 +1363,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       alive = false;
       closeSocket(false);
     };
-  }, [closeSocket]);
+  }, [closeSocket, reportSecretStoreError]);
 
   useEffect(() => {
     activeWorkspaceRef.current = activeWorkspaceId;
@@ -1421,16 +1429,16 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       return;
     }
     void saveJson(SETTINGS_STORAGE_KEY, toPersistedSettings(settings));
-    void saveSecret(DEVICE_SECRET_STORAGE_KEY, settings.deviceSecret);
-    void saveSecret(DEVICE_ORIGIN_STORAGE_KEY, settings.deviceSecret ? normalizeServerUrl(settings.serverUrl) : '');
-  }, [hydrated, settings]);
+    saveSecret(DEVICE_SECRET_STORAGE_KEY, settings.deviceSecret).catch(reportSecretStoreError);
+    saveSecret(DEVICE_ORIGIN_STORAGE_KEY, settings.deviceSecret ? normalizeServerUrl(settings.serverUrl) : '').catch(reportSecretStoreError);
+  }, [hydrated, reportSecretStoreError, settings]);
 
   useEffect(() => {
     if (hydrated) {
       void saveJson(BACKEND_CONNECTIONS_STORAGE_KEY, backendConnections.map(({ deviceSecret: _deviceSecret, ...profile }) => profile));
-      for (const profile of backendConnections) void saveSecret(`${DEVICE_SECRET_STORAGE_KEY}.${profile.id}`, profile.deviceSecret);
+      for (const profile of backendConnections) saveSecret(`${DEVICE_SECRET_STORAGE_KEY}.${profile.id}`, profile.deviceSecret).catch(reportSecretStoreError);
     }
-  }, [backendConnections, hydrated]);
+  }, [backendConnections, hydrated, reportSecretStoreError]);
 
   useEffect(() => {
     if (hydrated) {
@@ -3580,8 +3588,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     scheduleSocketFrameDrain();
   }, [scheduleSocketFrameDrain]);
 
-  /** Raw `{id, type, payload}` frame on the unified /v2/ws socket: encrypt,
-   * guard the 8 MiB backend limit, send. Returns null when the frame never
+  /** Raw `{id, type, payload}` frame on the unified /v2/ws socket: guard the
+   * 8 MiB backend limit, encrypt, send. Returns null when the frame never
    * left (socket closed) and throws ConnectionError on oversize payloads. */
   const sendRawProtocolFrame = useCallback((message: { id: string; type: string; payload: Record<string, unknown> }) => {
     const socket = socketRef.current;
@@ -3595,12 +3603,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       setLastError(error instanceof Error ? error.message : t('sess.serializeFailed'));
       return null;
     }
-    frame = socketCryptoRef.current?.encryptClientText(frame) ?? frame;
-    const size = utf8ByteLength(frame);
-    if (size > MAX_LEGACY_MESSAGE_BYTES) {
-      throw ConnectionError.messageTooLarge(size, MAX_LEGACY_MESSAGE_BYTES);
-    }
-    socket.send(frame);
+    socket.send(encodeOutboundFrame(frame, socketCryptoRef.current));
     return message;
   }, []);
 
@@ -4092,7 +4095,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           // So are live browser views: watch again what is still on screen.
           for (const watched of agentBrowserWatchersRef.current.keys()) {
             const watchFrame = JSON.stringify({ id: createRequestId('abw'), type: 'agentBrowser.watch', payload: { conversationId: watched } });
-            socket.send(socketCryptoRef.current?.encryptClientText(watchFrame) ?? watchFrame);
+            socket.send(encodeOutboundFrame(watchFrame, socketCryptoRef.current));
           }
           pendingV2SubscribeRef.current.clear();
           flushQueuedProtocolCommands();
