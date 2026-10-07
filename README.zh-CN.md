@@ -112,6 +112,10 @@ docker buildx build \
 
 固定了公钥时客户端一律走 transport v2，回环地址也一样：WebSocket 使用 `tv=2` 二进制帧，所有 REST 请求经 `POST /v2/sealed` 隧道；只有 `/health`、`/v2/transport-policy` 与设备验证直接请求。未固定公钥时只能以明文连接回环地址上的 Backend；连接远程地址会被拒绝并提示加密配对，Backend 改变加密方式时提示重新配对而不是降级。详见[设备验证](docs/device-verification.md)。
 
+## 历史记录加密
+
+会话历史始终端到端加密，没有开关。浏览器首次连接每个 Backend 时自动登记自己的历史密钥；未设置恢复密钥时会一直提醒。加密之前保存的旧对话只读，可查看、导出、归档或删除。详见[历史记录加密](docs/device-verification.md#历史记录加密)。
+
 ## 浏览器数据与凭据
 
 连接配置、Backend token、工作区选择、布局偏好、事件 cursor 和有限缓存保存在浏览器 `localStorage` 的 `todex.web.*` 命名空间中。设备签名密钥则用不可导出的 AES-GCM 密钥加密后存入 IndexedDB（旧版本留下的明文会在读取时迁移并删除）；这需要安全上下文（HTTPS 或 localhost），纯 HTTP 页面无法保存新的设备密钥。隔离边界是网站 origin 与浏览器配置文件，而不是 TodeX 账户。

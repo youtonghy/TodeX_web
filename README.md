@@ -159,6 +159,10 @@ Import the Backend's pairing QR code (it carries the address and pins the transp
 
 With a pinned key the client always uses transport v2, loopback included: the WebSocket uses `tv=2` binary frames and every REST request goes through the `POST /v2/sealed` tunnel; only `/health`, `/v2/transport-policy` and device verification are called directly. Without a pinned key only a loopback Backend can be reached (in plaintext); a remote address is refused with a prompt to pair with encryption, and a changed Backend protocol asks for re-pairing instead of downgrading. See [device verification](docs/device-verification.md#传输加密transport-v2).
 
+## History encryption
+
+Conversation history is always end-to-end encrypted; there is no switch. The browser registers its own history key with each Backend on first connect, and a reminder stays visible until a recovery key is set. Conversations stored before encryption are read-only: they can be viewed, exported, archived or deleted. See [history encryption](docs/device-verification.md#历史记录加密).
+
 ## Browser data and credentials
 
 Connection profiles, Backend tokens, selected workspaces, layout preferences, event cursors, and bounded local caches are stored under `todex.web.*` in the browser's `localStorage`. Device signing keys are instead sealed in IndexedDB under a non-extractable AES-GCM key (plaintext copies from older versions are migrated on load); this needs a secure context (HTTPS or localhost), and on plain-HTTP pages new device keys cannot be saved. All of this is isolated by browser origin and browser profile, not by a TodeX account.
