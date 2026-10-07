@@ -30,15 +30,13 @@ function session(state: Partial<HistoryEncryptionState> = {}, extra: Partial<His
   return {
     view: {
       backendId: 'b1', status: 'ready', localRid: 'me',
-      state: { mode: 'off', epoch: 1, myRid: 'me', grants: [], revokedDevices: [],
+      state: { mode: 'e2e', epoch: 1, myRid: 'me', grants: [], revokedDevices: [],
         recipients: [{ rid: 'me', kind: 'device', deviceId: 'dev_me', publicKey: 'pk', addedAt: 'a', revokedAt: null }], ...state },
     },
-    e2e: state.mode === 'e2e',
+    e2e: true,
     grantRuns: {},
     createRecoveryDraft: vi.fn(() => draft),
     confirmRecoveryKey: vi.fn(async () => {}),
-    enable: vi.fn(async () => ({} as HistoryEncryptionState)),
-    disable: vi.fn(async () => ({} as HistoryEncryptionState)),
     revoke: vi.fn(async () => ({} as HistoryEncryptionState)),
     restoreDevice: vi.fn(async () => ({} as HistoryEncryptionState)),
     requestGrant: vi.fn(async () => 'grt_new'),
@@ -65,35 +63,38 @@ function button(label: string): HTMLButtonElement {
   return found as HTMLButtonElement;
 }
 async function press(label: string) { await act(async () => { button(label).click(); }); }
+const buttons = (label: string) => [...document.querySelectorAll('button')].filter((item) => item.textContent === label);
+const isDisabled = (item: HTMLButtonElement) => item.disabled || item.getAttribute('data-disabled') === 'true';
 
-it('enabling shows the 24 words and QR, requires confirmation, then uploads the recovery key and enables', async () => {
+it('is always end-to-end; without a recovery key it warns, and setting one shows the 24 words and QR before uploading', async () => {
   const history = session();
   await render(history);
-  expect(container!.textContent).toContain('未加密');
+  expect(container!.textContent).toContain('端到端加密');
+  expect(container!.textContent).not.toContain('未加密');
+  expect(container!.textContent).toContain('尚未设置恢复密钥：所有设备丢失后历史将无法解密');
+  // There is no switch any more.
+  expect(buttons('开启端到端加密')).toHaveLength(0);
+  expect(buttons('关闭加密')).toHaveLength(0);
   // Opening the panel re-reads the state (an update may have been missed).
   expect(history.refresh).toHaveBeenCalled();
-  await press('开启端到端加密');
+  await press('创建恢复密钥');
   const words = document.querySelector('ol[aria-label="恢复单词"]');
   expect(words?.querySelectorAll('li')).toHaveLength(24);
   expect(document.querySelector('svg[aria-label="恢复密钥二维码"] path')?.getAttribute('d')).toMatch(/^M\d/);
-  expect(button('保存并开启加密').disabled || button('保存并开启加密').getAttribute('data-disabled') === 'true').toBe(true);
+  expect(isDisabled(button('保存恢复密钥'))).toBe(true);
   const checkbox = document.querySelector('input[type="checkbox"]') as HTMLInputElement;
   await act(async () => { checkbox.click(); });
-  await press('保存并开启加密');
+  await press('保存恢复密钥');
   expect(history.confirmRecoveryKey).toHaveBeenCalledTimes(1);
-  expect(history.enable).toHaveBeenCalledTimes(1);
 });
 
-it('skipping the recovery key needs a second, explicit warning', async () => {
-  const history = session();
-  await render(history);
-  await press('开启端到端加密');
-  await press('跳过');
-  expect(document.body.textContent).toContain('永久无法读取');
-  expect(history.enable).not.toHaveBeenCalled();
-  await press('仍然跳过并开启');
-  expect(history.enable).toHaveBeenCalledTimes(1);
-  expect(history.confirmRecoveryKey).not.toHaveBeenCalled();
+it('a backend with a recovery key shows no recovery warning', async () => {
+  await render(session({ recipients: [
+    { rid: 'me', kind: 'device', deviceId: 'dev_me', publicKey: 'pk', addedAt: 'a', revokedAt: null },
+    { rid: 'rec', kind: 'recovery', deviceId: null, publicKey: 'pk3', addedAt: 'a', revokedAt: null },
+  ] }));
+  expect(container!.textContent).not.toContain('尚未设置恢复密钥');
+  expect(buttons('创建恢复密钥')).toHaveLength(0);
 });
 
 it('lists recipients with revoke, authorizes pending grants and imports a recovery key', async () => {
@@ -144,8 +145,6 @@ it('shows an unavailable backend and grant progress', async () => {
   expect(pauseGrant).toHaveBeenCalledWith('grt_1');
 });
 
-const buttons = (label: string) => [...document.querySelectorAll('button')].filter((item) => item.textContent === label);
-const isDisabled = (item: HTMLButtonElement) => item.disabled || item.getAttribute('data-disabled') === 'true';
 
 it('revoking a device warns that it is permanent; revoked devices are restored after confirmation', async () => {
   const history = session({
@@ -189,7 +188,7 @@ it('a revoked device shows why and offers no history actions', async () => {
   expect(container!.textContent).not.toContain('尚未登记');
   expect(container!.textContent).toContain('此设备，吊销于 r');
   expect(buttons('恢复访问')).toHaveLength(0);
-  for (const label of ['吊销', '关闭加密', '请求访问旧历史', '授权', '忽略', '创建恢复密钥']) {
+  for (const label of ['吊销', '请求访问旧历史', '授权', '忽略', '创建恢复密钥']) {
     for (const item of buttons(label)) expect(isDisabled(item), label).toBe(true);
   }
 });

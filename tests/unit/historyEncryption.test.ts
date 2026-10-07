@@ -44,7 +44,7 @@ const json = (value: unknown) => new TextEncoder().encode(JSON.stringify(value))
 
 /** A backend stand-in for the §7 commands this client sends. */
 function fakeBackend() {
-  const state = { mode: 'off', epoch: 1, recipients: [] as Record<string, unknown>[], grants: [] as unknown[], myRid: undefined as string | undefined,
+  const state = { mode: 'e2e', epoch: 1, recipients: [] as Record<string, unknown>[], grants: [] as unknown[], myRid: undefined as string | undefined,
     myAccess: undefined as string | undefined, revokedDevices: [] as unknown[] };
   /** Commands other than `history.encryption.get` fail as for a revoked device. */
   let blocked = false;
@@ -326,4 +326,25 @@ it('a command refused as revoked stops registration without a re-key loop', asyn
   await act(async () => { await api().refresh(); });
   expect(commandTypes(backend).filter((type) => type === 'history.recipient.register')).toHaveLength(1);
   expect(api().revoked).toBe(true);
+});
+
+it('HISTORY_KEY_REQUIRED registers this device again; a missing recovery key shows a dismissible notice per backend', async () => {
+  localStorage.removeItem('todex.history.recoveryNoticeDismissed.v1');
+  const backend = fakeBackend();
+  const api = await mount(backend);
+  expect(api().recoveryMissing).toBe(true);
+  expect(api().recoveryNoticeVisible).toBe(true);
+  await act(async () => { api().dismissRecoveryNotice(); });
+  expect(api().recoveryNoticeVisible).toBe(false);
+  expect(api().recoveryMissing).toBe(true);
+  expect(JSON.parse(localStorage.getItem('todex.history.recoveryNoticeDismissed.v1') ?? '[]')).toEqual(['b1']);
+
+  // The backend lost this device as a recipient: a write fails with
+  // HISTORY_KEY_REQUIRED and the client registers once more.
+  backend.state.myRid = undefined;
+  backend.sendCommand.mockClear();
+  await act(async () => { await Promise.all([api().keyRequired(), api().keyRequired()]); });
+  expect(backend.sendCommand.mock.calls.map(([frame]) => frame.type)).toEqual(['history.encryption.get', 'history.recipient.register', 'history.encryption.get']);
+  expect(api().view.localRid).toBe(backend.state.myRid);
+  localStorage.removeItem('todex.history.recoveryNoticeDismissed.v1');
 });
