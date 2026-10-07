@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { QueuedFollowUps, restoreQueuedFollowUps } from '../../src/renderer/session/queuedFollowUps';
+import { QueuedFollowUps, restoreQueuedFollowUps, serializeQueuedFollowUps } from '../../src/renderer/session/queuedFollowUps';
 
 describe('local follow-up delivery', () => {
   it('advances on a completed turn once, never during historical replay', async () => {
@@ -42,9 +42,36 @@ describe('local follow-up delivery', () => {
     expect(attempts).toBe(1); finish(true); await first;
   });
   it('rejects malformed stored queues and bounds restored items', () => {
-    expect(restoreQueuedFollowUps({ c: [null, {}, { id: 2 }] })).toEqual({});
+    expect(restoreQueuedFollowUps({ c: [null, {}, { id: 2 }] })).toEqual({ queues: {}, paused: [] });
     const item = { id: 'a', text: 'hello', attachments: [], skills: [] };
-    expect(restoreQueuedFollowUps({ c: Array(40).fill(item) }).c).toHaveLength(32);
+    expect(restoreQueuedFollowUps({ c: Array(40).fill(item) }).queues.c).toHaveLength(32);
+    expect(restoreQueuedFollowUps({ version: 2, queues: { c: Array(40).fill(item) }, paused: 'c' })).toEqual({
+      queues: { c: Array(32).fill(item) }, paused: [] });
+  });
+  it('keeps the paused flag with the candidates and still reads the old shape', () => {
+    const item = { id: 'a', text: 'hello', attachments: [], skills: [] };
+    const stored = serializeQueuedFollowUps({ c: [item], d: [item] }, ['c', 'c', 'gone']);
+    // A pause without candidates behind it is not stored.
+    expect(stored).toEqual({ version: 2, queues: { c: [item], d: [item] }, paused: ['c'] });
+    expect(restoreQueuedFollowUps(JSON.parse(JSON.stringify(stored)))).toEqual({ queues: { c: [item], d: [item] }, paused: ['c'] });
+    // Version 1 stored the map alone; nothing in it was marked paused.
+    expect(restoreQueuedFollowUps({ c: [item] })).toEqual({ queues: { c: [item] }, paused: [] });
+  });
+  it('only an explicit resume moves a paused queue; automatic triggers wait', async () => {
+    const queue = new QueuedFollowUps(); const sent: string[] = [];
+    const items = [{ id: 'a' }];
+    const send = async (item: { id: string }) => { sent.push(item.id); return true; };
+    const remove = () => { items.splice(0, 1); };
+    queue.pause('c');
+    expect(queue.pausedIds()).toEqual(['c']);
+    await queue.drain('c', () => items[0], send, remove);
+    expect(sent).toEqual([]);
+    await queue.resume('c', () => items[0], send, remove);
+    expect(sent).toEqual(['a']);
+    expect(queue.pausedIds()).toEqual([]);
+    items.push({ id: 'b' });
+    await queue.drain('c', () => items[0], send, remove);
+    expect(sent).toEqual(['a', 'b']);
   });
 });
 
