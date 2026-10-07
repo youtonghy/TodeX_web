@@ -2,6 +2,7 @@ import { beforeEach, expect, it, vi } from 'vitest';
 import {
   addKanbanTask,
   attachKanbanTask,
+  detachKanbanTask,
   getKanbanTasks,
   kanbanTasksForWorkspace,
   removeKanbanTask,
@@ -67,8 +68,14 @@ it('attaches a task to a conversation and cleanly detaches it', () => {
   const task = addKanbanTask('w1', 'review me')!;
   attachKanbanTask(task.id, 'conv-1');
   expect(getKanbanTasks()[0].conversationId).toBe('conv-1');
-  attachKanbanTask(task.id, undefined);
+  // An empty id never attaches (or detaches) anything.
+  attachKanbanTask(task.id, '');
+  expect(getKanbanTasks()[0].conversationId).toBe('conv-1');
+  detachKanbanTask(task.id, 'conv-other');
+  expect(getKanbanTasks()[0].conversationId).toBe('conv-1');
+  detachKanbanTask(task.id, 'conv-1');
   expect(getKanbanTasks()[0]).not.toHaveProperty('conversationId');
+  expect(getKanbanTasks()[0]).not.toHaveProperty('conversationIds');
 });
 
 it('renames non-empty titles and ignores blank input', () => {
