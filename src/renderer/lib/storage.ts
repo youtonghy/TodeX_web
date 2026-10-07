@@ -25,6 +25,12 @@ export async function saveJson<T>(key: string, value: T): Promise<void> {
  * persist on every change skip identical writes. */
 const persistedSecrets = new Map<string, string>();
 
+/** Keys whose secure read failed this session. Their stored value is unknown,
+ * so an empty value from the settings effects must not be taken as "delete":
+ * a transient keychain failure would otherwise erase the device key for good.
+ * A later successful read, a non-empty save, or `removeSecret` clears this. */
+const unreadableSecrets = new Set<string>();
+
 async function readLegacySecret(key: string): Promise<string> {
   const value = await window.todexWeb.store.get(key);
   return typeof value === 'string' ? value : '';
@@ -35,6 +41,7 @@ export async function loadSecret(key: string): Promise<string> {
   try {
     sealed = await loadSealedSecret(key);
   } catch (error) {
+    unreadableSecrets.add(key);
     // No IndexedDB/WebCrypto (insecure context) or an unreadable record: a
     // plaintext copy from an older build still works; without one the failure
     // is the caller's.
@@ -43,6 +50,7 @@ export async function loadSecret(key: string): Promise<string> {
     console.error(`[storage] secure read of ${key} failed; using the unmigrated plaintext copy`, error);
     return legacy;
   }
+  unreadableSecrets.delete(key);
   const legacy = await readLegacySecret(key);
   if (sealed !== null) {
     if (legacy) await window.todexWeb.store.set(key, undefined);
@@ -66,11 +74,25 @@ export async function loadSecret(key: string): Promise<string> {
   return legacy;
 }
 
-/** Seals `value` (an empty value deletes it). Rejects without WebCrypto
- * (insecure context); nothing is written in plaintext then. */
+/** Seals `value` (an empty value deletes it, unless the key could not be
+ * read this session; use `removeSecret` to delete then). Rejects without
+ * WebCrypto (insecure context); nothing is written in plaintext then. */
 export async function saveSecret(key: string, value: string): Promise<void> {
+  if (!value && unreadableSecrets.has(key)) return;
+  await writeSecret(key, value);
+}
+
+/** Deletes `key` for an explicit user action (removing a backend), even when
+ * its current value could not be read. */
+export async function removeSecret(key: string): Promise<void> {
+  persistedSecrets.delete(key);
+  await writeSecret(key, '');
+}
+
+async function writeSecret(key: string, value: string): Promise<void> {
   if (persistedSecrets.get(key) === value) return;
   await saveSealedSecret(key, value || null);
+  unreadableSecrets.delete(key);
   persistedSecrets.set(key, value);
   // Drop a plaintext copy an interrupted migration may have left behind.
   await window.todexWeb.store.set(key, undefined);

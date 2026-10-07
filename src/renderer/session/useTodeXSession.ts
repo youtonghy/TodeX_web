@@ -95,7 +95,7 @@ import {
   shortJson,
   type CodexThreadHistoryEntry,
 } from '@todex/protocol/todex';
-import { loadJson, loadSecret, saveJson, saveSecret } from '../lib/storage';
+import { loadJson, loadSecret, removeSecret, saveJson, saveSecret } from '../lib/storage';
 import {
   applyPairingToSettings,
   assemblePairingQrChunkPayload,
@@ -4729,7 +4729,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
 
   const removeBackendConnection = useCallback((id: string) => {
     if (backendConnections.length <= 1) return;
-    void saveSecret(`${DEVICE_SECRET_STORAGE_KEY}.${id}`, '').catch((error) => {
+    void removeSecret(`${DEVICE_SECRET_STORAGE_KEY}.${id}`).catch((error) => {
       setLastError(error instanceof Error ? error.message : t('sess.credentialClearFailed'));
     });
     void historyEncryptionRef.current?.forgetBackend(id).catch((error: unknown) => {

@@ -70,6 +70,37 @@ describe('device secret storage', () => {
     expect(sealed.has(KEY)).toBe(false);
   });
 
+  it('does not delete a key whose sealed read failed when the settings save an empty value', async () => {
+    sealed.set(KEY, 'seed-4');
+    keyStore.failLoad = true;
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const { loadSecret, saveSecret } = await freshStorage();
+    await expect(loadSecret(KEY)).rejects.toThrow('secure context required');
+    await saveSecret(KEY, '');
+    expect(sealed.get(KEY)).toBe('seed-4');
+    // A later successful read makes empty saves delete again.
+    keyStore.failLoad = false;
+    await expect(loadSecret(KEY)).resolves.toBe('seed-4');
+    await saveSecret(KEY, '');
+    expect(sealed.has(KEY)).toBe(false);
+  });
+
+  it('lets a non-empty save or an explicit remove replace an unreadable key', async () => {
+    sealed.set(KEY, 'seed-5');
+    keyStore.failLoad = true;
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const { loadSecret, removeSecret, saveSecret } = await freshStorage();
+    await expect(loadSecret(KEY)).rejects.toThrow();
+    await removeSecret(KEY);
+    expect(sealed.has(KEY)).toBe(false);
+    sealed.set(KEY, 'seed-5');
+    await expect(loadSecret(KEY)).rejects.toThrow();
+    await saveSecret(KEY, 'seed-6');
+    expect(sealed.get(KEY)).toBe('seed-6');
+    await saveSecret(KEY, '');
+    expect(sealed.has(KEY)).toBe(false);
+  });
+
   it('rejects a save the sealed store refuses instead of writing plaintext', async () => {
     keyStore.failSave = true;
     const { saveSecret } = await freshStorage();
