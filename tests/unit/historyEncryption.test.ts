@@ -17,7 +17,7 @@ import { recoveryQrPayload } from '@todex/protocol/recoveryKey';
 import { decodeBase64UrlBytes, encodeBase64Url } from '@todex/protocol/transportCrypto';
 import type { ConversationManifest } from '@todex/protocol/v2';
 import { buildChatRenderItems, isChatTimelineEntry } from '../../src/renderer/components/conversationTimeline';
-import { useHistoryEncryption, type HistoryEncryptionSession } from '../../src/renderer/session/useHistoryEncryption';
+import { historyErrorMessage, useHistoryEncryption, type HistoryEncryptionSession } from '../../src/renderer/session/useHistoryEncryption';
 import type { TimelineEntry } from '../../src/renderer/session/helpers';
 import { ProtocolCommandError } from '../../src/renderer/session/protocolCommands';
 import { historyRecipientKeyPairFromSeed } from '@todex/protocol/historyCrypto';
@@ -347,4 +347,10 @@ it('HISTORY_KEY_REQUIRED registers this device again; a missing recovery key sho
   expect(backend.sendCommand.mock.calls.map(([frame]) => frame.type)).toEqual(['history.encryption.get', 'history.recipient.register', 'history.encryption.get']);
   expect(api().view.localRid).toBe(backend.state.myRid);
   localStorage.removeItem('todex.history.recoveryNoticeDismissed.v1');
+});
+
+it('explains the forced e2e write errors', () => {
+  expect(historyErrorMessage('HISTORY_READ_ONLY')).toBe('这是旧版未加密历史，只读。');
+  expect(historyErrorMessage('HISTORY_KEY_REQUIRED')).toContain('本设备尚未登记历史密钥');
+  expect(historyErrorMessage('CONFLICT')).toBeNull();
 });
