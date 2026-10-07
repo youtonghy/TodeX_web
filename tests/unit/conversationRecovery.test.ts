@@ -325,6 +325,56 @@ describe('shared conversation recovery', () => {
     expect(canAutoLoadEarlierHistory({ hasMore: true, loading: false, capped: true })).toBe(false);
   });
 
+  it('caps a growing runtime at the row cap and moves the history floor under the kept rows', async () => {
+    // One row per event: every delta opens its own turn's assistant row.
+    const rowEvent = (sequence: number) => event(sequence, 'message.delta', { turnId: `t${sequence}`, content: 'x' });
+    const rows = Array.from({ length: MAX_CONVERSATION_TIMELINE_ITEMS }, (_, index) => rowEvent(index + 1));
+    const replayBefore = pagesBefore(rows);
+    const update = vi.fn();
+    const recovery = new ConversationRecovery(async () => page([]), update, () => {}, replayBefore);
+    await recovery.open('c', 'w', { highWater: rows.length, pageLimit: MAX_CONVERSATION_TIMELINE_ITEMS });
+    expect(recovery.get('c')?.timeline).toHaveLength(MAX_CONVERSATION_TIMELINE_ITEMS);
+    expect(recovery.hasEarlierHistory('c')).toBe(false);
+    recovery.receive('c', 'w', Array.from({ length: 10 }, (_, index) => rowEvent(rows.length + index + 1)));
+    const state = recovery.get('c')!;
+    expect(state.timeline).toHaveLength(MAX_CONVERSATION_TIMELINE_ITEMS);
+    expect(state.timeline[0].id.startsWith(`v2-assistant-c-t${rows.length + 10}#s`)).toBe(true);
+    expect(state.timeline.at(-1)?.firstSequence).toBe(11);
+    expect(update.mock.lastCall?.[0]).toBe(state);
+    // The dropped rows are unloaded history again; paging them back in waits
+    // until the conversation is under its cap.
+    expect(recovery.hasEarlierHistory('c')).toBe(true);
+    await expect(recovery.loadEarlier('c', 'w')).resolves.toEqual({ hasMore: true, capped: true });
+    expect(replayBefore).toHaveBeenCalledTimes(1);
+  });
+
+  it('caps a fully replayed runtime without advertising history it cannot page in', async () => {
+    const rows = Array.from({ length: MAX_CONVERSATION_TIMELINE_ITEMS + 5 }, (_, index) =>
+      event(index + 1, 'message.delta', { turnId: `t${index + 1}`, content: 'x' }));
+    const replay = vi.fn(async (_id: string, after: number, limit: number) => {
+      const slice = rows.filter((item) => item.sequence > after).slice(0, limit);
+      return page(slice, (slice.at(-1)?.sequence ?? after) < rows.length);
+    });
+    const recovery = new ConversationRecovery(replay, () => {}, () => {});
+    await recovery.recover('c', 'w');
+    expect(recovery.get('c')?.appliedSequence).toBe(rows.length);
+    expect(recovery.get('c')?.timeline).toHaveLength(MAX_CONVERSATION_TIMELINE_ITEMS);
+    expect(recovery.hasEarlierHistory('c')).toBe(false);
+  });
+
+  it('restores the history floor when the consumer rejects a capped frame', async () => {
+    const rowEvent = (sequence: number) => event(sequence, 'message.delta', { turnId: `t${sequence}`, content: 'x' });
+    const rows = Array.from({ length: MAX_CONVERSATION_TIMELINE_ITEMS }, (_, index) => rowEvent(index + 1));
+    const update = vi.fn();
+    const recovery = new ConversationRecovery(async () => page([]), update, () => {}, pagesBefore(rows));
+    await recovery.open('c', 'w', { highWater: rows.length, pageLimit: MAX_CONVERSATION_TIMELINE_ITEMS });
+    const loaded = recovery.get('c');
+    update.mockImplementationOnce(() => { throw new Error('projection failed'); });
+    expect(() => recovery.receive('c', 'w', [rowEvent(rows.length + 1)])).toThrow('projection failed');
+    expect(recovery.get('c')).toBe(loaded);
+    expect(recovery.hasEarlierHistory('c')).toBe(false);
+  });
+
   it('keeps the active conversation rows while a background conversation streams past the cap', () => {
     const row = (conversationId: string, index: number) => ({ id: `${conversationId}-${index}`, conversationId });
     let timeline = capTimelinePerConversation(Array.from({ length: 100 }, (_, index) => row('active', 99 - index)));

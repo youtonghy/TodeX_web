@@ -107,3 +107,40 @@ it('keeps turn identity when a progress event omits its turn ID', () => {
   expect(items[1]).toMatchObject({ turnId: 't', entries: [{ id: 'unattributed' }, { id: 'tool' }] });
   expect(activeChatProcessId(items, 't')).toBe(items[1].type === 'executionGroup' ? items[1].id : '');
 });
+
+import { compareChatEntries, sameTimelineEntries, sortChatEntries } from '../../src/renderer/components/conversationTimeline';
+
+describe('chat row order', () => {
+  const row = (id: string, sequence: number | undefined, at: number): TimelineEntry => ({ ...entry(id, 'incoming'), sequence, at });
+  // The order ChatPanel produced before it skipped sorted input.
+  const previousOrder = (rows: TimelineEntry[]) => rows.slice().sort((left, right) => {
+    if (left.sequence !== undefined && right.sequence !== undefined && left.sequence !== right.sequence) {
+      return left.sequence - right.sequence;
+    }
+    if (left.at !== right.at) return left.at - right.at;
+    return left.id.localeCompare(right.id);
+  });
+
+  it('returns rows already in display order as they are', () => {
+    const rows = [row('a', 1, 5), row('b', 2, 1), row('c', undefined, 3), row('d', 4, 9)];
+    expect(sortChatEntries(rows)).toBe(rows);
+  });
+
+  it('orders like the previous sort for any input', () => {
+    let seed = 7;
+    const random = (limit: number) => { seed = (seed * 48271) % 2147483647; return seed % limit; };
+    for (let round = 0; round < 200; round += 1) {
+      const rows = Array.from({ length: 1 + random(12) }, (_, index) =>
+        row(`r${random(5)}-${index}`, random(4) === 0 ? undefined : random(6), random(4)));
+      expect(sortChatEntries(rows).map(item => item.id)).toEqual(previousOrder(rows).map(item => item.id));
+    }
+    expect(compareChatEntries(row('a', 1, 9), row('b', 2, 1))).toBeLessThan(0);
+  });
+
+  it('treats the same row objects as the same list', () => {
+    const rows = [row('a', 1, 1), row('b', 2, 2)];
+    expect(sameTimelineEntries(rows, [...rows])).toBe(true);
+    expect(sameTimelineEntries(rows, [rows[0], { ...rows[1] }])).toBe(false);
+    expect(sameTimelineEntries(rows, rows.slice(0, 1))).toBe(false);
+  });
+});

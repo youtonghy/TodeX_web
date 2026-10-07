@@ -17,7 +17,7 @@ import { ConversationPermissionActions, ConversationPromptInput, ConversationRun
 import { ReferenceComposer, type ReferenceComposerHandle } from '../components/ReferenceComposer';
 import { ComposerAttachmentPreview } from '../components/ComposerAttachmentPreview';
 import { SentAttachmentPreview } from '../components/SentAttachmentPreview';
-import { activeChatProcessId, buildChatRenderItems, isChatTimelineEntry, isChatToolEntry, latestIncomingEntryIds } from '../components/conversationTimeline';
+import { activeChatProcessId, buildChatRenderItems, isChatTimelineEntry, isChatToolEntry, latestIncomingEntryIds, sameTimelineEntries, sortChatEntries } from '../components/conversationTimeline';
 import type { ChatRenderItem } from '../components/conversationTimeline';
 import { ModelReasoningCard } from '../components/ModelReasoningCard';
 import { ProviderIcon } from '../components/ProviderIcon';
@@ -704,20 +704,17 @@ export function ChatPanel({ session }: Props) {
   /** Records where the viewport sat before an earlier-history prepend so the
    * rendered rows can be shifted back onto the same content. */
   const historyAnchorRef = useRef<{ conversationId: string; scrollHeight: number; scrollTop: number; oldestEntryId: string } | null>(null);
-  const chatEntries = useMemo(() => {
-    if (!conversation) return [];
-    return session.timeline
-      .filter((entry) => entry.conversationId === conversation.id)
-      .filter((entry) => isChatTimelineEntry(entry) && !isChatReminderEntry(entry))
-      .slice()
-      .sort((left, right) => {
-        if (left.sequence !== undefined && right.sequence !== undefined && left.sequence !== right.sequence) {
-          return left.sequence - right.sequence;
-        }
-        if (left.at !== right.at) return left.at - right.at;
-        return left.id.localeCompare(right.id);
-      });
+  // The session timeline merges every conversation and changes on each
+  // streamed frame; this conversation's rows keep their array (and so the
+  // render items below) until one of them changes.
+  const conversationTimelineRef = useRef<TimelineEntry[]>([]);
+  const conversationTimeline = useMemo(() => {
+    const next = conversation ? session.timeline.filter((entry) => entry.conversationId === conversation.id) : [];
+    if (!sameTimelineEntries(conversationTimelineRef.current, next)) conversationTimelineRef.current = next;
+    return conversationTimelineRef.current;
   }, [conversation?.id, session.timeline]);
+  const chatEntries = useMemo(() => sortChatEntries(conversationTimeline
+    .filter((entry) => isChatTimelineEntry(entry) && !isChatReminderEntry(entry))), [conversationTimeline]);
   const items = useMemo(() => buildChatRenderItems(chatEntries), [chatEntries]);
   const actionableIncoming = useMemo(() => latestIncomingEntryIds(chatEntries), [chatEntries]);
   // Only the newest rows are mounted. Scrolling up reveals loaded rows a
@@ -978,7 +975,6 @@ export function ChatPanel({ session }: Props) {
       if (candidate.kind === 'outgoing') break;
     }
   }
-  const conversationTimeline = session.timeline.filter((entry) => entry.conversationId === conversation.id);
   const canSwitchAgent = canSwitchConversationAgent(conversation, {
     timeline: conversationTimeline,
     thinking,
