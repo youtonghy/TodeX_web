@@ -96,7 +96,7 @@ beforeEach(() => {
   vi.useFakeTimers();
   TestSocket.instances = [];
   vi.stubGlobal('WebSocket', TestSocket);
-  policy = { requiredProtocol: 'x25519', transportVersion: 2 };
+  policy = { requiredProtocol: 'x25519', transportVersion: 2, sealedRevision: 2 };
   fetchMock = vi.fn(async (url: string) => {
     if (new URL(String(url)).pathname === '/v2/transport-policy') return new Response(JSON.stringify(await policy));
     if (String(url).endsWith('/health')) return new Response('{}');
@@ -166,8 +166,8 @@ it('refuses a remote backend without a pinned key before any request and asks fo
 });
 
 it.each([
-  ['a different protocol', { requiredProtocol: 'ml-kem-768', transportVersion: 2 }, 'ml-kem-768'],
-  ['plaintext', { requiredProtocol: 'none', transportVersion: 2 }, 'none'],
+  ['a different protocol', { requiredProtocol: 'ml-kem-768', transportVersion: 2, sealedRevision: 2 }, 'ml-kem-768'],
+  ['plaintext', { requiredProtocol: 'none', transportVersion: 2, sealedRevision: 2 }, 'none'],
 ])('asks to re-pair when the backend now requires %s, never downgrading', async (_label, answer, protocol) => {
   policy = answer;
   render(); await connect();
@@ -183,6 +183,17 @@ it('reports an outdated backend that does not speak transport v2', async () => {
   render(); await connect();
   expect(TestSocket.instances).toHaveLength(0);
   expect(session.lastError).toContain('transport v2');
+});
+
+it('reports a backend without sealed REST revision 2 as needing an update, without connecting', async () => {
+  policy = { requiredProtocol: 'x25519', transportVersion: 2 };
+  render(); await connect();
+  expect(probeBackendConnection).not.toHaveBeenCalled();
+  expect(TestSocket.instances).toHaveLength(0);
+  expect(session.connectionHealth).toMatchObject({ status: 'offline', code: 'protocol_mismatch' });
+  expect(session.lastError).toContain('升级后端');
+  await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+  expect(TestSocket.instances).toHaveLength(0);
 });
 
 it('rejects an unusable pinned key without touching the network', async () => {
@@ -249,16 +260,16 @@ it('ignores a policy answer that arrives after its attempt was replaced', async 
   let release!: (value: Record<string, unknown>) => void;
   policy = new Promise((resolve) => { release = resolve; });
   render(); await connect();
-  policy = { requiredProtocol: 'x25519', transportVersion: 2 };
+  policy = { requiredProtocol: 'x25519', transportVersion: 2, sealedRevision: 2 };
   await connect();
   expect(TestSocket.instances).toHaveLength(1);
-  await act(async () => release({ requiredProtocol: 'x25519', transportVersion: 2 }));
+  await act(async () => release({ requiredProtocol: 'x25519', transportVersion: 2, sealedRevision: 2 }));
   expect(TestSocket.instances).toHaveLength(1);
   expect(probeBackendConnection).toHaveBeenCalledOnce();
 });
 
 it('a loopback backend without a key stays plaintext and skips the encrypted challenge', async () => {
-  policy = { requiredProtocol: 'none', transportVersion: 2 };
+  policy = { requiredProtocol: 'none', transportVersion: 2, sealedRevision: 2 };
   render({ serverUrl: 'http://127.0.0.1:7345', encryptionProtocol: 'none', encryptionPublicKey: '' });
   await connect();
   expect(vi.mocked(probeBackendConnection).mock.calls[0][0].transport.mode).toBe('plaintext');
@@ -271,7 +282,7 @@ it('a loopback backend without a key stays plaintext and skips the encrypted cha
 });
 
 it('moves the socket to the newly active backend profile', async () => {
-  policy = { requiredProtocol: 'none', transportVersion: 2 };
+  policy = { requiredProtocol: 'none', transportVersion: 2, sealedRevision: 2 };
   vi.mocked(loadJson).mockImplementation((_key, fallback) => Promise.resolve(fallback));
   vi.mocked(loadSecret).mockResolvedValue('');
   render({ serverUrl: 'http://127.0.0.1:7345', encryptionProtocol: 'none', encryptionPublicKey: '' });

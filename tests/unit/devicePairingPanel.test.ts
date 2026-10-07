@@ -4,7 +4,7 @@ import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Toast, toast } from '@heroui/react';
 import { DevicePairingPanel } from '../../src/renderer/components/DevicePairingPanel';
-import { beginDevicePairing } from '../../src/renderer/session/devicePairing';
+import { DevicePairingRetryableError, beginDevicePairing } from '../../src/renderer/session/devicePairing';
 import type { DevicePairingRequest } from '../../src/renderer/session/devicePairing';
 import type { TodeXSession } from '../../src/renderer/session/useTodeXSession';
 import { deviceIdentityFromSecret, generateDeviceIdentity } from '@todex/protocol/deviceAuth';
@@ -14,7 +14,10 @@ import type { BackendConnectionProfile } from '@todex/protocol/todex';
 vi.hoisted(() => {
   window.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false, media: '', onchange: null });
 });
-vi.mock('../../src/renderer/session/devicePairing', () => ({ beginDevicePairing: vi.fn() }));
+vi.mock('../../src/renderer/session/devicePairing', async importOriginal => ({
+  ...await importOriginal<typeof import('../../src/renderer/session/devicePairing')>(),
+  beginDevicePairing: vi.fn(),
+}));
 let root: Root;
 let container: HTMLDivElement;
 beforeAll(() => {
@@ -228,4 +231,46 @@ it('shows a safe error instead of applying a malformed approval', async () => {
   await tick();
   expect(notices()).toContain('校验失败');
   expect(state.session.onDevicePairingApproved).not.toHaveBeenCalled();
+});
+
+it('keeps polling with backoff after transient failures and pins on a later approval', async () => {
+  const req = request();
+  req.poll
+    .mockRejectedValueOnce(new DevicePairingRetryableError('busy', 1000))
+    .mockRejectedValueOnce(new DevicePairingRetryableError('offline'))
+    .mockRejectedValueOnce(new DevicePairingRetryableError('offline'))
+    .mockResolvedValueOnce({ status: 'pending' })
+    .mockResolvedValue({ status: 'approved', deviceId: 'dev_test1234567890', pin: PIN });
+  vi.mocked(beginDevicePairing).mockResolvedValue(req);
+  const state = render();
+  await press('设备验证');
+  await tick(2000);
+  expect(req.poll).toHaveBeenCalledTimes(1);
+  // 2 s -> 4 s -> 5 s (capped), then back to 2 s after a pending answer.
+  await tick(3999);
+  expect(req.poll).toHaveBeenCalledTimes(1);
+  await tick(1);
+  expect(req.poll).toHaveBeenCalledTimes(2);
+  await tick(5000);
+  expect(req.poll).toHaveBeenCalledTimes(3);
+  await tick(5000);
+  expect(req.poll).toHaveBeenCalledTimes(4);
+  expect(container.textContent).toContain('SAFE-1234');
+  expect(req.cancel).not.toHaveBeenCalled();
+  await tick(2000);
+  expect(req.poll).toHaveBeenCalledTimes(5);
+  expect(state.session.onDevicePairingApproved).toHaveBeenCalledOnce();
+  expect(notices()).not.toContain('busy');
+});
+
+it('a transient failure after the deadline ends the attempt as expired', async () => {
+  const req = request();
+  req.expiresAt = Date.now() + 3000;
+  req.poll.mockRejectedValue(new DevicePairingRetryableError('offline'));
+  vi.mocked(beginDevicePairing).mockResolvedValue(req);
+  render();
+  await press('设备验证');
+  await tick(3000);
+  expect(notices()).toContain('申请已过期');
+  expect(req.poll).toHaveBeenCalledTimes(1);
 });

@@ -5,7 +5,12 @@ import { xchacha20poly1305 } from '@noble/ciphers/chacha.js';
 import { hkdf } from '@noble/hashes/hkdf.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { readFileSync } from 'node:fs';
-import { beginDevicePairing } from '../../src/renderer/session/devicePairing';
+import {
+  DevicePairingRetryableError,
+  PAIRING_POLL_INTERVAL_MS,
+  beginDevicePairing,
+  nextPairingPollDelayMs,
+} from '../../src/renderer/session/devicePairing';
 import { deviceIdentityFromSecret } from '@todex/protocol/deviceAuth';
 
 // Noble freezes its public API. Keep the real algorithms but allow a fixed
@@ -36,6 +41,8 @@ let approved: Record<string, unknown>;
 // The transport the create response offers; the transcript binds it.
 let transportProtocol: string;
 let transportPublicKey: string;
+// The device name the create request sent; the transcript binds it last.
+let deviceName: string;
 let fetchMock: ReturnType<typeof vi.fn<typeof fetch>>;
 
 function response(value: unknown, status = 200) {
@@ -48,6 +55,8 @@ function createResponse(body: string) {
   expect(request.clientPublicKey).toBeUndefined();
   expect(request.devicePublicKey).toBe(device.publicKey);
   expect(request.transportBinding).toBe(1);
+  expect(request.deviceNameBinding).toBe(1);
+  deviceName = request.deviceName;
   commitment = request.clientCommitment;
   return response({
     requestId: id, serverPublicKey: encode(serverPublic), transportProtocol, transportPublicKey,
@@ -66,7 +75,7 @@ function revealResponse(body: string) {
   transcript = new Uint8Array(Buffer.concat([
     Buffer.from(`${domain}transcript\0${id}\0`), clientPublic, serverPublic,
     Buffer.from([0]), devicePublic, clientNonce,
-    lp(utf8(transportProtocol)), lp(Buffer.from(transportPublicKey, 'base64url')),
+    lp(utf8(transportProtocol)), lp(Buffer.from(transportPublicKey, 'base64url')), lp(utf8(deviceName)),
   ]));
   const salt = sha256(transcript);
   const secret = x25519.getSharedSecret(serverSecret, clientPublic);
@@ -118,6 +127,49 @@ it('computes its own verification code and decrypts the approved device id once'
     expect(init).toMatchObject({ credentials: 'omit', redirect: 'error', cache: 'no-store' });
     expect(JSON.stringify(init)).not.toContain(device.secretKey);
   }
+});
+
+it.each([
+  ['  Yoh 的 iPhone 📱\u202e \n', 'Yoh 的 iPhone 📱'],
+  ['\u0007 ', 'TodeX'],
+  ['a'.repeat(79) + ' tail', 'a'.repeat(79)],
+])('sends and binds the normalized device name (%j)', async (input, expected) => {
+  const request = await beginDevicePairing('http://localhost', input, device);
+  expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body)).deviceName).toBe(expected);
+  const code = Buffer.from(sha256(transcript).slice(0, 5)).toString('hex').toUpperCase();
+  expect(request.verificationCode).toBe(`${code.slice(0, 5)}-${code.slice(5)}`);
+  expect(Buffer.from(transcript.slice(transcript.length - Buffer.byteLength(expected))).toString('utf8')).toBe(expected);
+});
+
+it.each([
+  ['429 with Retry-After', () => new Response('{}', { status: 429, headers: { 'Retry-After': '3' } }), 3000],
+  ['503', () => response({ code: 'INTERNAL_ERROR' }, 503), undefined],
+  ['a network error', () => { throw new TypeError('Failed to fetch'); }, undefined],
+] as const)('a poll that fails transiently (%s) is retryable and keeps the request', async (_label, fail, retryAfter) => {
+  const request = await beginDevicePairing('http://localhost', 'Web', device);
+  fetchMock.mockImplementationOnce(async () => fail());
+  const error = await request.poll().catch((cause: unknown) => cause);
+  expect(error).toBeInstanceOf(DevicePairingRetryableError);
+  expect((error as DevicePairingRetryableError).retryAfterMs).toBe(retryAfter);
+  fetchMock.mockResolvedValueOnce(response(approved));
+  expect(await request.poll()).toMatchObject({ status: 'approved', deviceId: device.deviceId });
+});
+
+it.each([[404, '不支持'], [401, '未被接受']] as const)('a poll answered %i ends the request', async (status, message) => {
+  const request = await beginDevicePairing('http://localhost', 'Web', device);
+  fetchMock.mockResolvedValueOnce(response({ code: 'NOT_FOUND' }, status));
+  const error = await request.poll().catch((cause: unknown) => cause);
+  expect(error).not.toBeInstanceOf(DevicePairingRetryableError);
+  expect((error as Error).message).toContain(message);
+});
+
+it('backs off transient poll failures by doubling, honouring Retry-After, up to 5 s', () => {
+  const transient = new DevicePairingRetryableError('x');
+  expect(nextPairingPollDelayMs(PAIRING_POLL_INTERVAL_MS, transient)).toBe(4000);
+  expect(nextPairingPollDelayMs(4000, transient)).toBe(5000);
+  expect(nextPairingPollDelayMs(5000, transient)).toBe(5000);
+  expect(nextPairingPollDelayMs(PAIRING_POLL_INTERVAL_MS, new DevicePairingRetryableError('x', 4500))).toBe(4500);
+  expect(nextPairingPollDelayMs(PAIRING_POLL_INTERVAL_MS, new DevicePairingRetryableError('x', 60_000))).toBe(5000);
 });
 
 it.each(['rejected', 'expired'] as const)('closes a %s request without enrolling a device', async status => {
@@ -256,11 +308,14 @@ it('matches the shared pairing v3 vector (commitment, transport binding, code, p
     return beginDevicePairing('http://localhost', name, fixtureDevice);
   };
 
-  const request = await begin(fixture, 'Interop test');
+  const request = await begin(fixture, fixture.deviceName);
   expect(request.verificationCode).toBe(fixture.verificationCode);
   expect(request.transportFingerprint).toBe(fixture.fingerprint);
   const createBody = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
-  expect(createBody).toMatchObject({ transportBinding: 1, clientCommitment: fixture.commitmentBase64Url, devicePublicKey: b64(fixture.devicePublicKey) });
+  expect(createBody).toMatchObject({
+    transportBinding: 1, deviceNameBinding: 1, deviceName: fixture.deviceName,
+    clientCommitment: fixture.commitmentBase64Url, devicePublicKey: b64(fixture.devicePublicKey),
+  });
   expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).toEqual({
     requestId: fixture.requestId, clientPublicKey: b64(fixture.clientPublicKey), clientNonce: b64(fixture.clientNonce),
   });
@@ -270,7 +325,7 @@ it('matches the shared pairing v3 vector (commitment, transport binding, code, p
   await expect(request.poll()).rejects.toThrow('校验失败');
   expect(JSON.parse(String(fetchMock.mock.calls[2][1]?.body)).proof).toBe(b64(fixture.pollProof));
 
-  const approvedRequest = await begin(fixture, 'Interop approval');
+  const approvedRequest = await begin(fixture, fixture.deviceName);
   const nonce = new Uint8Array(24).fill(7);
   const credential = JSON.parse(fixture.credential.plaintext);
   const ciphertext = xchacha20poly1305(hex(fixture.wrapKey), nonce, hex(fixture.transcript))
@@ -283,14 +338,22 @@ it('matches the shared pairing v3 vector (commitment, transport binding, code, p
 
   // A different transport key yields a different code, so a substituted key
   // shows up when the user compares codes.
-  const tampered = await begin(fixture.tampered, 'Interop tampered');
+  const tampered = await begin(fixture.tampered, fixture.deviceName);
   expect(tampered.verificationCode).toBe(fixture.tampered.verificationCode);
   await tampered.cancel();
-  const none = await begin(fixture.noneCase, 'Interop none');
+  // So does another device name: the backend shows the name the code binds.
+  for (const named of [fixture.nonAsciiName, fixture.tamperedName]) {
+    const renamed = await begin(fixture, named.deviceName);
+    expect(JSON.parse(String(fetchMock.mock.calls.at(-2)?.[1]?.body)).deviceName).toBe(named.deviceName);
+    expect(renamed.verificationCode).toBe(named.verificationCode);
+    expect(renamed.verificationCode).not.toBe(fixture.verificationCode);
+    await renamed.cancel();
+  }
+  const none = await begin(fixture.noneCase, fixture.deviceName);
   expect(none.verificationCode).toBe(fixture.noneCase.verificationCode);
   expect(none.transportFingerprint).toBe(fixture.noneCase.fingerprint);
 
-  const cancelled = await begin(fixture, 'Interop cancellation');
+  const cancelled = await begin(fixture, fixture.deviceName);
   await cancelled.cancel();
   expect(JSON.parse(String(fetchMock.mock.calls.at(-1)?.[1]?.body)).proof).toBe(b64(fixture.cancelProof));
 });

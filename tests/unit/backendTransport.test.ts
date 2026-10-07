@@ -6,15 +6,16 @@ import {
   RecordCipher,
   TRANSPORT_V2_DIRECTION_DOWN,
   TRANSPORT_V2_DIRECTION_UP,
-  TRANSPORT_V2_REST_LABEL,
   TransportCryptoError,
   decodeInnerRequest,
-  deriveTransportKeys,
+  deriveRestDownKey,
+  deriveRestTransportKeys,
   encodeInnerResponse,
   openRecordStream,
   sealRecordStream,
 } from '@todex/protocol/secureChannel';
 import {
+  BackendUpgradeRequiredError,
   EncryptionRequiredError,
   InvalidPinnedKeyError,
   TransportPolicyError,
@@ -39,8 +40,8 @@ const unverified = (serverUrl: string) => ({ ...pinned(serverUrl), transportVeri
 const unpaired = (serverUrl: string) => ({ serverUrl, deviceSecret: device.secretKey, encryptionProtocol: 'none' as const, encryptionPublicKey: '', transportVerified: false });
 
 type Inner = ReturnType<typeof decodeInnerRequest>;
-/** A `fetch` that only answers `/v2/sealed`, the way the backend tunnel does. */
-function sealedBackend(answer: (inner: Inner) => { status: number; body: unknown }) {
+/** A `fetch` that only answers `/v2/sealed`, the way the backend tunnel does (sealed revision 2). */
+function sealedBackend(answer: (inner: Inner) => { status: number; body: unknown }, contentType = 'application/vnd.todex.sealed; r=2') {
   const calls: { url: URL; inner?: Inner }[] = [];
   const fetchImpl = vi.fn(async (input: string, init: RequestInit) => {
     const url = new URL(String(input));
@@ -48,17 +49,22 @@ function sealedBackend(answer: (inner: Inner) => { status: number; body: unknown
     if (url.pathname !== '/v2/sealed') return new Response('{"code":"PROTOCOL_UPGRADE_REQUIRED"}', { status: 426 });
     const headers = init.headers as Record<string, string>;
     const clientMaterial = new Uint8Array(Buffer.from(headers['x-todex-client-key'], 'base64url'));
-    const keys = deriveTransportKeys({
-      label: TRANSPORT_V2_REST_LABEL, protocol: 'x25519', deviceId: '', serverStaticPublic: serverPublic, clientMaterial,
+    expect(headers['x-todex-sealed-revision']).toBe('2');
+    const keys = deriveRestTransportKeys({
+      protocol: 'x25519', deviceId: '', serverStaticPublic: serverPublic, clientMaterial,
       clientNonce: new Uint8Array(Buffer.from(headers['x-todex-request-nonce'], 'base64url')), serverNonce: new Uint8Array(),
       shared: x25519.getSharedSecret(serverSecret, clientMaterial),
     });
     const inner = decodeInnerRequest(openRecordStream(new RecordCipher(keys.kUp, keys.th, TRANSPORT_V2_DIRECTION_UP), init.body as Uint8Array));
     calls[calls.length - 1].inner = inner;
     const result = answer(inner);
-    const sealed = sealRecordStream(new RecordCipher(keys.kDown, keys.th, TRANSPORT_V2_DIRECTION_DOWN),
+    const responseNonce = crypto.getRandomValues(new Uint8Array(32));
+    const records = sealRecordStream(new RecordCipher(deriveRestDownKey(keys.prk, responseNonce), keys.th, TRANSPORT_V2_DIRECTION_DOWN),
       encodeInnerResponse({ status: result.status, headers: { 'content-type': 'application/json' } }, new TextEncoder().encode(JSON.stringify(result.body))));
-    return new Response(sealed as Uint8Array<ArrayBuffer>, { status: 200, headers: { 'content-type': 'application/vnd.todex.sealed' } });
+    const sealed = new Uint8Array(32 + records.length);
+    sealed.set(responseNonce);
+    sealed.set(records, 32);
+    return new Response(sealed as Uint8Array<ArrayBuffer>, { status: 200, headers: { 'content-type': contentType } });
   });
   vi.stubGlobal('fetch', fetchImpl);
   return calls;
@@ -128,6 +134,13 @@ it('surfaces inner error statuses as plain responses and an unsealed answer as a
   const failure = await backendFetch(pinned('http://192.168.1.21:7345'), { method: 'GET', path: '/v2/workspaces' }).catch((error: unknown) => error);
   expect(failure).toBeInstanceOf(ConnectionError);
   expect(describeTransportFailure(failure)).toMatchObject({ retryable: true, code: 'protocol_mismatch' });
+
+  // A sealed answer without r=2 comes from a backend that must be updated.
+  sealedBackend(() => ({ status: 200, body: {} }), 'application/vnd.todex.sealed');
+  const outdated = await backendFetch(pinned('http://192.168.1.22:7345'), { method: 'GET', path: '/v2/workspaces' }).catch((error: unknown) => error);
+  expect(outdated).toBeInstanceOf(BackendUpgradeRequiredError);
+  expect(describeTransportFailure(outdated)).toMatchObject({ retryable: false, code: 'protocol_mismatch' });
+  expect(describeTransportFailure(outdated)?.message).toContain('升级后端');
 });
 
 it('maps every transport failure to a localized message and retry policy', () => {
@@ -138,6 +151,7 @@ it('maps every transport failure to a localized message and retry policy', () =>
   expect(describeTransportFailure(new InvalidPinnedKeyError('x25519'))?.message).toContain('重新配对');
   expect(describeTransportFailure(new EncryptionRequiredError('http://x'))?.message).not.toMatch(/二维码|粘贴/);
   expect(describeTransportFailure(new TransportPolicyError('outdated', false))).toMatchObject({ retryable: false });
+  expect(describeTransportFailure(new BackendUpgradeRequiredError('policy'))).toMatchObject({ retryable: false, code: 'protocol_mismatch' });
   expect(describeTransportFailure(new TransportPolicyError('unreachable', true))).toMatchObject({ retryable: true, code: 'backend_unreachable' });
   expect(describeTransportFailure(new TransportPolicyError('timeout', true))).toMatchObject({ retryable: true });
   expect(describeTransportFailure(new TransportPolicyError('http', false, 403))).toMatchObject({ retryable: false });
