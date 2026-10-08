@@ -19,6 +19,8 @@ const action = (actionId: string, extra: Record<string, unknown> = {}) => ({
 function session(listeners: Map<string, (frame: AgentBrowserFrame) => void>, unwatch = vi.fn()) {
   return {
     settings: { serverUrl: 'https://backend.test', deviceSecret: '' },
+    // The runtime is keyed by the local id; the backend knows the v2 id.
+    conversations: [{ id: 'c', v2ConversationId: 'v2-c' }],
     conversationRuntimeById: {
       c: { desktopBrowser: { granted: true, tabOpen: true, deviceName: 'Studio Mac', actions: [action('a', { tool: 'browser_open', url: 'http://localhost:5173/', title: 'Dev', shotId: 'shot_a' }), action('b')] } },
     },
@@ -47,7 +49,7 @@ it('streams frames while shown and stops watching when hidden', async () => {
   // Before the first frame: the latest screenshot.
   expect(container.querySelector('img')?.getAttribute('src')).toBe('data:image/jpeg;base64,shot');
   await act(async () => {
-    listeners.get('c')!({ conversationId: 'c', seq: 1, mimeType: 'image/jpeg', data: btoa('jpeg'), width: 4, height: 3 });
+    listeners.get('v2-c')!({ conversationId: 'c', seq: 1, mimeType: 'image/jpeg', data: btoa('jpeg'), width: 4, height: 3 });
     await new Promise(resolve => setTimeout(resolve, 0));
   });
   expect(container.textContent).toContain('实时');
@@ -55,7 +57,7 @@ it('streams frames while shown and stops watching when hidden', async () => {
   expect([canvas.width, canvas.height]).toEqual([4, 3]);
   expect(bitmap.close).toHaveBeenCalled();
   // The tab closed on the backend.
-  await act(async () => { listeners.get('c')!({ conversationId: 'c', closed: true }); });
+  await act(async () => { listeners.get('v2-c')!({ conversationId: 'c', closed: true }); });
   expect(container.textContent).not.toContain('实时');
   await act(async () => { root.render(createElement(AgentBrowserLiveView, { session: session(listeners, unwatch), conversationId: 'c', isActive: false })); });
   expect(unwatch).toHaveBeenCalled();
@@ -64,11 +66,11 @@ it('streams frames while shown and stops watching when hidden', async () => {
 
 it('stop revokes the conversation browser', async () => {
   vi.spyOn(V2ApiClient.prototype, 'getAgentShot').mockResolvedValue({ shotId: 'shot_a', mimeType: 'image/jpeg', dataUrl: 'data:image/jpeg;base64,shot' });
-  const revoke = vi.spyOn(V2ApiClient.prototype, 'revokeAgentDesktop').mockResolvedValue({ conversationId: 'c', revoked: true });
+  const revoke = vi.spyOn(V2ApiClient.prototype, 'revokeAgentDesktop').mockResolvedValue({ conversationId: 'v2-c', revoked: true });
   await render(session(new Map()));
   const stop = [...container.querySelectorAll('button')].find(button => button.textContent?.includes('停止'))!;
   await act(async () => { stop.click(); });
-  expect(revoke).toHaveBeenCalledWith('c', 'browser');
+  expect(revoke).toHaveBeenCalledWith('v2-c', 'browser');
 });
 
 it('decodes frames natively when available and keeps a steady canvas size', async () => {
@@ -91,7 +93,7 @@ it('decodes frames natively when available and keeps a steady canvas size', asyn
     }
     for (const seq of [1, 2, 3]) {
       await act(async () => {
-        listeners.get('c')!({ conversationId: 'c', seq, mimeType: 'image/jpeg', data: btoa(`jpeg${seq}`), width: 4, height: 3 });
+        listeners.get('v2-c')!({ conversationId: 'c', seq, mimeType: 'image/jpeg', data: btoa(`jpeg${seq}`), width: 4, height: 3 });
         await new Promise(resolve => setTimeout(resolve, 0));
       });
     }
