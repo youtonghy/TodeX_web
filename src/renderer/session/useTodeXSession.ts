@@ -2,7 +2,12 @@ import { toast } from '@heroui/react';
 import { PiExtensionEffects, canApplyPluginDraft } from './piExtensionEffects';
 import { commandContextKey, routePiSlashCommand, type ProviderCommandCatalog } from './providerCommands';
 import { piExtensionPlainText } from '../components/piExtensionPresentation';
-import type { AgentBrowserFrame } from '@todex/protocol/agentDesktop';
+import {
+  AGENT_BROWSER_UNWATCH_ID_PREFIX,
+  AGENT_BROWSER_WATCH_ID_PREFIX,
+  isAgentBrowserWatchRequestId,
+  type AgentBrowserFrame,
+} from '@todex/protocol/agentDesktop';
 import type { ExtensionEditorRequest } from '@todex/protocol/conversationRuntime';
 import { normalizeBackendLabelColor, type BackendConnectionProfile } from './backendColors';
 import { useWorkbenchSharing } from './useWorkbenchSharing';
@@ -3632,6 +3637,12 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         const detail = historyErrorMessage(code) ?? (typeof payload?.message === 'string' ? payload.message : t('sess.v2CommandFailed'));
         const message = code ? `[${code}] ${detail}` : detail;
         const requestId = typeof parsed.id === 'string' ? parsed.id : '';
+        if (isAgentBrowserWatchRequestId(requestId)) {
+          // A live view that cannot start falls back to screenshots; it is not
+          // the user's failure to report.
+          console.warn('Agent browser watch request failed', message);
+          return;
+        }
         const failedSubscribe = pendingV2SubscribeRef.current.get(requestId);
         if (failedSubscribe) {
           pendingV2SubscribeRef.current.delete(requestId);
@@ -3766,14 +3777,14 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     if (!listeners) {
       listeners = new Set();
       watchers.set(conversationId, listeners);
-      sendRawProtocolFrame({ id: createRequestId('abw'), type: 'agentBrowser.watch', payload: { conversationId } });
+      sendRawProtocolFrame({ id: createRequestId(AGENT_BROWSER_WATCH_ID_PREFIX), type: 'agentBrowser.watch', payload: { conversationId } });
     }
     listeners.add(listener);
     return () => {
       const current = watchers.get(conversationId);
       if (!current?.delete(listener) || current.size) return;
       watchers.delete(conversationId);
-      sendRawProtocolFrame({ id: createRequestId('abu'), type: 'agentBrowser.unwatch', payload: { conversationId } });
+      sendRawProtocolFrame({ id: createRequestId(AGENT_BROWSER_UNWATCH_ID_PREFIX), type: 'agentBrowser.unwatch', payload: { conversationId } });
     };
   }, [sendRawProtocolFrame]);
 
@@ -4198,7 +4209,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         v2SubscriptionsRef.current.clear();
         // So are live browser views: watch again what is still on screen.
         for (const watched of agentBrowserWatchersRef.current.keys()) {
-          const watchFrame = JSON.stringify({ id: createRequestId('abw'), type: 'agentBrowser.watch', payload: { conversationId: watched } });
+          const watchFrame = JSON.stringify({ id: createRequestId(AGENT_BROWSER_WATCH_ID_PREFIX), type: 'agentBrowser.watch', payload: { conversationId: watched } });
           sendSocketText(socket, watchFrame);
         }
         pendingV2SubscribeRef.current.clear();

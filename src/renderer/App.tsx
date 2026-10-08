@@ -4,6 +4,7 @@ import { AppLayout, Navbar } from '@heroui-pro/react';
 import { RiAddLine, RiGithubLine, RiLayoutLeftLine, RiLayoutRightLine, RiRobot2Line, RiShieldLine } from '@remixicon/react';
 import { useWorkbenchLayout } from './session/useWorkbenchLayout';
 import { sshWorkbenchScopeKey, workbenchScopeKey } from './session/workbenchLayout';
+import { createAgentBrowserWatch, takeNewAgentBrowserTab } from './session/agentBrowserTabs';
 import { createSshExecWatch, takeNewSshExecs } from './session/sshExecTabs';
 import { useTodeXSession, type TodeXSession } from './session/useTodeXSession';
 import { ConversationHeaderDetails } from './components/ConversationHeaderDetails';
@@ -128,6 +129,8 @@ export function App() {
   const layout = useWorkbenchLayout(scopeKey);
   const { isOpen: asideOpen, setOpen: setAsideOpenRaw, tab: workbenchTab, setTab: setWorkbenchTab,
     target: panelTarget, setTarget: setPanelTarget } = layout;
+  // The aside is actually on screen; live views stop streaming otherwise.
+  const asideShown = Boolean(scopeKey) && layout.hydrated && asideOpen;
   const persistAsideOpen = useCallback((open: boolean) => {
     if (open !== asideOpen) animatePanelMotion();
     setAsideOpenRaw(open);
@@ -211,20 +214,18 @@ export function App() {
     persistAsideOpen(true);
   }, [persistAsideOpen, queueWorkbenchRequest, scopeKey, sshActive, viewedConversationId, viewedRecovering, viewedRuntime]);
 
-  // A new agent desktop-browser action in the viewed conversation opens its
-  // screenshot tab; actions already present when the conversation became the
-  // viewed one (history, replay) do not.
-  const agentBrowserWatchRef = useRef({ conversationId: '', actionId: '' });
-  const newestAgentAction = viewedRuntime?.desktopBrowser.actions.at(-1)?.actionId ?? '';
+  // A new agent-browser tab lifetime in the viewed conversation (its first
+  // successful call, or one after the tab closed) opens the live view.
+  // Lifetimes already present when the conversation became the viewed one
+  // (history, replay), failed calls, and a panel the user closed during the
+  // same lifetime do not.
+  const agentBrowserWatchRef = useRef(createAgentBrowserWatch());
   useEffect(() => {
-    const watch = agentBrowserWatchRef.current;
-    const fresh = watch.conversationId === viewedConversationId && !viewedRecovering
-      && newestAgentAction && newestAgentAction !== watch.actionId;
-    agentBrowserWatchRef.current = { conversationId: viewedConversationId, actionId: newestAgentAction };
-    if (!fresh || sshActive || !scopeKey) return;
+    const started = takeNewAgentBrowserTab(agentBrowserWatchRef.current, viewedConversationId, viewedRuntime, viewedRecovering);
+    if (!started || sshActive || !scopeKey) return;
     queueWorkbenchRequest(id => ({ id, kind: 'agent-browser', conversationId: viewedConversationId }));
     persistAsideOpen(true);
-  }, [newestAgentAction, persistAsideOpen, queueWorkbenchRequest, scopeKey, sshActive, viewedConversationId, viewedRecovering]);
+  }, [persistAsideOpen, queueWorkbenchRequest, scopeKey, sshActive, viewedConversationId, viewedRecovering, viewedRuntime]);
 
   useEffect(() => {
     const reportStorageFailure = () => toast.danger(t('app.storageQuota'));
@@ -367,7 +368,7 @@ export function App() {
           asideMaxSize="640px"
           asideResizeBehavior="preserve-pixel-size"
           resizableAutoSaveId={LAYOUT_AUTO_SAVE_ID}
-          asideOpen={Boolean(scopeKey) && layout.hydrated && asideOpen}
+          asideOpen={asideShown}
           onAsideOpenChange={persistAsideOpen}
           aside={
             !scopeKey || !layout.hydrated ? null : (
@@ -380,7 +381,7 @@ export function App() {
                     onBack={() => setPanel(workbenchTab)}
                   />
                 ) : (
-                  <WorkbenchPanel key={scopeKey} scopeKey={scopeKey} session={session} tab={workbenchTab} target={panelTarget} onTabChange={changeWorkbenchTab} onTargetConsumed={consumePanelTarget}
+                  <WorkbenchPanel key={scopeKey} scopeKey={scopeKey} shown={asideShown} session={session} tab={workbenchTab} target={panelTarget} onTabChange={changeWorkbenchTab} onTargetConsumed={consumePanelTarget}
                     sshMode={sshActive} requests={workbenchRequests} onRequestsHandled={workbenchRequestsHandled} onItemsChange={sshActive ? setWorkbenchItems : undefined} />
                 )}
               </Suspense>

@@ -4,7 +4,7 @@ import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { toast } from '@heroui/react';
 import { ChatPanel } from '../../src/renderer/screens/ChatPanel';
-import { ConversationPermissionActions } from '../../src/renderer/components/ConversationRunStatus';
+import { ConversationPermissionActions, PermissionRequestCard } from '../../src/renderer/components/ConversationRunStatus';
 import { deviceIdentityFromSecret } from '@todex/protocol/deviceAuth';
 import type { TodeXSession } from '../../src/renderer/session/useTodeXSession';
 vi.hoisted(() => { window.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false, media: '', onchange: null }); });
@@ -102,4 +102,42 @@ it('requests naming their answering devices show buttons only on those devices',
   expect(container.querySelector('button')).toBeNull();
   act(() => root.render(createElement(ConversationPermissionActions, { request, deviceSecret: secret, onSelect })));
   expect([...container.querySelectorAll('button')].map(button => button.textContent)).toEqual(['允许', '拒绝']);
+});
+
+it('localizes the backend desktop browser approvals: titles from details, option names from the shared set', () => {
+  const grant = {
+    requestId: 'g', requestType: 'permission', title: 'Allow the agent to use a browser on Studio Mac?', event: {} as never,
+    data: {
+      kind: 'desktop_browser', details: { host: 'Studio Mac' },
+      options: [
+        { optionId: 'allow', name: 'Allow for this conversation', kind: 'allow_always' },
+        { optionId: 'reject', name: 'Deny', kind: 'reject_once' },
+      ],
+    },
+  };
+  const action = {
+    requestId: 'a', requestType: 'permission', title: 'Allow the agent to click "Pay" in the browser?', event: {} as never,
+    data: {
+      kind: 'desktop_browser_action', details: { tool: 'browser_act', action: 'click "Pay"', reason: 'payment' },
+      options: [
+        { optionId: 'allow', name: 'Allow once', kind: 'allow_once' },
+        { optionId: 'reject', name: 'Deny', kind: 'reject_once' },
+      ],
+    },
+  };
+  const tool = {
+    requestId: 't', requestType: 'permission', title: 'Allow x?', event: {} as never,
+    data: { kind: 'tool', details: { tool: 'x' }, options: [{ optionId: 'allow_always', name: 'Always allow in this conversation', kind: 'allow_always' }] },
+  };
+  container = document.createElement('div'); document.body.append(container); root = createRoot(container);
+  const show = (request: typeof grant | typeof action | typeof tool) => act(() => root.render(createElement(PermissionRequestCard, { request, fallbackTitle: 'fallback', onSelect: vi.fn() })));
+  show(grant);
+  expect(container.querySelector('p')?.textContent).toBe('允许 Agent 使用 Studio Mac 上的浏览器？');
+  expect([...container.querySelectorAll('button')].map(button => button.textContent)).toEqual(['本对话内允许', '拒绝']);
+  show(action);
+  expect(container.querySelector('p')?.textContent).toBe('允许 Agent 在浏览器中click "Pay"？');
+  expect([...container.querySelectorAll('button')].map(button => button.textContent)).toEqual(['允许本次', '拒绝']);
+  show(tool);
+  expect(container.querySelector('p')?.textContent).toBe('fallback');
+  expect([...container.querySelectorAll('button')].map(button => button.textContent)).toEqual(['本对话内允许']);
 });

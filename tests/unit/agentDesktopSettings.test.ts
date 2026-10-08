@@ -64,6 +64,33 @@ it('toggles desktop tools; Computer Use and the browser run on the backend compu
   expect(container.textContent).toContain('已授予屏幕录制');
 });
 
+it('keeps the last known settings when a later poll fails', async () => {
+  vi.useFakeTimers();
+  try {
+    const get = vi.spyOn(V2ApiClient.prototype, 'getAgentDesktop').mockResolvedValueOnce({ ...base, browser: browser(true) });
+    vi.spyOn(V2ApiClient.prototype, 'getAgentBrowserProfiles').mockResolvedValue({ profiles: [], workspaces: {} });
+    await render();
+    const toggle = () => container.querySelector<HTMLInputElement>('input[type="checkbox"], [role="switch"]');
+    expect(toggle()?.disabled).toBe(false);
+    expect(container.textContent).toContain('Chromium 154.0 已就绪');
+    get.mockRejectedValue(new ConnectionError('network', 'offline', '', true));
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    expect(get).toHaveBeenCalledTimes(2);
+    // A transient failure is not "backend without desktop tools".
+    expect(toggle()?.disabled).toBe(false);
+    expect(toggle()?.checked).toBe(true);
+    expect(container.textContent).toContain('Chromium 154.0 已就绪');
+    // The backend really lacking the endpoint clears them.
+    const notFound = new ConnectionError('server', 'not found', '', false);
+    notFound.httpStatus = 404;
+    get.mockRejectedValue(notFound);
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    expect(container.textContent).not.toContain('Chromium 154.0 已就绪');
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
 it('deletes a browser profile after confirming', async () => {
   vi.spyOn(V2ApiClient.prototype, 'getAgentDesktop').mockResolvedValue({ ...base, browser: browser(true) });
   vi.spyOn(V2ApiClient.prototype, 'getAgentBrowserProfiles').mockResolvedValue({ profiles: [{ id: 'p1', name: 'app', createdAt: 1 }], workspaces: { ws_1: 'p1' } });

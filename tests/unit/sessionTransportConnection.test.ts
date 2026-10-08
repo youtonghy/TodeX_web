@@ -318,3 +318,28 @@ it('an approved pairing pins the transport in one profile update and connects en
   expect(session.settings).toMatchObject({ serverUrl: 'http://127.0.0.2:7345', deviceSecret: '', encryptionProtocol: 'none', encryptionPublicKey: '', transportVerified: false });
   expect(session.backendConnections.at(-1)).toMatchObject({ deviceSecret: '', encryptionProtocol: 'none', encryptionPublicKey: '', transportVerified: false });
 });
+
+it('a failed agentBrowser.watch/unwatch stays out of lastError, other request failures do not', async () => {
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  render(); await connect();
+  const socket = TestSocket.instances[0];
+  await act(async () => { socket.open(); socket.hello(); });
+  await act(async () => socket.pong());
+  expect(session.connectionState).toBe('open');
+  const sent = (type: string) => socket.texts.map(text => JSON.parse(text) as { id: string; type: string }).filter(frame => frame.type === type);
+  let unwatch = () => {};
+  await act(async () => { unwatch = session.watchAgentBrowser('v2-conv', () => {}); });
+  const [watch] = sent('agentBrowser.watch');
+  expect(watch.id).toMatch(/^abw-/);
+  await act(async () => { socket.reply({ id: watch.id, type: 'server.error', payload: { code: 'NOT_FOUND', message: 'no such conversation' } }); });
+  expect(session.lastError).toBe('');
+  expect(warn).toHaveBeenCalled();
+  await act(async () => { unwatch(); });
+  const [unwatchFrame] = sent('agentBrowser.unwatch');
+  expect(unwatchFrame.id).toMatch(/^abu-/);
+  await act(async () => { socket.reply({ id: unwatchFrame.id, type: 'server.error', payload: { code: 'NOT_FOUND', message: 'gone' } }); });
+  expect(session.lastError).toBe('');
+  // Any other failed request still reaches the user.
+  await act(async () => { socket.reply({ id: 'conversation-send-1', type: 'server.error', payload: { code: 'INTERNAL', message: 'boom' } }); });
+  expect(session.lastError).toContain('boom');
+});
