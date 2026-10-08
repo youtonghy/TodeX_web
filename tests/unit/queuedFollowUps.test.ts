@@ -1,89 +1,76 @@
 import { describe, expect, it } from 'vitest';
-import { QueuedFollowUps, restoreQueuedFollowUps, serializeQueuedFollowUps } from '../../src/renderer/session/queuedFollowUps';
+import { migrateLegacyFollowUps, restoreQueuedFollowUps, serializeQueuedFollowUps,
+  type LegacyAddResult, type LegacyConversationState } from '../../src/renderer/session/queuedFollowUps';
 
-describe('local follow-up delivery', () => {
-  it('advances on a completed turn once, never during historical replay', async () => {
-    const queue = new QueuedFollowUps();
-    const items = [{ id: 'a' }, { id: 'b' }];
-    const sent: string[] = [];
-    const send = async (item: { id: string }) => { sent.push(item.id); return true; };
-    const remove = (id: string) => { items.splice(items.findIndex(item => item.id === id), 1); };
-    await queue.settle('c', 't', 'turn.completed', true, () => items[0], send, remove);
-    expect(sent).toEqual([]);
-    await queue.settle('c', 't', 'turn.completed', false, () => items[0], send, remove);
-    await queue.settle('c', 't', 'turn.completed', false, () => items[0], send, remove);
-    expect(sent).toEqual(['a']);
-    expect(items).toEqual([{ id: 'b' }]);
-  });
-  it('pauses only on abnormal turn end; failed sends stay queued and retryable', async () => {
-    const queue = new QueuedFollowUps(); let attempts = 0;
-    const items = [{ id: 'a' }];
-    const next = () => items[0];
-    const send = async () => { attempts++; return false; };
-    const remove = () => { items.splice(0, 1); };
-    // A failed send does not pause: the item stays queued for the next trigger.
-    await queue.settle('c', 't1', 'turn.completed', false, next, send, remove);
-    expect(attempts).toBe(1);
-    expect(queue.isPaused('c')).toBe(false);
-    // An abnormal terminal pauses until explicit resume.
-    await queue.settle('c', 't2', 'turn.failed', false, next, send, remove);
-    expect(queue.isPaused('c')).toBe(true);
-    await queue.settle('c', 't3', 'turn.completed', false, next, send, remove);
-    expect(attempts).toBe(1);
-    await queue.resume('c', next, send, remove);
-    expect(attempts).toBe(2);
-    expect(queue.isPaused('c')).toBe(false);
-  });
-  it('serializes concurrent resume calls', async () => {
-    const queue = new QueuedFollowUps(); let attempts = 0; let finish!: (ok: boolean) => void;
-    const send = () => { attempts++; return new Promise<boolean>(resolve => { finish = resolve; }); };
-    const first = queue.resume('c', () => ({ id: 'a' }), send, () => {});
-    await queue.resume('c', () => ({ id: 'a' }), send, () => {});
-    expect(attempts).toBe(1); finish(true); await first;
-  });
+const item = (id: string) => ({ id, text: `text ${id}`, attachments: [], skills: [] });
+
+describe('legacy candidate parsing', () => {
   it('rejects malformed stored queues and bounds restored items', () => {
     expect(restoreQueuedFollowUps({ c: [null, {}, { id: 2 }] })).toEqual({ queues: {}, paused: [] });
-    const item = { id: 'a', text: 'hello', attachments: [], skills: [] };
-    expect(restoreQueuedFollowUps({ c: Array(40).fill(item) }).queues.c).toHaveLength(32);
-    expect(restoreQueuedFollowUps({ version: 2, queues: { c: Array(40).fill(item) }, paused: 'c' })).toEqual({
-      queues: { c: Array(32).fill(item) }, paused: [] });
+    expect(restoreQueuedFollowUps({ c: Array(40).fill(item('a')) }).queues.c).toHaveLength(32);
+    expect(restoreQueuedFollowUps({ version: 2, queues: { c: Array(40).fill(item('a')) }, paused: 'c' })).toEqual({
+      queues: { c: Array(32).fill(item('a')) }, paused: [] });
   });
   it('keeps the paused flag with the candidates and still reads the old shape', () => {
-    const item = { id: 'a', text: 'hello', attachments: [], skills: [] };
-    const stored = serializeQueuedFollowUps({ c: [item], d: [item] }, ['c', 'c', 'gone']);
+    const stored = serializeQueuedFollowUps({ c: [item('a')], d: [item('a')] }, ['c', 'c', 'gone']);
     // A pause without candidates behind it is not stored.
-    expect(stored).toEqual({ version: 2, queues: { c: [item], d: [item] }, paused: ['c'] });
-    expect(restoreQueuedFollowUps(JSON.parse(JSON.stringify(stored)))).toEqual({ queues: { c: [item], d: [item] }, paused: ['c'] });
+    expect(stored).toEqual({ version: 2, queues: { c: [item('a')], d: [item('a')] }, paused: ['c'] });
+    expect(restoreQueuedFollowUps(JSON.parse(JSON.stringify(stored)))).toEqual({ queues: { c: [item('a')], d: [item('a')] }, paused: ['c'] });
     // Version 1 stored the map alone; nothing in it was marked paused.
-    expect(restoreQueuedFollowUps({ c: [item] })).toEqual({ queues: { c: [item] }, paused: [] });
-  });
-  it('only an explicit resume moves a paused queue; automatic triggers wait', async () => {
-    const queue = new QueuedFollowUps(); const sent: string[] = [];
-    const items = [{ id: 'a' }];
-    const send = async (item: { id: string }) => { sent.push(item.id); return true; };
-    const remove = () => { items.splice(0, 1); };
-    queue.pause('c');
-    expect(queue.pausedIds()).toEqual(['c']);
-    await queue.drain('c', () => items[0], send, remove);
-    expect(sent).toEqual([]);
-    await queue.resume('c', () => items[0], send, remove);
-    expect(sent).toEqual(['a']);
-    expect(queue.pausedIds()).toEqual([]);
-    items.push({ id: 'b' });
-    await queue.drain('c', () => items[0], send, remove);
-    expect(sent).toEqual(['a', 'b']);
+    expect(restoreQueuedFollowUps({ c: [item('a')] })).toEqual({ queues: { c: [item('a')] }, paused: [] });
   });
 });
 
-it('advances after a queued turn finishes before its submission ACK', async () => {
-  const queue = new QueuedFollowUps(); const items = [{id:'b'}, {id:'c'}]; const sent: string[] = [];
-  let acknowledge!: (value: boolean) => void;
-  const send = (item: {id: string}) => { sent.push(item.id); return item.id === 'b'
-    ? new Promise<boolean>(resolve => { acknowledge = resolve; }) : Promise.resolve(true); };
-  const remove = (id: string) => { const index = items.findIndex(item => item.id === id); if (index >= 0) items.splice(index, 1); };
-  const first = queue.settle('conversation', 'a', 'turn.completed', false, () => items[0], send, remove);
-  remove('b'); // Realtime terminal consumed B before its command waiter resolved.
-  await queue.settle('conversation', 'b', 'turn.completed', false, () => items[0], send, remove);
-  acknowledge(true); await first;
-  expect(sent).toEqual(['b','c']); expect(items).toEqual([]);
+describe('migrateLegacyFollowUps', () => {
+  function run(legacy: Parameters<typeof migrateLegacyFollowUps<ReturnType<typeof item>>>[0], states: Record<string, LegacyConversationState>,
+    results: (id: string, itemId: string, paused: boolean) => LegacyAddResult = () => 'added') {
+    const added: string[] = []; const settled: Record<string, string[]> = {}; const discarded: Record<string, string[]> = {};
+    return {
+      added, settled, discarded,
+      done: migrateLegacyFollowUps(legacy, {
+        state: (id) => states[id] ?? 'wait',
+        add: async (id, entry, paused) => { added.push(`${id}:${entry.id}:${paused ? 'paused' : 'live'}`); return results(id, entry.id, paused); },
+        settle: (id, remaining) => { settled[id] = remaining.map((entry) => entry.id); },
+        discarded: (id, items) => { discarded[id] = items.map((entry) => entry.id); },
+      }),
+    };
+  }
+
+  it('adds the items in order under their original ids and settles each one', async () => {
+    const test = run({ queues: { c: [item('a'), item('b')] }, paused: [] }, { c: { control: true } });
+    expect(await test.done).toEqual({ queues: {}, paused: [] });
+    expect(test.added).toEqual(['c:a:live', 'c:b:live']);
+    expect(test.settled.c).toEqual([]);
+  });
+  it('keeps a paused conversation paused, or leaves it untouched without queue control', async () => {
+    const paused = run({ queues: { c: [item('a'), item('b')] }, paused: ['c'] }, { c: { control: true } });
+    await paused.done;
+    expect(paused.added).toEqual(['c:a:paused', 'c:b:paused']);
+    const legacy = { queues: { c: [item('a')] }, paused: ['c'] };
+    const noControl = run(legacy, { c: { control: false } });
+    expect(await noControl.done).toEqual(legacy);
+    expect(noControl.added).toEqual([]);
+    expect(noControl.settled).toEqual({});
+  });
+  it('drops conversations that are gone or read-only and reports what was discarded', async () => {
+    const test = run({ queues: { gone: [item('a')], ro: [item('b'), item('c')] }, paused: ['ro'] }, { gone: 'gone', ro: 'readOnly' });
+    expect(await test.done).toEqual({ queues: {}, paused: [] });
+    expect(test.discarded).toEqual({ gone: ['a'], ro: ['b', 'c'] });
+    expect(test.added).toEqual([]);
+    expect(test.settled).toEqual({ gone: [], ro: [] });
+  });
+  it('drops the rest of a conversation the backend refuses for good', async () => {
+    const test = run({ queues: { c: [item('a'), item('b')] }, paused: [] }, { c: { control: true } },
+      (_id, itemId) => itemId === 'a' ? 'added' : 'discard');
+    expect(await test.done).toEqual({ queues: {}, paused: [] });
+    expect(test.discarded).toEqual({ c: ['b'] });
+  });
+  it('keeps the unsent items after a transient failure and waits for conversations not ready', async () => {
+    const legacy = { queues: { c: [item('a'), item('b'), item('c')], other: [item('x')] }, paused: ['other'] };
+    const test = run(legacy, { c: { control: true } }, (_id, itemId) => itemId === 'b' ? 'transient' : 'added');
+    expect(await test.done).toEqual({ queues: { c: [item('b'), item('c')], other: [item('x')] }, paused: ['other'] });
+    expect(test.added).toEqual(['c:a:live', 'c:b:live']);
+    expect(test.settled.c).toEqual(['b', 'c']);
+    expect(test.discarded).toEqual({});
+  });
 });

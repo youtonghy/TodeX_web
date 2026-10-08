@@ -1,10 +1,12 @@
-import { afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as React from 'react';
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { toast } from '@heroui/react';
 import { useTodeXSession, type TodeXSession } from '../../src/renderer/session/useTodeXSession';
 import { loadJson, saveJson } from '../../src/renderer/lib/storage';
+import { ConversationControls } from '../../src/renderer/components/ConversationControls';
+import { EMPTY_FOLLOW_UP_QUEUE } from '@todex/protocol/conversationRuntime';
 import { t } from '../../src/renderer/i18n';
 import { buildConversationCancelMessage, defaultSettings, formatResetInstant, hasBackendQueue, isStaleCancelResult, SETTINGS_STORAGE_KEY, WORKSPACES_STORAGE_KEY, CONVERSATIONS_STORAGE_KEY,
   ACTIVE_SELECTION_STORAGE_KEY, type ConversationRecord } from '../../src/renderer/session/helpers';
@@ -35,6 +37,9 @@ let manifestStatus = 'idle';
 let manifestSequence = 0;
 let journal: object[] = [];
 let storedQueue: unknown = {};
+let storedConversations: object[] = [];
+let extraManifests: object[] = [];
+const LEGACY_KEY = 'todex.queued-follow-ups.v1';
 
 function event(sequence: number, type: string, payload: Record<string, unknown>) {
   return { schemaVersion: 2, eventId: `e${sequence}`, conversationId: 'c', sequence, time: '2026-10-06T00:00:00Z', type, payload };
@@ -64,14 +69,16 @@ beforeEach(() => {
   manifestSequence = 0;
   journal = [];
   storedQueue = {};
+  storedConversations = [];
+  extraManifests = [];
   TestSocket.instances = [];
   vi.stubGlobal('WebSocket', TestSocket);
   for (const kind of ['warning', 'danger', 'info'] as const) vi.spyOn(toast, kind).mockReturnValue(`toast-${kind}`);
   vi.mocked(loadJson).mockImplementation(async (key, fallback) => ({
     [SETTINGS_STORAGE_KEY]: { ...defaultSettings, serverUrl: 'http://127.0.0.3' },
-    [WORKSPACES_STORAGE_KEY]: [workspace], [CONVERSATIONS_STORAGE_KEY]: [{ ...conversation, nativeStatus: manifestStatus, lastSequence: manifestSequence }],
+    [WORKSPACES_STORAGE_KEY]: [workspace], [CONVERSATIONS_STORAGE_KEY]: [{ ...conversation, nativeStatus: manifestStatus, lastSequence: manifestSequence }, ...storedConversations],
     [ACTIVE_SELECTION_STORAGE_KEY]: { workspaceId: 'w', conversationId: 'c' },
-    'todex.queued-follow-ups.v1': storedQueue,
+    [LEGACY_KEY]: storedQueue,
   }[key] ?? fallback) as never);
   vi.stubGlobal('fetch', vi.fn(async (input: string | URL) => {
     const url = new URL(String(input));
@@ -80,7 +87,7 @@ beforeEach(() => {
     else if (url.pathname === '/v2/providers') result = { providers: [provider] };
     else if (url.pathname === '/v2/conversations') result = { conversations: [{ schemaVersion: 2, id: 'c', provider: 'claude-code',
       ownerId: 'owner', workspace: '/workspace', workspaceId: 'w', title: 'Queue test', status: manifestStatus,
-      lastSequence: manifestSequence, createdAt: '2026-10-06T00:00:00Z', updatedAt: '2026-10-06T00:00:00Z' }] };
+      lastSequence: manifestSequence, createdAt: '2026-10-06T00:00:00Z', updatedAt: '2026-10-06T00:00:00Z' }, ...extraManifests] };
     else if (url.pathname === '/v2/workspaces') result = { workspaces: [workspace] };
     else if (url.pathname === '/v2/providers/models') result = { provider: 'claude-code', models: [] };
     else if (url.pathname === '/v2/catalog/skills') result = { provider: 'claude-code', skills: [] };
@@ -117,7 +124,7 @@ it('only a backend that advertises its queue holds the follow-ups', () => {
   expect(hasBackendQueue([provider] as never, { ...record, v2ConversationId: '' })).toBe(false);
 });
 
-it('hands restored candidates to the backend queue instead of starting a turn after a reload', async () => {
+it('migrates legacy candidates to the backend queue instead of starting a turn after a reload', async () => {
   // The reported case: a long turn whose start lies below the loaded window.
   manifestStatus = 'running';
   manifestSequence = 3500;
@@ -129,7 +136,8 @@ it('hands restored candidates to the backend queue instead of starting a turn af
   expect(framesOf(socket, 'conversation.prompt')).toHaveLength(0);
   await act(async () => { socket.reply({ id: adds[0].id, type: 'server.result', payload: { conversationId: 'c', itemId: 'queued-1', status: 'queued' } }); });
   await act(async () => { await vi.advanceTimersByTimeAsync(50); });
-  expect(session.queuedChatDrafts.c ?? []).toHaveLength(0);
+  // Only a taken item leaves the legacy copy, and nothing new is ever stored.
+  expect(vi.mocked(saveJson).mock.calls.filter(([key]) => key === LEGACY_KEY)).toEqual([[LEGACY_KEY, undefined]]);
   expect(session.lastError).toBe('');
 });
 
@@ -154,6 +162,10 @@ it('queues composer sends in the backend while a turn runs and shows its snapsho
     await vi.advanceTimersByTimeAsync(100);
   });
   expect(session.conversationRuntimeById.c?.followUps.items.map(item => item.id)).toEqual([add.payload.itemId]);
+  // The backend is the only store: nothing about candidates or waits is persisted.
+  const keys = vi.mocked(saveJson).mock.calls.map(([key]) => key);
+  expect(keys).not.toContain(LEGACY_KEY);
+  expect(keys).not.toContain('todex.rate-limits.v1');
 });
 
 it('moves a prompt that hits a busy conversation into the backend queue without an error', async () => {
@@ -175,7 +187,7 @@ it('moves a prompt that hits a busy conversation into the backend queue without 
   expect(session.lastError).toBe('');
 });
 
-it('keeps candidates local on a backend without a queue while its manifest reports a running turn', async () => {
+it('keeps legacy candidates untouched on a backend without a queue', async () => {
   provider.capabilities.backendQueue = false;
   try {
     manifestStatus = 'running';
@@ -185,10 +197,236 @@ it('keeps candidates local on a backend without a queue while its manifest repor
     await act(async () => { await vi.advanceTimersByTimeAsync(100); });
     expect(framesOf(socket, 'conversation.prompt')).toHaveLength(0);
     expect(framesOf(socket, 'conversation.queue.add')).toHaveLength(0);
-    expect(session.queuedChatDrafts.c?.map(item => item.id)).toEqual(['queued-1']);
+    expect(vi.mocked(saveJson).mock.calls.filter(([key]) => key === LEGACY_KEY)).toEqual([]);
   } finally {
     provider.capabilities.backendQueue = true;
   }
+});
+
+it('rejects a busy send on a backend without a queue and keeps the composer', async () => {
+  provider.capabilities.backendQueue = false;
+  try {
+    manifestStatus = 'running';
+    manifestSequence = 1;
+    journal = [event(1, 'turn.started', { turnId: 't1' })];
+    const socket = await mount();
+    await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+    await act(async () => { session.setConversationChatDraft('c', 'next step'); });
+    await act(async () => { session.submitChat('c'); await vi.advanceTimersByTimeAsync(10); });
+    expect(framesOf(socket, 'conversation.queue.add')).toHaveLength(0);
+    expect(framesOf(socket, 'conversation.prompt')).toHaveLength(0);
+    expect(session.chatDrafts.c).toBe('next step');
+    expect(session.lastError).toBe(t('sess.backendQueueRequired'));
+    expect(vi.mocked(saveJson).mock.calls.filter(([key]) => String(key).includes('follow-ups'))).toEqual([]);
+  } finally {
+    provider.capabilities.backendQueue = true;
+  }
+});
+
+it('keeps the draft in the composer, reported, when the backend refuses a busy send', async () => {
+  manifestStatus = 'running';
+  manifestSequence = 1;
+  journal = [event(1, 'turn.started', { turnId: 't1' })];
+  const socket = await mount();
+  await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+  await act(async () => { session.setConversationChatDraft('c', 'next step'); });
+  await act(async () => { session.submitChat('c'); });
+  const add = framesOf(socket, 'conversation.queue.add').at(-1)!;
+  await act(async () => {
+    socket.reply({ id: add.id, type: 'server.error', payload: { code: 'INTERNAL', message: 'queue is full' } });
+    await vi.advanceTimersByTimeAsync(10);
+  });
+  expect(session.chatDrafts.c).toBe('next step');
+  expect(session.lastError).toContain('queue is full');
+  expect(vi.mocked(saveJson).mock.calls.filter(([key]) => String(key).includes('follow-ups'))).toEqual([]);
+});
+
+describe('legacy candidate migration', () => {
+  const legacyItem = (id: string, text: string) => ({ id, text, attachments: [], skills: [] });
+  const acknowledge = async (socket: TestSocket, frame: { id: string; payload: Record<string, unknown> }) => {
+    await act(async () => {
+      socket.reply({ id: frame.id, type: 'server.result', payload: { status: 'queued', itemId: frame.payload.itemId } });
+      await vi.advanceTimersByTimeAsync(10);
+    });
+  };
+
+  it('adds the items in order and removes the local copy only after the backend took them', async () => {
+    storedQueue = { c: [legacyItem('q1', 'first'), legacyItem('q2', 'second')] };
+    const socket = await mount();
+    await act(async () => { await vi.advanceTimersByTimeAsync(50); });
+    expect(framesOf(socket, 'conversation.queue.add').map(frame => frame.payload.itemId)).toEqual(['q1']);
+    await acknowledge(socket, framesOf(socket, 'conversation.queue.add')[0]);
+    expect(framesOf(socket, 'conversation.queue.add').map(frame => frame.payload.itemId)).toEqual(['q1', 'q2']);
+    expect(vi.mocked(saveJson).mock.calls.filter(([key]) => key === LEGACY_KEY).at(-1)![1]).toMatchObject({ queues: { c: [{ id: 'q2' }] } });
+    await acknowledge(socket, framesOf(socket, 'conversation.queue.add')[1]);
+    expect(vi.mocked(saveJson).mock.calls.filter(([key]) => key === LEGACY_KEY).at(-1)).toEqual([LEGACY_KEY, undefined]);
+  });
+
+  it('keeps a paused conversation paused when the backend can pause on add', async () => {
+    provider.capabilities.backendQueueControl = true;
+    try {
+      storedQueue = { version: 2, queues: { c: [legacyItem('q1', 'after the stop')] }, paused: ['c'] };
+      const socket = await mount();
+      await act(async () => { await vi.advanceTimersByTimeAsync(50); });
+      const adds = framesOf(socket, 'conversation.queue.add');
+      expect(adds).toHaveLength(1);
+      expect(adds[0].payload).toMatchObject({ itemId: 'q1', text: 'after the stop', paused: true });
+      expect(framesOf(socket, 'conversation.prompt')).toHaveLength(0);
+    } finally {
+      delete (provider.capabilities as Record<string, unknown>).backendQueueControl;
+    }
+  });
+
+  it('leaves a paused conversation local when the backend cannot pause on add', async () => {
+    storedQueue = { version: 2, queues: { c: [legacyItem('q1', 'after the stop')] }, paused: ['c'] };
+    const socket = await mount();
+    await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+    expect(framesOf(socket, 'conversation.queue.add')).toHaveLength(0);
+    expect(framesOf(socket, 'conversation.prompt')).toHaveLength(0);
+    expect(vi.mocked(saveJson).mock.calls.filter(([key]) => key === LEGACY_KEY)).toEqual([]);
+  });
+
+  it('drops candidates of a read-only or missing conversation with a notice listing them', async () => {
+    storedConversations = [{ ...conversation, id: 'ro', v2ConversationId: 'ro', sessionId: 'v2_ro', legacyPlaintext: true }];
+    extraManifests = [{ schemaVersion: 2, id: 'ro', provider: 'claude-code', ownerId: 'owner', workspace: '/workspace', workspaceId: 'w',
+      title: 'Old chat', status: 'idle', lastSequence: 0, legacyPlaintext: true,
+      createdAt: '2026-10-06T00:00:00Z', updatedAt: '2026-10-06T00:00:00Z' }];
+    storedQueue = { ro: [legacyItem('q1', 'read only text')], missing: [legacyItem('q2', 'lost text')] };
+    const socket = await mount();
+    await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+    expect(framesOf(socket, 'conversation.queue.add')).toHaveLength(0);
+    const notice = session.timeline.find(entry => entry.title === t('sess.legacyCandidatesDiscarded'));
+    expect(notice?.conversationId).toBe('ro');
+    expect(notice?.subtitle).toContain('read only text');
+    expect(session.lastError).toContain('lost text');
+    expect(vi.mocked(saveJson).mock.calls.filter(([key]) => key === LEGACY_KEY).at(-1)).toEqual([LEGACY_KEY, undefined]);
+  });
+
+  it('keeps the local copy when the add fails for a reason that may pass', async () => {
+    storedQueue = { c: [legacyItem('q1', 'later')] };
+    const socket = await mount();
+    await act(async () => { await vi.advanceTimersByTimeAsync(50); });
+    const add = framesOf(socket, 'conversation.queue.add')[0];
+    await act(async () => {
+      socket.reply({ id: add.id, type: 'server.error', payload: { code: 'INTERNAL', message: 'try again' } });
+      await vi.advanceTimersByTimeAsync(10);
+    });
+    expect(vi.mocked(saveJson).mock.calls.filter(([key]) => key === LEGACY_KEY)).toEqual([]);
+    expect(session.timeline.some(entry => entry.title === t('sess.legacyCandidatesDiscarded'))).toBe(false);
+  });
+});
+
+it('holds a send in memory while the first prompt creates the backend conversation, then queues it', async () => {
+  let created!: () => void;
+  const createGate = new Promise<void>(resolve => { created = resolve; });
+  const realFetch = globalThis.fetch;
+  vi.stubGlobal('fetch', vi.fn(async (input: string | URL, init?: RequestInit) => {
+    if (init?.method === 'POST' && new URL(String(input)).pathname === '/v2/conversations') {
+      await createGate;
+      return new Response(JSON.stringify({ schemaVersion: 2, id: 'n2', provider: 'claude-code', ownerId: 'owner',
+        workspace: '/workspace', workspaceId: 'w', title: 'New chat', status: 'idle', lastSequence: 0,
+        createdAt: '2026-10-06T00:00:00Z', updatedAt: '2026-10-06T00:00:00Z' }), { status: 200 });
+    }
+    return realFetch(input, init);
+  }));
+  const socket = await mount();
+  let draft: ReturnType<TodeXSession['createConversation']> = null;
+  await act(async () => { draft = session.createConversation('w'); });
+  const id = draft!.id;
+  await act(async () => { session.setConversationChatDraft(id, 'first'); });
+  await act(async () => { session.submitChat(id); await vi.advanceTimersByTimeAsync(10); });
+  await act(async () => { session.setConversationChatDraft(id, 'second'); });
+  await act(async () => { session.submitChat(id); await vi.advanceTimersByTimeAsync(10); });
+  // Nothing about the held message is stored or sent yet; the composer is clear.
+  expect(session.chatDrafts[id]).toBe('');
+  expect(framesOf(socket, 'conversation.queue.add')).toHaveLength(0);
+  expect(vi.mocked(saveJson).mock.calls.filter(([key]) => String(key).includes('follow-ups'))).toEqual([]);
+  await act(async () => { created(); await vi.advanceTimersByTimeAsync(50); });
+  const prompt = framesOf(socket, 'conversation.prompt').at(-1)!;
+  expect(prompt.payload).toMatchObject({ conversationId: 'n2', text: 'first' });
+  await act(async () => {
+    socket.reply({ id: prompt.id, type: 'server.result', payload: { conversationId: 'n2', turnId: 't1' } });
+    await vi.advanceTimersByTimeAsync(50);
+  });
+  const add = framesOf(socket, 'conversation.queue.add').at(-1)!;
+  expect(add.payload).toMatchObject({ conversationId: 'n2', text: 'second' });
+});
+
+it('returns a held send to the composer when the backend conversation cannot be created', async () => {
+  let fail!: () => void;
+  const failGate = new Promise<void>(resolve => { fail = resolve; });
+  const realFetch = globalThis.fetch;
+  vi.stubGlobal('fetch', vi.fn(async (input: string | URL, init?: RequestInit) => {
+    if (init?.method !== 'POST' || new URL(String(input)).pathname !== '/v2/conversations') return realFetch(input, init);
+    await failGate;
+    return new Response(JSON.stringify({ error: { code: 'INTERNAL', message: 'create failed' } }), { status: 500 });
+  }));
+  const socket = await mount();
+  let draft: ReturnType<TodeXSession['createConversation']> = null;
+  await act(async () => { draft = session.createConversation('w'); });
+  const id = draft!.id;
+  await act(async () => { session.setConversationChatDraft(id, 'first'); });
+  await act(async () => { session.submitChat(id); });
+  await act(async () => { session.setConversationChatDraft(id, 'second'); });
+  await act(async () => { session.submitChat(id); await vi.advanceTimersByTimeAsync(10); });
+  expect(session.chatDrafts[id]).toBe('');
+  await act(async () => { fail(); await vi.advanceTimersByTimeAsync(100); });
+  expect(framesOf(socket, 'conversation.queue.add')).toHaveLength(0);
+  expect(session.chatDrafts[id]).toBe('first\n\nsecond');
+});
+
+it('pauses the queue through the backend', async () => {
+  const socket = await mount();
+  let edited!: Promise<boolean>;
+  await act(async () => { edited = session.editFollowUpQueue('c', 'pause'); await vi.advanceTimersByTimeAsync(10); });
+  const pause = framesOf(socket, 'conversation.queue.pause').at(-1)!;
+  expect(pause.payload).toEqual({ conversationId: 'c' });
+  await act(async () => {
+    socket.reply({ id: pause.id, type: 'server.result', payload: { conversationId: 'c', queue: {
+      items: [{ id: 'a', text: 'held', status: 'queued', contentCount: 0, skills: [] }], paused: true, pauseReason: 'user' } } });
+    await vi.advanceTimersByTimeAsync(10);
+  });
+  expect(await edited).toBe(true);
+  expect(session.conversationRuntimeById.c?.followUps).toMatchObject({ paused: true, pauseReason: 'user' });
+});
+
+describe('ConversationControls queue buttons', () => {
+  const queue = { ...EMPTY_FOLLOW_UP_QUEUE, items: [{ id: 'a', text: 'held message', status: 'queued', queuedAt: '', contentCount: 2, skills: ['review'] }] };
+  function show(props: { followUps: typeof queue; canPauseBackend: boolean; running?: boolean }) {
+    const handlers = { onPauseBackend: vi.fn(), onResumeBackend: vi.fn(), onClearBackend: vi.fn(), onRemoveBackend: vi.fn() };
+    container = document.createElement('div'); document.body.append(container); root = createRoot(container);
+    act(() => { root.render(createElement(ConversationControls, {
+      runtime: { conversationId: 'c', queueItems: [], followUps: props.followUps } as never, running: props.running ?? true,
+      canUseNativeQueue: false, piQueue: false, canPauseBackend: props.canPauseBackend,
+      onRecover: vi.fn(), onRemoveNative: vi.fn(), onClearNative: vi.fn(), ...handlers })); });
+    const button = (label: string) => [...container.querySelectorAll('button')].find(item => item.textContent === label);
+    return { handlers, button };
+  }
+  const press = (button: HTMLElement | undefined) => act(() => { button!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
+  it('shows Pause only when the backend can pause and the queue is running', () => {
+    const { handlers, button } = show({ followUps: queue, canPauseBackend: true });
+    expect(container.textContent).toContain('2');
+    expect(container.textContent).toContain('Skill · review');
+    press(button(t('controls.pauseQueue')));
+    expect(handlers.onPauseBackend).toHaveBeenCalledTimes(1);
+    expect(button(t('controls.resumeSend'))).toBeUndefined();
+  });
+  it('hides Pause without backendQueueControl', () => {
+    const { button } = show({ followUps: queue, canPauseBackend: false });
+    expect(button(t('controls.pauseQueue'))).toBeUndefined();
+  });
+  it('offers Continue for a pause by the user even while a turn runs', () => {
+    const { handlers, button } = show({ followUps: { ...queue, paused: true, pauseReason: 'user' }, canPauseBackend: true });
+    expect(container.textContent).toContain(t('controls.backendPaused.user', { time: '' }));
+    expect(button(t('controls.pauseQueue'))).toBeUndefined();
+    press(button(t('controls.resumeSend')));
+    expect(handlers.onResumeBackend).toHaveBeenCalledTimes(1);
+  });
+  it('keeps other pauses resumable only while idle', () => {
+    const { button } = show({ followUps: { ...queue, paused: true, pauseReason: 'turn_failed' }, canPauseBackend: true, running: true });
+    expect(button(t('controls.resumeSend'))).toBeUndefined();
+  });
 });
 
 async function promptAndFail(socket: TestSocket, text: string, failure: Record<string, unknown>) {
@@ -223,11 +461,9 @@ it('leaves the rate-limit continuation to the daemon and reads the wait from its
   });
   // The daemon continues the prompt itself; a local copy would run twice and
   // the error text is not parsed into a local wait.
-  expect(session.queuedChatDrafts.c ?? []).toHaveLength(0);
   expect(framesOf(socket, 'conversation.queue.add')).toHaveLength(0);
   expect(framesOf(socket, 'conversation.queue.list')).toHaveLength(1); // only the one sent on open
   expect(session.chatDrafts.c).toBe('');
-  expect(session.rateLimitedUntilByConversation.c).toBeUndefined();
   expect(session.lastError).toBe(t('sess.sessionLimitReached', { reset: formatResetInstant(Date.parse(resumeAt)) }));
   // While the daemon waits, a new message joins its queue instead of starting a turn.
   const prompts = framesOf(socket, 'conversation.prompt').length;
@@ -258,22 +494,6 @@ it('returns an ordinary failed prompt to the composer once the queue snapshot sh
   });
   expect(session.chatDrafts.c).toBe('long task');
   expect(session.lastError).toBe('provider crashed');
-});
-
-it('keeps paused candidates local across a reload until the user continues them', async () => {
-  storedQueue = { version: 2, queues: { c: [{ id: 'queued-1', text: 'after the stop', attachments: [], skills: [] }] }, paused: ['c'] };
-  const socket = await mount();
-  await act(async () => { await vi.advanceTimersByTimeAsync(100); });
-  expect(framesOf(socket, 'conversation.queue.add')).toHaveLength(0);
-  expect(framesOf(socket, 'conversation.prompt')).toHaveLength(0);
-  expect(session.queuePausedByConversation.c).toBe(true);
-  const saved = vi.mocked(saveJson).mock.calls.filter(([key]) => key === 'todex.queued-follow-ups.v1').at(-1)?.[1];
-  expect(saved).toMatchObject({ version: 2, paused: ['c'] });
-  await act(async () => { void session.resumeQueuedFollowUps('c'); await vi.advanceTimersByTimeAsync(10); });
-  const adds = framesOf(socket, 'conversation.queue.add');
-  expect(adds).toHaveLength(1);
-  expect(adds[0].payload).toMatchObject({ itemId: 'queued-1', text: 'after the stop' });
-  expect(session.queuePausedByConversation.c).toBe(false);
 });
 
 it('cancels the turn on screen and treats a stale-turn answer as a no-op', async () => {

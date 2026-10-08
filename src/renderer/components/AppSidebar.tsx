@@ -861,14 +861,11 @@ export function AppSidebar({
                     const status = getConversationStatus(session, conversation, timelineInfoMap[conversation.id]?.latestEntry, timelineInfoMap[conversation.id]?.latestIncomingAt);
                     const taskMeta = conversationTaskMetaMap[conversation.id];
                     // Queued sends waiting out a provider rate limit get a
-                    // clock badge: local waits come from the draft queue, and a
-                    // daemon-paused follow-up queue reports its own resumeAt.
-                    const localWait = (session.queuedChatDrafts[conversation.id]?.length ?? 0) > 0
-                      ? session.rateLimitedUntilByConversation[conversation.id]?.until : undefined;
+                    // clock badge: the daemon-paused follow-up queue reports its resumeAt.
                     const followUps = session.conversationRuntimeById[conversation.id]?.followUps;
                     const backendWait = followUps?.paused && followUps.pauseReason === 'rate_limited' && followUps.items.length > 0
                       ? Date.parse(followUps.resumeAt) : NaN;
-                    const resetAt = [localWait, backendWait].filter((value): value is number => typeof value === 'number' && Number.isFinite(value) && value > Date.now()).sort((a, b) => a - b)[0];
+                    const resetAt = Number.isFinite(backendWait) && backendWait > Date.now() ? backendWait : undefined;
                     const tasksDone = Boolean(taskMeta && taskMeta.pending === 0);
                     return (
                       <ChatListView.Item
