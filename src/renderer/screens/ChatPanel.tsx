@@ -951,10 +951,12 @@ export function ChatPanel({ session }: Props) {
   const readOnly = conversation.legacyPlaintext === true;
   const runtime = session.conversationRuntimeById[conversation.id];
   const latestProcessGroupId = activeChatProcessId(items, runtime?.activeTurnId || session.turnIds[conversation.id]);
+  // The agent has stopped answering and only waits on provider background tasks (e.g. a CI watcher).
+  const backgroundTaskCount = thinking ? runtime?.backgroundTaskIds.length ?? 0 : 0;
   // Once the agent has replied after its last steps, the live status moves
   // below that reply instead of staying on the finished group above it.
   const lastItem = items[items.length - 1];
-  const showTrailingStatus = thinking && !latestProcessGroupId && items.length > 0
+  const showTrailingStatus = thinking && (backgroundTaskCount > 0 || !latestProcessGroupId) && items.length > 0
     && !(lastItem?.type === 'entry' && lastItem.entry.subtitle === STREAMING_REPLY_PLACEHOLDER);
   const sessionPermissionIds = new Set((runtime?.pendingPermissions ?? []).filter(item => item.scope === 'session').map(item => item.id));
   const pendingPermissionIds = new Set((runtime?.pendingPermissions ?? []).map(item => item.id));
@@ -1266,7 +1268,7 @@ export function ChatPanel({ session }: Props) {
                 conversationId={conversation.id}
                 thinking={thinking}
                 isStreamingGroup={autoExpanded}
-                groupLabelActive={item.type === 'executionGroup' && thinking && item.id === latestProcessGroupId}
+                groupLabelActive={item.type === 'executionGroup' && thinking && backgroundTaskCount === 0 && item.id === latestProcessGroupId}
                 groupExpanded={item.type === 'executionGroup'
                   && (expandedProcessIds.has(item.id) || autoExpanded)
                   && !collapsedProcessIds.has(item.id)}
@@ -1291,7 +1293,7 @@ export function ChatPanel({ session }: Props) {
           })}
           {showTrailingStatus ? (
             <p className="text-muted min-h-7 py-1 text-xs" role="status">
-              <TextShimmer>{t('chat.working')}</TextShimmer>
+              <TextShimmer>{backgroundTaskCount > 0 ? t('chat.waitingBackground', { count: backgroundTaskCount }) : t('chat.working')}</TextShimmer>
             </p>
           ) : null}
         </div>
