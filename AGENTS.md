@@ -13,6 +13,15 @@
 
 - In `Dockerfile`, `hpsetup` (deps stage) installs `@heroui-pro/react@latest` and its peer deps, rewriting `package.json`, `pnpm-lock.yaml`, and `pnpm-workspace.yaml` in the image. The `build` stage's `COPY . .` restores the repo copies, so the deps-stage copies are copied back right after to keep manifests in sync with `node_modules`. Without this, pnpm 11's `verifyDepsBeforeRun` (default `install`) detects drift on `pnpm run` and reinstalls the unlicensed npm stub over the licensed package contents, breaking typecheck with `TS2307`.
 
+## Sibling repositories (cross-repo access)
+
+TodeX lives in sibling checkouts under the same parent directory:
+
+- `../TodeX_backend` — Rust backend/API server (`docs/API.md` holds the API contract)
+- `../TodeX_desktop` — Electron desktop client; keep shared UI, screens, styles, and session logic in sync with it (mirror of the Dual-Client Synchronization rules in its `AGENTS.md`)
+
+When a task requires it — keeping the dual clients in sync, aligning client calls with the backend API contract, or a change that explicitly spans repos — read and edit those sibling repositories directly at their paths, even though they sit outside this repository. Follow each repo's own `AGENTS.md` while working inside it. Commit and push in each repository separately per its Git delivery rules; never mix another repo's changes into this repository's commits.
+
 ## Git delivery
 
 - Do every complex task — anything beyond a parameter change or a few localized lines — in a dedicated Git worktree on its own branch, not in the main checkout, which may hold the user's uncommitted work. Install dependencies inside the worktree (`pnpm install`) before running builds or checks.
