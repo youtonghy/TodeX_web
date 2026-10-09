@@ -22,7 +22,7 @@ export const koDocs: DocsLocalePack = {
       body: body(`
 TodeX는 **셀프 호스팅 가능한 멀티 에이전트 코딩 워크벤치**입니다. 하나의
 Rust 백엔드 — \`todex-agentd\` — 가 이미 사용 중인 코딩 에이전트(Codex,
-Claude Code, Pi, Devin, OpenCode, Grok Build 및 모든 ACP 호환 에이전트)를
+Claude Code, Pi, Devin, OpenCode, Grok Build, Antigravity 및 모든 ACP 호환 에이전트)를
 단일 인증 API 뒤에서 오케스트레이션합니다. 데스크톱, 웹, 모바일
 클라이언트는 암호화된 채널을 통해 이 백엔드에 연결됩니다.
 
@@ -144,7 +144,7 @@ TUI는 데몬 상태, 실시간 로그, 페어링 도구를 표시합니다. 클
 ## 프로바이더와 프로바이더 드라이버
 
 *프로바이더*는 백엔드가 구동할 수 있는 에이전트 엔진입니다 — Codex,
-Claude Code, Pi, Grok Build, Devin, OpenCode 또는 \`config.toml\`에
+Claude Code, Pi, Grok Build, Devin, OpenCode, Antigravity 또는 \`config.toml\`에
 선언된 임의의 ACP 2.0 프로파일. 각 프로바이더에는 네이티브
 드라이버(JSON-RPC app-server, stream-json, RPC 또는 ACP stdio)가 있어
 스킬, 슬래시 명령, 모델 카탈로그 같은 기능이 추정이 아니라 설치된
@@ -223,6 +223,7 @@ Rust 바이너리로, 이벤트 스트림, 승인, 터미널 세션을 위한 �
 | **Claude Code** | stream-json | Claude CLI를 구동합니다. 게이트웨이 없이 내장 모델 별칭 사용 |
 | **Pi** | Native RPC | 명령 검색, 동적 모델, 대화형 도구 승인 |
 | **Grok Build** | Managed CLI | 다른 관리형 CLI처럼 버전 관리 및 자체 업데이트 가능 |
+| **Antigravity** | stream-json | \`agy\` print 모드를 구동합니다. 헤드리스 \`agy\`는 승인을 요청할 수 없어 전체 액세스 또는 Plan만 제공합니다 |
 | **ACP 2.0** | stdio profiles | Devin(\`devin acp\`), OpenCode(\`opencode acp\`), 사용자 정의 \`config.toml\` 프로파일 |
 
 백엔드는 UI를 제공하기 위해 프로바이더 설치를 절대 변경하지 않습니다.

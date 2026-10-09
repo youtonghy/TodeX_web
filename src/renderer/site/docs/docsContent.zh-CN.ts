@@ -22,7 +22,7 @@ export const zhCNDocs: DocsLocalePack = {
       body: body(`
 TodeX 是一个**可自托管的多智能体编程工作台**。一个 Rust 后端——
 \`todex-agentd\`——将你已经在使用的编程智能体（Codex、
-Claude Code、Pi、Devin、OpenCode、Grok Build，以及任何兼容 ACP 的智能体）
+Claude Code、Pi、Devin、OpenCode、Grok Build、Antigravity，以及任何兼容 ACP 的智能体）
 统一编排到一个带认证的 API 之后。桌面端、Web 端和移动端客户端
 通过加密通道连接到它。
 
@@ -140,7 +140,7 @@ TUI 会显示守护进程状态、实时日志和配对工具。当客户端首�
 ## Provider 与 Provider 驱动
 
 *Provider* 是后端可以驱动的智能体引擎——Codex、Claude Code、
-Pi、Grok Build、Devin、OpenCode，或在 \`config.toml\` 中声明的
+Pi、Grok Build、Devin、OpenCode、Antigravity，或在 \`config.toml\` 中声明的
 任意 ACP 2.0 profile。每个 Provider 都有原生驱动
 （JSON-RPC app-server、stream-json、RPC 或 ACP stdio），因此
 Skills、斜杠命令和模型目录等能力直接来自已安装的 CLI，
@@ -215,6 +215,7 @@ Skills、斜杠命令和模型目录等能力直接来自已安装的 CLI，
 | **Claude Code** | stream-json | 驱动 Claude CLI；内置模型别名，无需网关 |
 | **Pi** | 原生 RPC | 命令发现、动态模型、交互式工具审批 |
 | **Grok Build** | 受管 CLI | 带版本管理，与其他受管 CLI 一样可自更新 |
+| **Antigravity** | stream-json | 驱动 \`agy\` 打印模式；headless 的 \`agy\` 无法请求审批，因此只提供完全访问或 Plan |
 | **ACP 2.0** | stdio profile | Devin（\`devin acp\`）、OpenCode（\`opencode acp\`）、自定义 \`config.toml\` profile |
 
 后端从不为了适配界面而改动 Provider 的安装：能力目录

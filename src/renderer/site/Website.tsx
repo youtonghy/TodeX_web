@@ -13,7 +13,7 @@ import { LanguageSwitcher } from './LanguageSwitcher';
 const repository = 'https://github.com/youtonghy/TodeX_desktop';
 const backendRepository = 'https://github.com/youtonghy/TodeX_backend';
 // Mirrors the backend provider drivers (TodeX_backend/src/provider); ACP is rendered separately with a generic icon.
-const supportedAgents = [{ id: 'codex', label: 'Codex' }, { id: 'claude', label: 'Claude Code' }, { id: 'pi', label: 'Pi' }, { id: 'grok', label: 'Grok Build' }, { id: 'devin', label: 'Devin' }, { id: 'opencode', label: 'OpenCode' }];
+const supportedAgents = [{ id: 'codex', label: 'Codex' }, { id: 'claude', label: 'Claude Code' }, { id: 'pi', label: 'Pi' }, { id: 'grok', label: 'Grok Build' }, { id: 'devin', label: 'Devin' }, { id: 'opencode', label: 'OpenCode' }, { id: 'antigravity', label: 'Antigravity' }];
 
 function Brand({ footer = false }: { footer?: boolean }) {
   const t = useT();

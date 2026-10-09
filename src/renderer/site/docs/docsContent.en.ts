@@ -23,7 +23,7 @@ export const enDocs: DocsLocalePack = {
       body: body(`
 TodeX is a **self-hostable multi-agent coding workbench**. One Rust backend —
 \`todex-agentd\` — orchestrates the coding agents you already use (Codex,
-Claude Code, Pi, Devin, OpenCode, Grok Build, and any ACP-compatible agent)
+Claude Code, Pi, Devin, OpenCode, Grok Build, Antigravity, and any ACP-compatible agent)
 behind a single authenticated API. Desktop, web, and mobile clients connect
 to it over an encrypted channel.
 
@@ -144,7 +144,7 @@ terminal, and Git state all stream over the same connection.
 ## Providers and provider drivers
 
 A *provider* is an agent engine the backend can drive — Codex, Claude Code,
-Pi, Grok Build, Devin, OpenCode, or any ACP 2.0 profile declared in
+Pi, Grok Build, Devin, OpenCode, Antigravity, or any ACP 2.0 profile declared in
 \`config.toml\`. Each provider has a native driver (JSON-RPC app-server,
 stream-json, RPC, or ACP stdio) so capabilities like skills, slash commands,
 and model catalogs come straight from the installed CLI instead of being
@@ -221,6 +221,7 @@ Axum that exposes one REST surface (\`/v2/*\`) and one multiplexed WebSocket
 | **Claude Code** | stream-json | Drives the Claude CLI; built-in model aliases without a gateway |
 | **Pi** | Native RPC | Command discovery, dynamic models, interactive tool approval |
 | **Grok Build** | Managed CLI | Versioned, self-updatable like other managed CLIs |
+| **Antigravity** | stream-json | Drives \`agy\` print mode; full access or Plan only, since headless \`agy\` cannot ask for approval |
 | **ACP 2.0** | stdio profiles | Devin (\`devin acp\`), OpenCode (\`opencode acp\`), custom \`config.toml\` profiles |
 
 The backend never mutates provider installations to serve a UI: capability

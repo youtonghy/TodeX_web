@@ -23,7 +23,7 @@ export const jaDocs: DocsLocalePack = {
 TodeX は**セルフホスト可能なマルチエージェント・コーディングワークベンチ**です。
 1 つの Rust 製バックエンド —— \`todex-agentd\` —— が、普段使っている
 コーディングエージェント（Codex、Claude Code、Pi、Devin、OpenCode、
-Grok Build、および任意の ACP 互換エージェント）を単一の認証済み API の
+Grok Build、Antigravity、および任意の ACP 互換エージェント）を単一の認証済み API の
 背後でオーケストレーションします。デスクトップ、Web、モバイルの各
 クライアントは暗号化されたチャネルで接続します。
 
@@ -149,7 +149,7 @@ TUI を終了しても、デーモンはバックグラウンドで動作し続�
 ## プロバイダーとプロバイダードライバー
 
 *プロバイダー*とは、バックエンドが駆動できるエージェントエンジンのことです
-—— Codex、Claude Code、Pi、Grok Build、Devin、OpenCode、または
+—— Codex、Claude Code、Pi、Grok Build、Devin、OpenCode、Antigravity、または
 \`config.toml\` で宣言された任意の ACP 2.0 プロファイル。各プロバイダーには
 ネイティブドライバー（JSON-RPC app-server、stream-json、RPC、ACP stdio）が
 あり、スキル、スラッシュコマンド、モデルカタログなどの機能は推測ではなく
@@ -229,6 +229,7 @@ Rust バイナリで、イベントストリーム、承認、ターミナルセ
 | **Claude Code** | stream-json | Claude CLI を駆動。ゲートウェイなしで組み込みモデルエイリアスを使用 |
 | **Pi** | Native RPC | コマンド検出、動的モデル、対話的ツール承認 |
 | **Grok Build** | Managed CLI | 他の管理対象 CLI と同様にバージョン管理され、自己更新可能 |
+| **Antigravity** | stream-json | \`agy\` の print モードを駆動。ヘッドレスの \`agy\` は承認を求められないため、フルアクセスまたは Plan のみ |
 | **ACP 2.0** | stdio profiles | Devin（\`devin acp\`）、OpenCode（\`opencode acp\`）、カスタム \`config.toml\` プロファイル |
 
 バックエンドは UI を提供するためにプロバイダーのインストールを変更する
