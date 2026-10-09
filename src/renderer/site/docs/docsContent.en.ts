@@ -221,7 +221,7 @@ Axum that exposes one REST surface (\`/v2/*\`) and one multiplexed WebSocket
 | **Claude Code** | stream-json | Drives the Claude CLI; built-in model aliases without a gateway |
 | **Pi** | Native RPC | Command discovery, dynamic models, interactive tool approval |
 | **Grok Build** | Managed CLI | Versioned, self-updatable like other managed CLIs |
-| **Antigravity** | stream-json | Drives \`agy\` print mode; full access or Plan only, since headless \`agy\` cannot ask for approval |
+| **Antigravity** | stream-json | Drives \`agy\` print mode; a TodeX PreToolUse hook in \`~/.gemini/config\` asks for approval per tool (ask / auto / full access) and carries TodeX's MCP tools |
 | **ACP 2.0** | stdio profiles | Devin (\`devin acp\`), OpenCode (\`opencode acp\`), custom \`config.toml\` profiles |
 
 The backend never mutates provider installations to serve a UI: capability
