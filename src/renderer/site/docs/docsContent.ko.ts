@@ -223,7 +223,7 @@ Rust 바이너리로, 이벤트 스트림, 승인, 터미널 세션을 위한 �
 | **Claude Code** | stream-json | Claude CLI를 구동합니다. 게이트웨이 없이 내장 모델 별칭 사용 |
 | **Pi** | Native RPC | 명령 검색, 동적 모델, 대화형 도구 승인 |
 | **Grok Build** | Managed CLI | 다른 관리형 CLI처럼 버전 관리 및 자체 업데이트 가능 |
-| **Antigravity** | stream-json | \`agy\` print 모드를 구동합니다. \`~/.gemini/config\`의 TodeX PreToolUse 훅이 도구별로 승인하고(확인 / 자동 / 전체 액세스) TodeX MCP 도구를 연결합니다 |
+| **Antigravity** | stream-json | \`agy\` print 모드를 구동합니다. \`~/.gemini/config\`의 TodeX PreToolUse 훅이 도구별로 승인하고(확인 / 전체 액세스) TodeX MCP 도구를 연결합니다 |
 | **ACP 2.0** | stdio profiles | Devin(\`devin acp\`), OpenCode(\`opencode acp\`), 사용자 정의 \`config.toml\` 프로파일 |
 
 백엔드는 UI를 제공하기 위해 프로바이더 설치를 절대 변경하지 않습니다.

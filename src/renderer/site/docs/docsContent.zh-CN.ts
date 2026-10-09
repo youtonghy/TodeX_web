@@ -215,7 +215,7 @@ Skills、斜杠命令和模型目录等能力直接来自已安装的 CLI，
 | **Claude Code** | stream-json | 驱动 Claude CLI；内置模型别名，无需网关 |
 | **Pi** | 原生 RPC | 命令发现、动态模型、交互式工具审批 |
 | **Grok Build** | 受管 CLI | 带版本管理，与其他受管 CLI 一样可自更新 |
-| **Antigravity** | stream-json | 驱动 \`agy\` 打印模式；写入 \`~/.gemini/config\` 的 TodeX PreToolUse hook 按工具审批（询问 / 自动 / 完全访问），并接入 TodeX 的 MCP 工具 |
+| **Antigravity** | stream-json | 驱动 \`agy\` 打印模式；写入 \`~/.gemini/config\` 的 TodeX PreToolUse hook 按工具审批（询问 / 完全访问），并接入 TodeX 的 MCP 工具 |
 | **ACP 2.0** | stdio profile | Devin（\`devin acp\`）、OpenCode（\`opencode acp\`）、自定义 \`config.toml\` profile |
 
 后端从不为了适配界面而改动 Provider 的安装：能力目录
