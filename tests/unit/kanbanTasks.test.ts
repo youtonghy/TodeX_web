@@ -2,6 +2,10 @@ import { beforeEach, expect, it, vi } from 'vitest';
 import {
   addKanbanTask,
   attachKanbanTask,
+  cancelKanbanTaskSchedule,
+  kanbanBackendLocalTime,
+  kanbanTimeZoneLabel,
+  setKanbanTaskSchedule,
   detachKanbanTask,
   getKanbanTasks,
   kanbanTasksForWorkspace,
@@ -160,4 +164,27 @@ it('sync payload strips local connection tags and parses snake or camel records'
 
   expect(normalizeKanbanTask({ id: '', workspaceId: 'w1', title: 'x' })).toBeNull();
   expect(normalizeKanbanTask({ id: 't', workspaceId: 'w1', title: 'x', status: 'bogus' })?.status).toBe('planned');
+});
+
+it('arms a pending schedule and cancels it without dropping the record', () => {
+  const task = addKanbanTask('w1', 'nightly')!;
+  setKanbanTaskSchedule(task.id, { at: '2030-01-02T03:04', action: 'start', text: 'run it', provider: 'codex' });
+  const armed = getKanbanTasks()[0].schedule!;
+  expect(armed).toMatchObject({ at: '2030-01-02T03:04', action: 'start', text: 'run it', status: 'pending' });
+  expect(armed.id).toMatch(/^sched-[a-z0-9-]+$/);
+
+  cancelKanbanTaskSchedule(task.id);
+  expect(getKanbanTasks()[0].schedule).toMatchObject({ id: armed.id, status: 'cancelled' });
+  // Re-arming issues a new id so the backend treats it as a new run.
+  setKanbanTaskSchedule(task.id, { at: '2030-01-03T03:04', action: 'start', text: 'again' });
+  expect(getKanbanTasks()[0].schedule!.id).not.toBe(armed.id);
+  expect(prepareKanbanSyncPayload(getKanbanTasks())[0].schedule).toMatchObject({ status: 'pending', text: 'again' });
+});
+
+it('formats wall-clock time and labels in the backend time zone', () => {
+  const now = Date.UTC(2026, 9, 9, 23, 30);
+  expect(kanbanBackendLocalTime({ offsetMinutes: 480 }, now)).toBe('2026-10-10T07:30');
+  expect(kanbanBackendLocalTime({ offsetMinutes: -330 }, now)).toBe('2026-10-09T18:00');
+  expect(kanbanTimeZoneLabel({ name: 'Asia/Shanghai', offsetMinutes: 480 })).toBe('Asia/Shanghai (UTC+08:00)');
+  expect(kanbanTimeZoneLabel({ offsetMinutes: -330 })).toBe('UTC-05:30');
 });
