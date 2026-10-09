@@ -8775,6 +8775,12 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     return api.listSshHosts();
   }, [settings.serverUrl, settings.deviceSecret, settings.encryptionProtocol, settings.encryptionPublicKey, settings.transportVerified]);
 
+  // Stable for the composer @app: effect, like fetchSshHosts.
+  const fetchHostApps = useCallback(async () => {
+    const api = backendApi(settings);
+    return api.listComputerApps();
+  }, [settings.serverUrl, settings.deviceSecret, settings.encryptionProtocol, settings.encryptionPublicKey, settings.transportVerified]);
+
   return {
     watchAgentBrowser,
     ...workbenchSharingState,
@@ -8915,6 +8921,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     fetchWorkspaceDirectorySnapshot: (path?: string) => fetchWorkspaceDirectorySnapshot(settings, path),
     fetchWorkspaceEntries,
     fetchSshHosts,
+    fetchHostApps,
     openModelPicker,
     applyModelCommand,
     applyWorkspaceModelSelection,

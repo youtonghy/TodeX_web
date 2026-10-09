@@ -15,6 +15,7 @@ const resolved = async () => {};
 const resolvedFalse = async () => false;
 const noEntries = async () => ({ entries: [] });
 const noSshHosts = async () => ({ hosts: [], ftpSites: [] });
+const noHostApps = async () => ({ apps: [] });
 const noCatalog = () => undefined;
 
 const modelCatalog: CodexModelCatalogItem[] = [{
@@ -82,6 +83,7 @@ export function buildDemoSession(
     getProviderCommandCatalog: noCatalog,
     fetchWorkspaceEntries: noEntries,
     fetchSshHosts: noSshHosts,
+    fetchHostApps: noHostApps,
     hydrateProcessGroup: resolvedFalse,
     loadEarlierHistory: resolvedFalse,
     recoverConversation: resolved,
