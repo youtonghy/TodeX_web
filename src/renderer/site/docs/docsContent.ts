@@ -58,6 +58,7 @@ const docNavSeed: DocNavSeed[] = [
       { id: 'backend/configuration', page: 'backend/configuration' },
       { id: 'backend/security', page: 'backend/security' },
       { id: 'backend/api', page: 'backend/api' },
+      { id: 'backend/external-api', page: 'backend/external-api' },
     ],
   },
   {

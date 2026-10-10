@@ -215,6 +215,9 @@ Ed25519 키를 생성하고 등록을 요청하며, 백엔드 TUI에서 코드�
 Rust 바이너리로, 이벤트 스트림, 승인, 터미널 세션을 위한 하나의 REST
 표면(\`/v2/*\`)과 하나의 멀티플렉싱 WebSocket(\`/v2/ws\`)을 노출합니다.
 
+\`[api] enabled = true\`로 설정하면 스크립트와 서비스를 위한 API 키 인증 REST + SSE
+API도 제공합니다. [외부 API와 키](/docs/backend/external-api)를 참고하세요.
+
 ## 프로바이더 드라이버
 
 | 프로바이더 | 전송 | 참고 |
@@ -345,6 +348,7 @@ QR 팝업에서 \`b\`를 눌러 브라우저에서 정사각형 SVG 버전을 �
 | Pi 바이너리 | — | \`TODEX_AGENTD_PI_BIN\` | \`pi\` |
 | 디바이스 인증 | — | \`TODEX_AGENTD_ENABLE_AUTH\` | \`true\` |
 | 페어링 암호화 | — | \`TODEX_AGENTD_PAIRING_ENCRYPTION\` | \`ml-kem-768\` |
+| 외부 API | \`--enable-api\` / \`--api-port\` | \`TODEX_AGENTD_API_ENABLED\` / \`TODEX_AGENTD_API_PORT\` | 꺼짐 / \`7346\` |
 
 ## \`config.toml\` 예시
 
@@ -371,6 +375,11 @@ args = ["--stdio"]
 [security]
 enable_auth = true
 enable_tls = false
+
+[api]
+enabled = false
+host = "127.0.0.1"
+port = 7346
 \`\`\`
 
 > **참고:** \`enable_tls = true\`는 잘못된 보안 가정을 방지하기 위해
@@ -437,6 +446,8 @@ TodeX는 페일-클로즈드입니다. 디바이스가 명시적으로 승인되
   변수가 프로바이더 세션으로 새어나가지 않습니다.
 - **TLS** — 네이티브 리스너는 \`enable_tls\`를 거부합니다. 우회
   방법을 신뢰하는 대신 리버스 프록시에서 TLS를 종단하세요.
+- **API 키** — [외부 API](/docs/backend/external-api)의 각 키는 자신의 대화와
+  범위 내 에이전트·워크스페이스에만 접근할 수 있습니다.
 `),
     },
 
@@ -447,6 +458,9 @@ TodeX는 페일-클로즈드입니다. 디바이스가 명시적으로 승인되
       body: body(`
 모든 엔드포인트는 \`/v2\` 아래에 있습니다. 모든 요청에는 등록된
 디바이스 서명이 포함되어야 하며, 본문과 응답은 JSON입니다.
+
+스크립트와 서비스용 API 키 호출은 별도 포트와 \`/api/v1\`을 사용합니다.
+[외부 API와 키](/docs/backend/external-api)를 참고하세요.
 
 ## 시스템
 
@@ -515,6 +529,130 @@ TodeX는 페일-클로즈드입니다. 디바이스가 명시적으로 승인되
 
 공식 계약은 백엔드 리포지토리의
 [docs/API.md](https://github.com/youtonghy/TodeX_backend/blob/main/docs/API.md)입니다.
+`),
+    },
+
+    'backend/external-api': {
+      slug: 'backend/external-api',
+      title: '외부 API와 키',
+      description: '백엔드가 관리하는 API 키로 스크립트와 서비스에서 REST + SSE로 에이전트를 호출합니다.',
+      body: body(`
+디바이스 포트(7345) 외에도 \`todex-agentd\`는 별도 포트에서 스크립트, CI 작업,
+기타 서비스를 위한 REST + SSE API를 제공할 수 있습니다. **백엔드가 발급한
+API 키**로 인증하며 디바이스 페어링이나 transport v2가 필요 없고, TodeX가
+다루는 모든 에이전트를 실행할 수 있습니다. daemon의 대화 엔진을 공유하지만
+각 키는 자신의 대화만 볼 수 있습니다.
+
+## 활성화
+
+이 리스너는 **기본적으로 꺼져 있습니다**. \`config.toml\`의
+\`[api] enabled = true\`, \`--enable-api\`, 또는
+\`TODEX_AGENTD_API_ENABLED=true\`로 켭니다. TUI 설정에서도 켜고 끄거나 포트를
+바꿀 수 있습니다(다음 시작 시 적용).
+
+\`\`\`toml
+[api]
+enabled = true
+host = "127.0.0.1"
+port = 7346
+# allow_plaintext_remote = true   # TLS 종단 프록시 뒤에서만
+\`\`\`
+
+API 포트는 메인 포트와 달라야 합니다. 키는 bearer 자격 증명이므로
+\`api.host\`가 루프백이 아니면 \`allow_plaintext_remote = true\` 없이는 시작을
+거부합니다. 원격으로 사용할 때는 앞에 TLS 리버스 프록시를 두세요. CORS가
+없으므로 브라우저에서 교차 출처로 호출할 수 없습니다.
+
+## 키 발급과 관리
+
+키는 \`tdx_<id>_<secret>\` 형식이며 생성할 때 **한 번만** 표시됩니다.
+백엔드는 \`<data_dir>/api-keys.json\`(0600)에 secret의 해시만 저장하므로 이
+파일만으로는 인증도 복호화도 할 수 없습니다.
+
+\`\`\`bash
+todex-agentd api-key create --name ci --agent codex --workspace ~/projects/app
+todex-agentd api-key list
+todex-agentd api-key update <id> --approval auto-approve
+todex-agentd api-key revoke <id>
+\`\`\`
+
+TUI에는 **API Keys** 패널이 있습니다(\`i\`: \`n\` 새 키, \`a\` 승인 정책 전환,
+\`x\` 두 번으로 폐기). 페어링된 디바이스는 \`GET/POST /v2/api-keys\`,
+\`PATCH/DELETE /v2/api-keys/{id}\`도 사용할 수 있습니다. 변경 사항은 daemon을
+재시작하지 않아도 적용되며, 폐기되거나 만료된 키는 즉시 \`401\`을 받고 실행
+중인 턴은 취소됩니다.
+
+각 키에는 다음 설정이 있습니다.
+
+- **에이전트** — 사용할 수 있는 에이전트(기본값: 전체).
+- **워크스페이스** — 사용할 수 있는 절대 경로, 하위 디렉터리 포함(기본값:
+  모든 워크스페이스 루트). 목록에 적은 워크스페이스는 해당 키에 대해 신뢰된
+  것으로 간주되며, 그 밖의 워크스페이스는 페어링된 디바이스에서 이미 신뢰되어
+  있어야 합니다.
+- **승인** — 권한 요청 처리 방식: \`ask\`(기본값, 호출자가 응답),
+  \`auto-approve\`, \`reject\`. 특정 디바이스에 묶인 요청은 키를 대신해 승인되지
+  않습니다.
+- **만료** — 선택 사항.
+
+API 대화는 에이전트 자체 도구만 사용하며 TodeX의 SSH·데스크톱·브라우저 도구는
+주입되지 않습니다. 턴에서 권한 모드나 샌드박스 모드를 재정의할 수도 없으며,
+키의 승인 정책이 적용됩니다.
+
+## 엔드포인트
+
+\`http://127.0.0.1:7346\`에 \`Authorization: Bearer <key>\`(또는
+\`X-API-Key\`)를 붙여 요청합니다.
+
+| 엔드포인트 | 용도 |
+| --- | --- |
+| \`GET /api/v1/health\` | 상태 확인(키 불필요) |
+| \`GET /api/v1/me\` | 호출한 키와 범위, 승인 정책 |
+| \`GET /api/v1/agents\` | 키가 사용할 수 있는 에이전트 |
+| \`GET /api/v1/agents/{agent}/models?workspace=\` | 실시간 모델 목록 |
+| \`GET /api/v1/workspaces\` | 키가 사용할 수 있는 워크스페이스 |
+| \`POST /api/v1/conversations\` | 대화 생성: \`{agent, workspace, title?}\` |
+| \`GET /api/v1/conversations\` | 키의 대화 목록 |
+| \`GET / DELETE /api/v1/conversations/{id}\` | 대화 조회·삭제 |
+| \`POST /api/v1/conversations/{id}/turns\` | 턴 시작: \`{text, model?, reasoningEffort?}\`. \`Accept: text/event-stream\`이면 스트리밍 |
+| \`GET /api/v1/conversations/{id}/events?after=&limit=\` | 이벤트 페이지(평문) |
+| \`GET /api/v1/conversations/{id}/events/stream\` | SSE: 기록 후 실시간 이벤트, \`Last-Event-ID\`로 재개 |
+| \`POST /api/v1/conversations/{id}/cancel\` | 실행 중인 턴 취소 |
+| \`POST /api/v1/conversations/{id}/permissions/{permissionId}\` | 권한 요청에 응답 |
+| \`POST /api/v1/runs\` | 한 번의 호출로 새 대화와 턴 하나 실행(스트리밍 또는 완료 대기) |
+
+SSE 이벤트는 \`id: <sequence>\`, \`event: <type>\`, 그리고 \`data\`에 이벤트 JSON을
+담습니다. 15초마다 \`: \` keepalive가 전송됩니다. 오류는 \`/v2\`와 같은
+\`{"code", "message"}\` 형식입니다.
+
+## 원샷 실행
+
+\`\`\`bash
+KEY=$(todex-agentd api-key create --name demo --workspace ~/projects/app | tail -1)
+
+curl -s -H "Authorization: Bearer $KEY" -H 'content-type: application/json' \\
+  -d '{"agent":"codex","workspace":"'"$HOME"'/projects/app","text":"README 요약"}' \\
+  http://127.0.0.1:7346/api/v1/runs
+# {"conversationId":"…","turnId":"…","status":"completed","output":"…","error":null}
+
+curl -N -H "Authorization: Bearer $KEY" -H 'content-type: application/json' \\
+  -d '{"agent":"claude-code","workspace":"'"$HOME"'/projects/app","text":"TODO 목록","stream":true}' \\
+  http://127.0.0.1:7346/api/v1/runs
+\`\`\`
+
+\`stream\`이 없으면 턴이 끝날 때까지 기다립니다(\`timeoutSecs\` 기본 600, 최대
+3600. 시간이 초과되면 턴을 취소하고 \`504\`를 반환합니다).
+
+## 기록은 계속 암호화됩니다
+
+대화 기록은 디스크에서 항상 종단 간 암호화됩니다. 각 키는 secret에서 전용
+기록 수신자를 파생하며, 해당 키 자신의 대화만 그 수신자에게 래핑됩니다. 그
+키로 들어온 요청을 처리하는 동안 백엔드는 메모리에서 이벤트를 복호화해 평문으로
+반환하고, 키에서 파생된 어떤 것도 저장하지 않습니다. 데이터 디렉터리를 도난당해도
+기록을 읽을 수 없고, 키가 유출되어도 그 키의 대화만 노출됩니다.
+
+공식 계약은 백엔드 저장소
+[docs/API.md](https://github.com/youtonghy/TodeX_backend/blob/main/docs/API.md)의
+"외부 API（API Key）" 장입니다.
 `),
     },
 

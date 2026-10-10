@@ -213,6 +213,9 @@ can never cross tenants.
 Axum that exposes one REST surface (\`/v2/*\`) and one multiplexed WebSocket
 (\`/v2/ws\`) for event streams, approvals, and terminal sessions.
 
+With \`[api] enabled = true\` it also serves a key-authenticated REST + SSE
+API for scripts and services; see [External API & keys](/docs/backend/external-api).
+
 ## Provider drivers
 
 | Provider | Transport | Notes |
@@ -341,6 +344,7 @@ the terminal. The credentials popup shows the transport key fingerprint.
 | Pi binary | — | \`TODEX_AGENTD_PI_BIN\` | \`pi\` |
 | Device auth | — | \`TODEX_AGENTD_ENABLE_AUTH\` | \`true\` |
 | Pairing encryption | — | \`TODEX_AGENTD_PAIRING_ENCRYPTION\` | \`ml-kem-768\` |
+| External API | \`--enable-api\` / \`--api-port\` | \`TODEX_AGENTD_API_ENABLED\` / \`TODEX_AGENTD_API_PORT\` | off / \`7346\` |
 
 ## Example \`config.toml\`
 
@@ -367,6 +371,11 @@ args = ["--stdio"]
 [security]
 enable_auth = true
 enable_tls = false
+
+[api]
+enabled = false
+host = "127.0.0.1"
+port = 7346
 \`\`\`
 
 > **Note:** \`enable_tls = true\` is intentionally blocked on the native
@@ -431,6 +440,8 @@ active turns and detaches the workspace without deleting its conversations.
   administrative variables don't leak into provider sessions.
 - **TLS** — the native listener refuses \`enable_tls\`; terminate TLS at a
   reverse proxy instead of trusting a bypass.
+- **API keys** — keys of the [external API](/docs/backend/external-api)
+  reach only their own conversations, scoped agents and workspaces.
 `),
     },
 
@@ -441,6 +452,9 @@ active turns and detaches the workspace without deleting its conversations.
       body: body(`
 All endpoints live under \`/v2\`. Every request must carry a registered
 device signature; bodies and responses are JSON.
+
+API keys for scripts and services use a separate port and \`/api/v1\`; see
+[External API & keys](/docs/backend/external-api).
 
 ## System
 
@@ -507,6 +521,129 @@ Frames enforce UTF-8 length limits; heartbeats detect dead connections.
 
 The authoritative contract is [docs/API.md](https://github.com/youtonghy/TodeX_backend/blob/main/docs/API.md)
 in the backend repository.
+`),
+    },
+
+    'backend/external-api': {
+      slug: 'backend/external-api',
+      title: 'External API & keys',
+      description: 'Call your agents from scripts and services over REST + SSE with backend-managed API keys.',
+      body: body(`
+Besides the device port (7345), \`todex-agentd\` can serve a separate
+REST + SSE API on its own port for scripts, CI jobs, and other services. It
+is authenticated with **API keys issued by the backend** — no device pairing,
+no transport v2 — and runs any agent TodeX already drives. It shares the
+daemon's conversation engine, but every key only sees its own conversations.
+
+## Turn it on
+
+The listener is **off by default**. Enable it with \`[api] enabled = true\`
+in \`config.toml\`, \`--enable-api\`, or \`TODEX_AGENTD_API_ENABLED=true\`; the
+TUI settings can toggle it and edit the port (applied on the next start).
+
+\`\`\`toml
+[api]
+enabled = true
+host = "127.0.0.1"
+port = 7346
+# allow_plaintext_remote = true   # only behind a TLS-terminating proxy
+\`\`\`
+
+The API port must differ from the main port. Keys are bearer credentials, so
+a non-loopback \`api.host\` is refused unless \`allow_plaintext_remote = true\`
+is set — put a TLS reverse proxy in front for remote use. There is no CORS:
+browsers cannot call it cross-origin.
+
+## Issue and manage keys
+
+A key looks like \`tdx_<id>_<secret>\` and is shown **once**, when it is
+created. The backend keeps only a hash of the secret in
+\`<data_dir>/api-keys.json\` (0600), so the file alone neither authenticates
+nor decrypts anything.
+
+\`\`\`bash
+todex-agentd api-key create --name ci --agent codex --workspace ~/projects/app
+todex-agentd api-key list
+todex-agentd api-key update <id> --approval auto-approve
+todex-agentd api-key revoke <id>
+\`\`\`
+
+The TUI has an **API Keys** panel (\`i\`: \`n\` new, \`a\` cycle approval,
+\`x\` twice to revoke), and paired devices can use \`GET/POST /v2/api-keys\`,
+\`PATCH/DELETE /v2/api-keys/{id}\`. Changes apply to a running daemon
+without a restart; a revoked or expired key gets \`401\` at once and its
+running turns are cancelled.
+
+Each key carries:
+
+- **Agents** — the agents it may use (all by default).
+- **Workspaces** — absolute paths it may use, subdirectories included (all
+  workspace roots by default). Listing a workspace also trusts it for the
+  key; any other workspace must already be trusted on a paired device.
+- **Approval** — how permission requests are answered: \`ask\` (default,
+  the caller answers), \`auto-approve\`, or \`reject\`. Requests bound to a
+  specific device are never approved on a key's behalf.
+- **Expiry** — optional.
+
+API conversations get the agent's own tools only — TodeX's SSH, desktop and
+browser tools are not injected — and turns cannot override permission or
+sandbox modes; the key's approval policy governs them.
+
+## Endpoints
+
+Send \`Authorization: Bearer <key>\` (or \`X-API-Key\`) to
+\`http://127.0.0.1:7346\`.
+
+| Endpoint | Purpose |
+| --- | --- |
+| \`GET /api/v1/health\` | Liveness probe (no key) |
+| \`GET /api/v1/me\` | The calling key, its scopes and approval policy |
+| \`GET /api/v1/agents\` | Agents the key may use |
+| \`GET /api/v1/agents/{agent}/models?workspace=\` | Live model catalog |
+| \`GET /api/v1/workspaces\` | Workspaces the key may use |
+| \`POST /api/v1/conversations\` | Create a conversation: \`{agent, workspace, title?}\` |
+| \`GET /api/v1/conversations\` | The key's conversations |
+| \`GET / DELETE /api/v1/conversations/{id}\` | Read or delete one |
+| \`POST /api/v1/conversations/{id}/turns\` | Start a turn: \`{text, model?, reasoningEffort?}\`; with \`Accept: text/event-stream\` it streams the turn |
+| \`GET /api/v1/conversations/{id}/events?after=&limit=\` | Event page (plaintext) |
+| \`GET /api/v1/conversations/{id}/events/stream\` | SSE: history, then live events; resumes with \`Last-Event-ID\` |
+| \`POST /api/v1/conversations/{id}/cancel\` | Cancel the running turn |
+| \`POST /api/v1/conversations/{id}/permissions/{permissionId}\` | Answer a permission request |
+| \`POST /api/v1/runs\` | One call: new conversation + one turn, streamed or awaited |
+
+SSE events carry \`id: <sequence>\`, \`event: <type>\` and the event JSON as
+\`data\`; a \`: \` keepalive is sent every 15 seconds. Errors use the same
+\`{"code", "message"}\` shape as \`/v2\`.
+
+## One-shot runs
+
+\`\`\`bash
+KEY=$(todex-agentd api-key create --name demo --workspace ~/projects/app | tail -1)
+
+curl -s -H "Authorization: Bearer $KEY" -H 'content-type: application/json' \\
+  -d '{"agent":"codex","workspace":"'"$HOME"'/projects/app","text":"Summarize the README"}' \\
+  http://127.0.0.1:7346/api/v1/runs
+# {"conversationId":"…","turnId":"…","status":"completed","output":"…","error":null}
+
+curl -N -H "Authorization: Bearer $KEY" -H 'content-type: application/json' \\
+  -d '{"agent":"claude-code","workspace":"'"$HOME"'/projects/app","text":"List the TODOs","stream":true}' \\
+  http://127.0.0.1:7346/api/v1/runs
+\`\`\`
+
+Without \`stream\`, the call waits for the turn (\`timeoutSecs\`, default 600,
+at most 3600; on timeout the turn is cancelled and \`504\` is returned).
+
+## History stays encrypted
+
+Conversation history is always end-to-end encrypted on disk. Each key
+derives its own history recipient from its secret, and only that key's
+conversations are wrapped for it. While serving a request made with the key,
+the backend decrypts those events in memory and returns plaintext; nothing
+derived from the key is stored. A stolen data directory still cannot be
+read, and a leaked key exposes only its own conversations.
+
+The authoritative contract is the "外部 API（API Key）" chapter of
+[docs/API.md](https://github.com/youtonghy/TodeX_backend/blob/main/docs/API.md).
 `),
     },
 

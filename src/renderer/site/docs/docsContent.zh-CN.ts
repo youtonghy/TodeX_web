@@ -207,6 +207,9 @@ Skills、斜杠命令和模型目录等能力直接来自已安装的 CLI，
 单一 Rust 二进制文件，对外提供一个 REST 接口面（\`/v2/*\`）和
 一条复用的 WebSocket（\`/v2/ws\`），用于事件流、审批和终端会话。
 
+设置 \`[api] enabled = true\` 后，它还会为脚本和服务提供使用 API key 鉴权的
+REST + SSE 接口，见[外部 API 与密钥](/docs/backend/external-api)。
+
 ## Provider 驱动
 
 | Provider | 传输方式 | 说明 |
@@ -334,6 +337,7 @@ todex-agentd daemon autostart enable
 | Pi 二进制 | — | \`TODEX_AGENTD_PI_BIN\` | \`pi\` |
 | 设备认证 | — | \`TODEX_AGENTD_ENABLE_AUTH\` | \`true\` |
 | 配对加密 | — | \`TODEX_AGENTD_PAIRING_ENCRYPTION\` | \`ml-kem-768\` |
+| 外部 API | \`--enable-api\` / \`--api-port\` | \`TODEX_AGENTD_API_ENABLED\` / \`TODEX_AGENTD_API_PORT\` | 关闭 / \`7346\` |
 
 ## 示例 \`config.toml\`
 
@@ -360,6 +364,11 @@ args = ["--stdio"]
 [security]
 enable_auth = true
 enable_tls = false
+
+[api]
+enabled = false
+host = "127.0.0.1"
+port = 7346
 \`\`\`
 
 > **注意：**原生监听器有意禁止 \`enable_tls = true\`，以避免造成
@@ -419,6 +428,8 @@ TodeX 采用 fail-closed 设计：设备被显式批准之前，没有任何东�
   管理类环境变量不会泄漏到 Provider 会话中。
 - **TLS**——原生监听器拒绝 \`enable_tls\`；请在反向代理上
   终止 TLS，而不是依赖绕过手段。
+- **API key**——[外部 API](/docs/backend/external-api) 的每把 key 只能访问
+  自己的会话，以及 scope 内的 Agent 和 workspace。
 `),
     },
 
@@ -429,6 +440,9 @@ TodeX 采用 fail-closed 设计：设备被显式批准之前，没有任何东�
       body: body(`
 所有端点都位于 \`/v2\` 之下。每个请求都必须携带已注册的
 设备签名；请求体与响应均为 JSON。
+
+面向脚本和服务的 API key 调用使用单独的端口和 \`/api/v1\`，见
+[外部 API 与密钥](/docs/backend/external-api)。
 
 ## 系统
 
@@ -495,6 +509,122 @@ Provider 账户位于 \`/v2/agent-providers/{agent}\` 之下，
 
 权威契约以后端仓库中的 [docs/API.md](https://github.com/youtonghy/TodeX_backend/blob/main/docs/API.md)
 为准。
+`),
+    },
+
+    'backend/external-api': {
+      slug: 'backend/external-api',
+      title: '外部 API 与密钥',
+      description: '使用后端管理的 API key，从脚本和服务通过 REST + SSE 调用 Agent。',
+      body: body(`
+除了设备端口（7345），\`todex-agentd\` 还可以在另一个端口提供 REST + SSE
+接口，供脚本、CI 任务和其他服务调用。它使用**后端签发的 API key** 鉴权，
+不需要设备配对，也不走 transport v2，可以调用 TodeX 已接入的所有 Agent。
+它与 daemon 共用同一个会话引擎，但每把 key 只能看到自己的会话。
+
+## 开启
+
+外部 API **默认关闭**。可以在 \`config.toml\` 中设置 \`[api] enabled = true\`，
+或使用 \`--enable-api\`、\`TODEX_AGENTD_API_ENABLED=true\` 开启；TUI 设置中也能
+开关并修改端口（下次启动时生效）。
+
+\`\`\`toml
+[api]
+enabled = true
+host = "127.0.0.1"
+port = 7346
+# allow_plaintext_remote = true   # 仅限 TLS 反向代理之后
+\`\`\`
+
+API 端口必须与主端口不同。key 是 bearer 凭据，所以 \`api.host\` 不是回环
+地址时，必须设置 \`allow_plaintext_remote = true\` 才能启动；远程使用请在
+前面放 TLS 反向代理。外部 API 不提供 CORS，浏览器无法跨域调用。
+
+## 签发与管理 key
+
+key 的格式为 \`tdx_<id>_<secret>\`，只在创建时显示**一次**。后端只在
+\`<data_dir>/api-keys.json\`（0600）中保存 secret 的哈希，单凭这个文件
+既不能鉴权，也不能解密。
+
+\`\`\`bash
+todex-agentd api-key create --name ci --agent codex --workspace ~/projects/app
+todex-agentd api-key list
+todex-agentd api-key update <id> --approval auto-approve
+todex-agentd api-key revoke <id>
+\`\`\`
+
+TUI 中有 **API Keys** 面板（\`i\`：\`n\` 新建，\`a\` 切换审批策略，连按两次
+\`x\` 吊销）；已配对设备也可以调用 \`GET/POST /v2/api-keys\`、
+\`PATCH/DELETE /v2/api-keys/{id}\`。修改无需重启 daemon 即可生效；被吊销或
+过期的 key 会立即收到 \`401\`，其正在运行的 turn 会被取消。
+
+每把 key 包含：
+
+- **Agent**：允许使用的 Agent（默认全部）。
+- **Workspace**：允许使用的绝对路径，包含子目录（默认全部 workspace 根目录）。
+  在列表中写明的 workspace 同时视为对该 key 受信任；其他 workspace 必须
+  已在已配对设备上被信任。
+- **审批策略**：权限请求的处理方式，\`ask\`（默认，由调用方回答）、
+  \`auto-approve\` 或 \`reject\`。绑定到特定设备的请求永远不会代 key 批准。
+- **过期时间**：可选。
+
+API 会话只使用 Agent 自身的工具，不注入 TodeX 的 SSH、桌面和浏览器工具；
+turn 也不能覆盖权限模式或沙箱模式，由 key 的审批策略统一处理。
+
+## 接口
+
+请求 \`http://127.0.0.1:7346\` 时携带 \`Authorization: Bearer <key>\`
+（或 \`X-API-Key\`）。
+
+| 端点 | 用途 |
+| --- | --- |
+| \`GET /api/v1/health\` | 存活探测（无需 key） |
+| \`GET /api/v1/me\` | 当前 key 及其 scope 与审批策略 |
+| \`GET /api/v1/agents\` | key 可用的 Agent |
+| \`GET /api/v1/agents/{agent}/models?workspace=\` | 实时模型列表 |
+| \`GET /api/v1/workspaces\` | key 可用的 workspace |
+| \`POST /api/v1/conversations\` | 创建会话：\`{agent, workspace, title?}\` |
+| \`GET /api/v1/conversations\` | 该 key 的会话列表 |
+| \`GET / DELETE /api/v1/conversations/{id}\` | 查看或删除会话 |
+| \`POST /api/v1/conversations/{id}/turns\` | 发起 turn：\`{text, model?, reasoningEffort?}\`；带 \`Accept: text/event-stream\` 时流式返回 |
+| \`GET /api/v1/conversations/{id}/events?after=&limit=\` | 事件分页（明文） |
+| \`GET /api/v1/conversations/{id}/events/stream\` | SSE：先历史后实时，支持 \`Last-Event-ID\` 续传 |
+| \`POST /api/v1/conversations/{id}/cancel\` | 取消运行中的 turn |
+| \`POST /api/v1/conversations/{id}/permissions/{permissionId}\` | 回答权限请求 |
+| \`POST /api/v1/runs\` | 一次调用：新建会话并执行一个 turn，可流式或等待结果 |
+
+SSE 事件包含 \`id: <sequence>\`、\`event: <type>\`，\`data\` 为事件 JSON；每
+15 秒发送一次 \`: \` keepalive。错误格式与 \`/v2\` 相同，为
+\`{"code", "message"}\`。
+
+## 一次性调用
+
+\`\`\`bash
+KEY=$(todex-agentd api-key create --name demo --workspace ~/projects/app | tail -1)
+
+curl -s -H "Authorization: Bearer $KEY" -H 'content-type: application/json' \\
+  -d '{"agent":"codex","workspace":"'"$HOME"'/projects/app","text":"总结 README"}' \\
+  http://127.0.0.1:7346/api/v1/runs
+# {"conversationId":"…","turnId":"…","status":"completed","output":"…","error":null}
+
+curl -N -H "Authorization: Bearer $KEY" -H 'content-type: application/json' \\
+  -d '{"agent":"claude-code","workspace":"'"$HOME"'/projects/app","text":"列出 TODO","stream":true}' \\
+  http://127.0.0.1:7346/api/v1/runs
+\`\`\`
+
+不带 \`stream\` 时，请求会等待 turn 结束（\`timeoutSecs\` 默认 600，最大
+3600；超时后取消该 turn 并返回 \`504\`）。
+
+## 历史仍然加密
+
+会话历史在磁盘上始终端到端加密。每把 key 由自己的 secret 派生一个专属的
+历史接收方，只有该 key 自己的会话会封装给它。处理带这把 key 的请求时，
+后端在内存中解密这些事件并返回明文，不保存任何由 key 派生的内容。即使
+数据目录被盗也无法读取历史，某把 key 泄露也只会暴露它自己的会话。
+
+权威接口说明见后端仓库
+[docs/API.md](https://github.com/youtonghy/TodeX_backend/blob/main/docs/API.md)
+中的“外部 API（API Key）”一章。
 `),
     },
 

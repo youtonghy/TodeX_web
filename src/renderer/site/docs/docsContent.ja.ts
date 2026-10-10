@@ -221,6 +221,9 @@ Rust バイナリで、イベントストリーム、承認、ターミナルセ
 1 つの REST サーフェス（\`/v2/*\`）と 1 つの多重化 WebSocket（\`/v2/ws\`）を
 公開します。
 
+\`[api] enabled = true\` にすると、スクリプトやサービス向けに API キー認証の
+REST + SSE API も提供します。[外部 API とキー](/docs/backend/external-api) を参照してください。
+
 ## プロバイダードライバー
 
 | プロバイダー | トランスポート | 備考 |
@@ -355,6 +358,7 @@ TUI を終了してもデーモンは動作し続けます。ペアリング QR 
 | Pi バイナリ | — | \`TODEX_AGENTD_PI_BIN\` | \`pi\` |
 | デバイス認証 | — | \`TODEX_AGENTD_ENABLE_AUTH\` | \`true\` |
 | ペアリング暗号化 | — | \`TODEX_AGENTD_PAIRING_ENCRYPTION\` | \`ml-kem-768\` |
+| 外部 API | \`--enable-api\` / \`--api-port\` | \`TODEX_AGENTD_API_ENABLED\` / \`TODEX_AGENTD_API_PORT\` | 無効 / \`7346\` |
 
 ## \`config.toml\` の例
 
@@ -381,6 +385,11 @@ args = ["--stdio"]
 [security]
 enable_auth = true
 enable_tls = false
+
+[api]
+enabled = false
+host = "127.0.0.1"
+port = 7346
 \`\`\`
 
 > **注意：** \`enable_tls = true\` は、誤ったセキュリティ前提を防ぐため、
@@ -448,6 +457,8 @@ TodeX はフェールクローズドです。デバイスが明示的に承認�
   ため、管理用の変数がプロバイダーセッションに漏れません。
 - **TLS** —— ネイティブリスナーは \`enable_tls\` を拒否します。迂回手段に
   頼るのではなく、リバースプロキシで TLS を終端してください。
+- **API キー** —— [外部 API](/docs/backend/external-api) の各キーは自分の会話と、
+  スコープ内のエージェントとワークスペースにしかアクセスできません。
 `),
     },
 
@@ -458,6 +469,9 @@ TodeX はフェールクローズドです。デバイスが明示的に承認�
       body: body(`
 すべてのエンドポイントは \`/v2\` 配下にあります。すべてのリクエストには
 登録済みデバイスの署名が必要で、ボディとレスポンスは JSON です。
+
+スクリプトやサービス向けの API キー呼び出しは別のポートと \`/api/v1\` を使います。
+[外部 API とキー](/docs/backend/external-api) を参照してください。
 
 ## システム
 
@@ -526,6 +540,132 @@ TodeX はフェールクローズドです。デバイスが明示的に承認�
 
 正式な仕様はバックエンドリポジトリの [docs/API.md](https://github.com/youtonghy/TodeX_backend/blob/main/docs/API.md)
 です。
+`),
+    },
+
+    'backend/external-api': {
+      slug: 'backend/external-api',
+      title: '外部 API とキー',
+      description: 'バックエンドが管理する API キーで、スクリプトやサービスから REST + SSE でエージェントを呼び出します。',
+      body: body(`
+デバイス用ポート（7345）に加えて、\`todex-agentd\` は別のポートで
+スクリプト、CI ジョブ、その他のサービス向けの REST + SSE API を提供できます。
+認証には**バックエンドが発行する API キー**を使い、デバイスのペアリングも
+transport v2 も不要で、TodeX が扱うすべてのエージェントを実行できます。
+daemon の会話エンジンを共有しますが、各キーは自分の会話しか参照できません。
+
+## 有効化
+
+このリスナーは**デフォルトで無効**です。\`config.toml\` の
+\`[api] enabled = true\`、\`--enable-api\`、または
+\`TODEX_AGENTD_API_ENABLED=true\` で有効にします。TUI の設定からも切り替えと
+ポート変更ができます（次回起動時に反映）。
+
+\`\`\`toml
+[api]
+enabled = true
+host = "127.0.0.1"
+port = 7346
+# allow_plaintext_remote = true   # TLS 終端プロキシの背後でのみ
+\`\`\`
+
+API ポートはメインポートと別にする必要があります。キーは bearer 資格情報なので、
+\`api.host\` がループバック以外の場合は \`allow_plaintext_remote = true\` が
+ないと起動を拒否します。リモートで使うときは前段に TLS リバースプロキシを
+置いてください。CORS はないため、ブラウザからのクロスオリジン呼び出しは
+できません。
+
+## キーの発行と管理
+
+キーは \`tdx_<id>_<secret>\` の形式で、作成時に**一度だけ**表示されます。
+バックエンドは \`<data_dir>/api-keys.json\`（0600）に secret のハッシュだけを
+保存するため、このファイルだけでは認証も復号もできません。
+
+\`\`\`bash
+todex-agentd api-key create --name ci --agent codex --workspace ~/projects/app
+todex-agentd api-key list
+todex-agentd api-key update <id> --approval auto-approve
+todex-agentd api-key revoke <id>
+\`\`\`
+
+TUI には **API Keys** パネルがあります（\`i\`：\`n\` 新規、\`a\` 承認ポリシー
+切り替え、\`x\` を 2 回で失効）。ペアリング済みデバイスは
+\`GET/POST /v2/api-keys\`、\`PATCH/DELETE /v2/api-keys/{id}\` も使えます。
+変更は daemon を再起動せずに反映され、失効または期限切れのキーには即座に
+\`401\` が返り、実行中のターンはキャンセルされます。
+
+各キーには次の設定があります。
+
+- **エージェント** — 使用できるエージェント（既定はすべて）。
+- **ワークスペース** — 使用できる絶対パス（サブディレクトリを含む、既定は
+  すべてのワークスペースルート）。列挙したワークスペースはそのキーに対して
+  信頼済みになります。それ以外はペアリング済みデバイスで信頼済みである
+  必要があります。
+- **承認** — 権限リクエストの扱い：\`ask\`（既定、呼び出し側が回答）、
+  \`auto-approve\`、\`reject\`。特定デバイスに紐づくリクエストがキーの代わりに
+  承認されることはありません。
+- **有効期限** — 任意。
+
+API の会話ではエージェント自身のツールのみを使い、TodeX の SSH・デスクトップ・
+ブラウザツールは注入されません。ターンで権限モードやサンドボックスモードを
+上書きすることもできず、キーの承認ポリシーが適用されます。
+
+## エンドポイント
+
+\`http://127.0.0.1:7346\` に \`Authorization: Bearer <key>\`
+（または \`X-API-Key\`）を付けて送信します。
+
+| エンドポイント | 用途 |
+| --- | --- |
+| \`GET /api/v1/health\` | 死活確認（キー不要） |
+| \`GET /api/v1/me\` | 呼び出し元のキーとスコープ、承認ポリシー |
+| \`GET /api/v1/agents\` | キーが使えるエージェント |
+| \`GET /api/v1/agents/{agent}/models?workspace=\` | ライブのモデル一覧 |
+| \`GET /api/v1/workspaces\` | キーが使えるワークスペース |
+| \`POST /api/v1/conversations\` | 会話を作成：\`{agent, workspace, title?}\` |
+| \`GET /api/v1/conversations\` | キーの会話一覧 |
+| \`GET / DELETE /api/v1/conversations/{id}\` | 会話の取得・削除 |
+| \`POST /api/v1/conversations/{id}/turns\` | ターン開始：\`{text, model?, reasoningEffort?}\`。\`Accept: text/event-stream\` でストリーム |
+| \`GET /api/v1/conversations/{id}/events?after=&limit=\` | イベントのページ（平文） |
+| \`GET /api/v1/conversations/{id}/events/stream\` | SSE：履歴の後にライブイベント。\`Last-Event-ID\` で再開 |
+| \`POST /api/v1/conversations/{id}/cancel\` | 実行中のターンをキャンセル |
+| \`POST /api/v1/conversations/{id}/permissions/{permissionId}\` | 権限リクエストに回答 |
+| \`POST /api/v1/runs\` | 1 回の呼び出しで新しい会話と 1 ターンを実行（ストリームまたは完了待ち） |
+
+SSE イベントは \`id: <sequence>\`、\`event: <type>\` と、\`data\` にイベント JSON を
+持ちます。15 秒ごとに \`: \` の keepalive が送られます。エラーは \`/v2\` と同じ
+\`{"code", "message"}\` 形式です。
+
+## ワンショット実行
+
+\`\`\`bash
+KEY=$(todex-agentd api-key create --name demo --workspace ~/projects/app | tail -1)
+
+curl -s -H "Authorization: Bearer $KEY" -H 'content-type: application/json' \\
+  -d '{"agent":"codex","workspace":"'"$HOME"'/projects/app","text":"README を要約して"}' \\
+  http://127.0.0.1:7346/api/v1/runs
+# {"conversationId":"…","turnId":"…","status":"completed","output":"…","error":null}
+
+curl -N -H "Authorization: Bearer $KEY" -H 'content-type: application/json' \\
+  -d '{"agent":"claude-code","workspace":"'"$HOME"'/projects/app","text":"TODO を一覧にして","stream":true}' \\
+  http://127.0.0.1:7346/api/v1/runs
+\`\`\`
+
+\`stream\` を指定しない場合はターンの完了を待ちます（\`timeoutSecs\` 既定 600、
+最大 3600。タイムアウトするとターンをキャンセルして \`504\` を返します）。
+
+## 履歴は暗号化されたまま
+
+会話履歴はディスク上で常にエンドツーエンド暗号化されています。各キーは
+secret から専用の履歴受信者を導出し、そのキー自身の会話だけがそれ向けに
+ラップされます。そのキーでのリクエストを処理する間、バックエンドはメモリ上で
+イベントを復号して平文で返し、キーから導出したものは何も保存しません。
+データディレクトリが盗まれても履歴は読めず、キーが漏れても露出するのは
+そのキーの会話だけです。
+
+正式な仕様はバックエンドリポジトリの
+[docs/API.md](https://github.com/youtonghy/TodeX_backend/blob/main/docs/API.md)
+にある「外部 API（API Key）」の章です。
 `),
     },
 
