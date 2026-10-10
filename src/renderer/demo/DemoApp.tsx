@@ -180,29 +180,27 @@ function DemoWorkspaceModal({ modal, backend }: { modal: DemoModalState | null; 
   const [shown, setShown] = useState(modal);
   if (modal && modal !== shown) setShown(modal);
   return (
-    <Modal isOpen={modal !== null} onOpenChange={noop}>
-      <Modal.Backdrop>
-        <Modal.Container>
-          <Modal.Dialog className="sm:max-w-lg">
-            <Modal.Header>
-              <Modal.Heading>{t('app.workspaceCreateTitle')}</Modal.Heading>
-            </Modal.Header>
-            <Modal.Body className="flex flex-col gap-4">
-              <div data-demo-target="workspace-name"><Field label={t('app.workspaceName')} value={shown?.name ?? ''} onChange={noop} /></div>
-              <Select selectedKey={backend.id}>
-                <Label>{t('app.workspaceBackend')}</Label><Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
-                <Select.Popover><ListBox><ListBox.Item id={backend.id} textValue={backend.name}>{backend.name} · {backend.serverUrl}</ListBox.Item></ListBox></Select.Popover>
-              </Select>
-              <Field label={t('app.workspaceDirectory')} value={shown?.path ?? ''} onChange={noop} />
-            </Modal.Body>
-            <Modal.Footer>
-              <Button variant="tertiary">{t('common.cancel')}</Button>
-              <Button data-demo-target="create-workspace"><RiAddLine className="size-4" />{t('app.workspaceCreate')}</Button>
-            </Modal.Footer>
-          </Modal.Dialog>
-        </Modal.Container>
-      </Modal.Backdrop>
-    </Modal>
+    <Modal.Backdrop isOpen={modal !== null} onOpenChange={noop}>
+      <Modal.Container>
+        <Modal.Dialog className="sm:max-w-lg">
+          <Modal.Header>
+            <Modal.Heading>{t('app.workspaceCreateTitle')}</Modal.Heading>
+          </Modal.Header>
+          <Modal.Body className="flex flex-col gap-4">
+            <div data-demo-target="workspace-name"><Field label={t('app.workspaceName')} value={shown?.name ?? ''} onChange={noop} /></div>
+            <Select selectedKey={backend.id}>
+              <Label>{t('app.workspaceBackend')}</Label><Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
+              <Select.Popover><ListBox><ListBox.Item id={backend.id} textValue={backend.name}>{backend.name} · {backend.serverUrl}</ListBox.Item></ListBox></Select.Popover>
+            </Select>
+            <Field label={t('app.workspaceDirectory')} value={shown?.path ?? ''} onChange={noop} />
+          </Modal.Body>
+          <Modal.Footer>
+            <Button variant="tertiary">{t('common.cancel')}</Button>
+            <Button data-demo-target="create-workspace"><RiAddLine className="size-4" />{t('app.workspaceCreate')}</Button>
+          </Modal.Footer>
+        </Modal.Dialog>
+      </Modal.Container>
+    </Modal.Backdrop>
   );
 }
 
