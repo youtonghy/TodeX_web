@@ -2,10 +2,12 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
 import { installWebPlatformBridge } from './lib/webPlatform';
+import { applyAppearance } from './lib/appearance';
 import '@fontsource-variable/inter';
 import './styles/global.css';
 
 installWebPlatformBridge();
+applyAppearance();
 
 // Keep parity with the desktop renderer: the window-chrome attribute drives
 // drag-region CSS, which is inert in a browser ('native').
