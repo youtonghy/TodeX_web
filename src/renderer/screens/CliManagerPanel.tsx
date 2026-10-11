@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button, Card, Chip, Spinner, toast } from '@heroui/react';
-import { RiDeleteBin6Line, RiDownload2Line, RiDownloadCloud2Line, RiRefreshLine, RiServerLine } from '@remixicon/react';
+import { RiDeleteBin6Line, RiDownload2Line, RiDownloadCloud2Line, RiRefreshLine, RiServerLine, RiSettings3Line } from '@remixicon/react';
 import {
   type CliOperationAction,
   type CliUpgradeOperation,
@@ -8,6 +8,7 @@ import {
   type CliVersionStatus,
   type ManagedCliProvider,
 } from '@todex/protocol/v2';
+import { ClaudeSettingsModal } from '../components/cli/ClaudeSettingsModal';
 import { ProviderIcon } from '../components/ProviderIcon';
 import { NoticeToast } from '../components/NoticeToast';
 import { t, useT, type MessageKey } from '../i18n';
@@ -109,6 +110,7 @@ export function CliManagerPanel({ session }: { session: TodeXSession }) {
     }
   };
 
+  const [claudeSettingsOpen, setClaudeSettingsOpen] = useState(false);
   const [removingIntegration, setRemovingIntegration] = useState(false);
   // TodeX keeps a PreToolUse hook and its MCP servers in Antigravity's global
   // config (shared with the Antigravity app); this takes them out again.
@@ -207,11 +209,18 @@ export function CliManagerPanel({ session }: { session: TodeXSession }) {
                     {t('cli.antigravityRemoveIntegration')}
                   </Button>
                 ) : null}
+                {cli.id === 'claude-code' && !notInstalled ? (
+                  <Button className="mt-2 w-full" size="sm" variant="ghost" onPress={() => setClaudeSettingsOpen(true)}>
+                    <RiSettings3Line className="size-4" />
+                    {t('cliSettings.open')}
+                  </Button>
+                ) : null}
               </Card>
             );
           })}
         </div>
       )}
+      <ClaudeSettingsModal isOpen={claudeSettingsOpen} onOpenChange={setClaudeSettingsOpen} api={api} />
     </div>
   );
 }
