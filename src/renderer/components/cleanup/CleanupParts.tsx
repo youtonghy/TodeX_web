@@ -150,8 +150,10 @@ export function StorageSummaryCard({ title, description, count, countLabel, tota
 
 /** The daemon's automatic cleanup: enable switch, age and size rules, last
  * and next run, and a confirmed run-now action. */
-export function CleanupPolicyCard({ hint, state, onSave, onRun, children }: {
+export function CleanupPolicyCard({ hint, state, sizes = true, onSave, onRun, children }: {
   hint: ReactNode;
+  /** Without known sizes there is no capacity rule. */
+  sizes?: boolean;
   state: HistoryCleanupPolicyResponse | undefined;
   onSave: (policy: HistoryCleanupPolicy) => Promise<void>;
   onRun: () => Promise<void>;
@@ -230,7 +232,7 @@ export function CleanupPolicyCard({ hint, state, onSave, onRun, children }: {
             </ListBox>
           </Select.Popover>
         </Select>
-        <Select
+        {sizes ? <Select
           className="w-full"
           isDisabled={!policy || saving}
           selectedKey={policy?.maxTotalBytes != null ? String(policy.maxTotalBytes) : OFF}
@@ -247,7 +249,7 @@ export function CleanupPolicyCard({ hint, state, onSave, onRun, children }: {
               ))}
             </ListBox>
           </Select.Popover>
-        </Select>
+        </Select> : null}
       </div>
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
         <div className="text-muted flex min-w-0 flex-1 flex-col gap-0.5 text-xs">
@@ -286,7 +288,8 @@ export type HistoryListItem = {
   subtitleTitle?: string;
   searchText: string;
   updatedAt: string;
-  bytes: number;
+  /** Null when the agent does not report per-session sizes. */
+  bytes: number | null;
   /** Cannot be selected (running, or in use by a TodeX conversation). */
   locked: boolean;
   badge?: ReactNode;
@@ -297,12 +300,14 @@ type SortKey = 'oldest' | 'newest' | 'largest';
 
 /** Searchable, sortable list with (select-all) selection and a confirmed
  * "clean selected" action. Locked rows cannot be selected. */
-export function SelectableHistoryList({ items, loading, emptyLabel, confirmTitle, confirmBody, onClean }: {
+export function SelectableHistoryList({ items, loading, sizes = true, emptyLabel, confirmTitle, confirmBody, onClean }: {
   items: HistoryListItem[];
   loading: boolean;
+  /** Rows carry sizes: offer the size sort and show totals. */
+  sizes?: boolean;
   emptyLabel: string;
   confirmTitle: (count: number) => string;
-  confirmBody: (size: string) => string;
+  confirmBody: (size: string | null) => string;
   onClean: (ids: string[]) => Promise<void>;
 }) {
   const t = useT();
@@ -317,13 +322,13 @@ export function SelectableHistoryList({ items, loading, emptyLabel, confirmTitle
     const filtered = needle ? items.filter((item) => item.searchText.toLowerCase().includes(needle)) : items;
     const time = (item: HistoryListItem) => Date.parse(item.updatedAt) || 0;
     return [...filtered].sort((a, b) => (
-      sort === 'largest' ? b.bytes - a.bytes : sort === 'newest' ? time(b) - time(a) : time(a) - time(b)
+      sort === 'largest' && sizes ? (b.bytes ?? 0) - (a.bytes ?? 0) : sort === 'newest' ? time(b) - time(a) : time(a) - time(b)
     ));
-  }, [items, query, sort]);
+  }, [items, query, sizes, sort]);
 
   // Rows that went away or became locked drop out of the selection.
   const chosen = items.filter((item) => selected.has(item.id) && !item.locked);
-  const chosenBytes = chosen.reduce((sum, item) => sum + item.bytes, 0);
+  const chosenBytes = chosen.reduce((sum, item) => sum + (item.bytes ?? 0), 0);
   const selectable = visible.filter((item) => !item.locked);
   const selectedVisible = selectable.filter((item) => selected.has(item.id));
   const allSelected = selectable.length > 0 && selectedVisible.length === selectable.length;
@@ -373,7 +378,7 @@ export function SelectableHistoryList({ items, loading, emptyLabel, confirmTitle
             <ListBox>
               <SelectOption id="oldest" label={t('cleanup.sortOldest')} />
               <SelectOption id="newest" label={t('cleanup.sortNewest')} />
-              <SelectOption id="largest" label={t('cleanup.sortLargest')} />
+              {sizes ? <SelectOption id="largest" label={t('cleanup.sortLargest')} /> : null}
             </ListBox>
           </Select.Popover>
         </Select>
@@ -391,7 +396,7 @@ export function SelectableHistoryList({ items, loading, emptyLabel, confirmTitle
           </Checkbox.Content>
         </Checkbox>
         <span className="text-muted flex-1 text-xs tabular-nums">
-          {chosen.length > 0 ? t('cleanup.selectedSummary', { count: chosen.length, size: formatStorageBytes(chosenBytes) }) : null}
+          {chosen.length > 0 ? (sizes ? t('cleanup.selectedSummary', { count: chosen.length, size: formatStorageBytes(chosenBytes) }) : t('cleanup.selectedCount', { count: chosen.length })) : null}
         </span>
         <Button variant="danger" size="sm" isDisabled={chosen.length === 0 || cleaning} onPress={() => setConfirming(true)}>
           <RiDeleteBin6Line className="size-4" />
@@ -426,7 +431,7 @@ export function SelectableHistoryList({ items, loading, emptyLabel, confirmTitle
                     <span className="text-muted truncate text-xs" title={item.subtitleTitle}>{item.subtitle}</span>
                   </span>
                   {item.badge}
-                  <span className="text-muted shrink-0 text-xs tabular-nums">{formatStorageBytes(item.bytes)}</span>
+                  <span className="text-muted shrink-0 text-xs tabular-nums">{item.bytes == null ? '—' : formatStorageBytes(item.bytes)}</span>
                 </Checkbox.Content>
               </Checkbox>
               {item.onView ? (
@@ -445,7 +450,7 @@ export function SelectableHistoryList({ items, loading, emptyLabel, confirmTitle
         isOpen={confirming}
         onClose={() => setConfirming(false)}
         title={confirmTitle(chosen.length)}
-        body={confirmBody(formatStorageBytes(chosenBytes))}
+        body={confirmBody(sizes ? formatStorageBytes(chosenBytes) : null)}
         confirmLabel={t('cleanup.cleanSelected')}
         isPending={cleaning}
         onConfirm={() => void clean()}
