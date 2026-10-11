@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
-import { Button, Card, ScrollShadow, Spinner, Tabs, toast } from '@heroui/react';
-import { RiArrowDownSLine, RiFlashlightLine, RiGitlabLine, RiRefreshLine } from '@remixicon/react';
-import type { McpCatalog, McpServerCatalogDescriptor, ProviderDescriptor, ProviderKind, SkillCatalog, SkillCatalogDescriptor } from '@todex/protocol/v2';
+import { AlertDialog, Button, Card, ScrollShadow, Spinner, Tabs, toast } from '@heroui/react';
+import { RiArrowDownSLine, RiDeleteBinLine, RiFlashlightLine, RiGitlabLine, RiRefreshLine } from '@remixicon/react';
+import type { McpCatalog, McpServerCatalogDescriptor, McpServerConfig, ProviderDescriptor, ProviderKind, SkillCatalog, SkillCatalogDescriptor } from '@todex/protocol/v2';
 import { providerDisplayName } from '@todex/protocol/v2';
 import { ProviderIcon } from '../components/ProviderIcon';
 import { useNoticeToast } from '../components/NoticeToast';
@@ -25,8 +25,8 @@ type Props = {
   canInvoke?: boolean;
   onToggleSkill?: (skill: SkillCatalogDescriptor, provider: ProviderKind) => void;
   onPreviewSkill?: (skill: SkillCatalogDescriptor, provider: ProviderKind) => Promise<string>;
-  onRefreshMcp?: (resourceId: string) => void;
-  onCallMcp?: (resourceId: string, toolName: string) => void;
+  onLoadMcpConfig?: (server: McpServerCatalogDescriptor) => Promise<McpServerConfig>;
+  onDeleteMcp?: (server: McpServerCatalogDescriptor) => Promise<void>;
   /** Hosted in a dialog whose heading already names the panel. */
   inDialog?: boolean;
 };
@@ -48,14 +48,17 @@ export function CapabilitiesPanel({
   canInvoke = false,
   onToggleSkill,
   onPreviewSkill,
-  onRefreshMcp,
-  onCallMcp,
+  onLoadMcpConfig,
+  onDeleteMcp,
   inDialog = false,
 }: Props) {
   const t = useT();
   const [viewMode, setViewMode] = useState<ViewMode>('skills');
   const [providerChoice, setProviderChoice] = useState<ProviderChoice>('common');
   const [previews, setPreviews] = useState<Record<string, string>>({});
+  const [mcpConfigs, setMcpConfigs] = useState<Record<string, McpServerConfig>>({});
+  const [pendingDelete, setPendingDelete] = useState<McpServerCatalogDescriptor | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const provider = providerChoice === 'common' ? undefined : providers.find((item) => item.id === providerChoice);
   const providerKeys = useMemo(() => providers.map((item) => item.id), [providers]);
   const selectedCatalogs = providerChoice === 'common'
@@ -164,13 +167,63 @@ export function CapabilitiesPanel({
             <McpRow
               key={`${item.resourceId}:${item.name}`}
               item={item}
-              canInvoke={canInvoke}
-              onRefresh={() => onRefreshMcp?.(item.resourceId)}
-              onCall={(toolName) => onCallMcp?.(item.resourceId, toolName)}
+              config={mcpConfigs[item.resourceId] ?? null}
+              canDelete={Boolean(onDeleteMcp)}
+              onLoad={async () => {
+                if (!onLoadMcpConfig) return;
+                try {
+                  const config = await onLoadMcpConfig(item);
+                  setMcpConfigs((current) => ({ ...current, [item.resourceId]: config }));
+                } catch (error) {
+                  toast.danger(error instanceof Error ? error.message : t('cap.mcpConfigFailed'));
+                }
+              }}
+              onDelete={() => setPendingDelete(item)}
             />
           )) : <p className="text-muted py-10 text-center text-sm">{t('cap.noMcps')}</p>
         ) : null}
       </ScrollShadow>
+      <AlertDialog isOpen={Boolean(pendingDelete)} onOpenChange={(open) => { if (!open && !deleting) setPendingDelete(null); }}>
+        <AlertDialog.Backdrop>
+          <AlertDialog.Container>
+            <AlertDialog.Dialog className="sm:max-w-md">
+              <AlertDialog.Header>
+                <AlertDialog.Heading>{t('cap.deleteMcpTitle')}</AlertDialog.Heading>
+              </AlertDialog.Header>
+              <AlertDialog.Body>
+                <p className="text-muted text-sm">
+                  {pendingDelete ? t('cap.deleteMcpBody', {
+                    name: pendingDelete.name,
+                    path: mcpConfigs[pendingDelete.resourceId]?.path ?? pendingDelete.source,
+                  }) : null}
+                </p>
+              </AlertDialog.Body>
+              <AlertDialog.Footer>
+                <Button slot="close" variant="tertiary" isDisabled={deleting}>{t('common.cancel')}</Button>
+                <Button
+                  variant="danger"
+                  isPending={deleting}
+                  onPress={async () => {
+                    if (!pendingDelete || !onDeleteMcp) return;
+                    setDeleting(true);
+                    try {
+                      await onDeleteMcp(pendingDelete);
+                      toast.success(t('cap.mcpDeleted', { name: pendingDelete.name }));
+                      setPendingDelete(null);
+                    } catch (error) {
+                      toast.danger(error instanceof Error ? error.message : t('cap.deleteMcpFailed'));
+                    } finally {
+                      setDeleting(false);
+                    }
+                  }}
+                >
+                  {t('common.delete')}
+                </Button>
+              </AlertDialog.Footer>
+            </AlertDialog.Dialog>
+          </AlertDialog.Container>
+        </AlertDialog.Backdrop>
+      </AlertDialog>
     </div>
   );
 }
@@ -292,49 +345,104 @@ function SkillRow({
 
 function McpRow({
   item,
-  canInvoke,
-  onRefresh,
-  onCall,
+  config,
+  canDelete,
+  onLoad,
+  onDelete,
 }: {
   item: McpServerCatalogDescriptor;
-  canInvoke: boolean;
-  onRefresh: () => void;
-  onCall: (toolName: string) => void;
+  config: McpServerConfig | null;
+  canDelete: boolean;
+  onLoad: () => Promise<void>;
+  onDelete: () => void;
 }) {
   const t = useT();
+  const [expanded, setExpanded] = useState(false);
+  const [loading, setLoading] = useState(false);
   const status = item.enabled && item.active ? t('cap.statusActive') : item.shadowedBy ? t('cap.statusShadowed') : item.enabled ? t('cap.statusAvailable') : t('cap.statusDisabled');
+
+  const handleToggle = async () => {
+    const next = !expanded;
+    setExpanded(next);
+    if (next && !config) {
+      setLoading(true);
+      try {
+        await onLoad();
+      } finally {
+        setLoading(false);
+      }
+    }
+  };
+
   return (
-    <Card className="mb-2 p-3">
+    <Card
+      role="button"
+      tabIndex={0}
+      aria-expanded={expanded}
+      className={`mb-2 p-3.5 transition-all cursor-pointer select-none hover:bg-surface-secondary/40 active:bg-surface-secondary/60 ${
+        expanded ? 'bg-surface-secondary/20 ring-1 ring-separator' : ''
+      }`}
+      onClick={handleToggle}
+      onKeyDown={(e) => {
+        if (e.target !== e.currentTarget) return;
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          void handleToggle();
+        }
+      }}
+    >
       <div className="flex gap-3">
-        <div className="bg-success-soft flex size-9 items-center justify-center rounded-lg">
+        <div className="bg-success-soft flex size-9 shrink-0 items-center justify-center rounded-lg">
           <RiGitlabLine className="text-success size-4" />
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center justify-between gap-2">
-            <p className="truncate font-semibold">{item.name}</p>
-            <p className="text-muted text-xs">{status}</p>
-          </div>
-          <p className="text-muted mt-2 text-[11px]">{item.transport} · {item.scope} · {item.source}</p>
-          {item.error ? <p className="text-danger mt-1 text-xs">{item.error}</p> : null}
-          <div className="mt-2 flex flex-wrap gap-2">
-            {canInvoke ? (
-              <Button size="sm" variant="tertiary" onPress={onRefresh}>{t('cap.refreshTools')}</Button>
-            ) : null}
-          </div>
-          {item.tools?.length ? (
-            <div className="mt-2 flex flex-col gap-1">
-              {item.tools.map((tool) => (
-                <div key={tool.name} className="flex items-center justify-between gap-2">
-                  <p className="truncate text-xs">{tool.name}{tool.description ? ` · ${tool.description}` : ''}</p>
-                  {canInvoke ? (
-                    <Button size="sm" variant="primary" onPress={() => onCall(tool.name)}>{t('cap.call')}</Button>
-                  ) : null}
-                </div>
-              ))}
+            <p className="truncate font-semibold text-sm">{item.name}</p>
+            <div className="flex items-center gap-2 shrink-0">
+              <span className="text-muted text-xs">{status}</span>
+              <RiArrowDownSLine
+                className={`text-muted size-4 transition-transform duration-200 ${
+                  expanded ? 'rotate-180' : ''
+                }`}
+              />
             </div>
-          ) : (
-            <p className="text-muted mt-2 text-xs">{t('cap.noTools')}</p>
-          )}
+          </div>
+          <p className="text-muted mt-1.5 text-[11px]">{item.transport} · {item.scope} · {item.source}</p>
+          {item.error ? <p className="text-danger mt-1 text-xs">{item.error}</p> : null}
+
+          {expanded ? (
+            <div className="mt-3 cursor-default border-t border-separator/40 pt-3 select-text" onClick={(e) => e.stopPropagation()}>
+              {loading ? (
+                <div className="flex items-center gap-2 py-3 text-muted text-xs">
+                  <Spinner size="sm" />
+                  <span>{t('cap.loadingMcp')}</span>
+                </div>
+              ) : config ? (
+                <>
+                  <div className="rounded-lg bg-surface-secondary/60 border border-separator/50 p-2.5">
+                    <p className="text-muted mb-1 truncate text-[11px] font-medium" title={config.path}>{config.path || 'JSON'}</p>
+                    <pre className="text-foreground/80 max-h-72 overflow-auto whitespace-pre font-mono text-[11px] leading-relaxed select-text">
+                      {JSON.stringify({ [item.name]: config.config }, null, 2)}
+                    </pre>
+                  </div>
+                  {canDelete ? (
+                    config.format === 'native' ? (
+                      <p className="text-muted mt-3 text-xs">{t('cap.mcpNativeManaged')}</p>
+                    ) : (
+                      <div className="mt-3 flex justify-end">
+                        <Button size="sm" variant="danger" onPress={onDelete}>
+                          <RiDeleteBinLine className="size-4" />
+                          {t('cap.deleteMcp')}
+                        </Button>
+                      </div>
+                    )
+                  ) : null}
+                </>
+              ) : (
+                <p className="text-muted text-xs">{t('cap.mcpConfigFailed')}</p>
+              )}
+            </div>
+          ) : null}
         </div>
       </div>
     </Card>
