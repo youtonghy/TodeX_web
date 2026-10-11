@@ -261,6 +261,7 @@ export function DemoApp() {
             onOpenCapabilities={noop}
             onOpenCliManager={noop}
             onOpenAgentProviders={noop}
+            onOpenCleanup={noop}
             onOpenUsage={noop}
             onOpenQuota={noop}
             onOpenAbout={noop}

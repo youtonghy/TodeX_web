@@ -1,4 +1,4 @@
-import { RiPushpin2Fill, RiLockLine, RiAddLine, RiFolderReduceLine, RiFoldersLine, RiFolderTransferLine, RiPencilLine, RiEdit2Line, RiErrorWarningLine, RiFolder3Line, RiGitBranchLine, RiDeleteBinLine, RiArrowDownSLine, RiBarChartBoxLine, RiInformationLine, RiKanbanView2, RiPaletteLine, RiPriceTag3Line, RiPuzzle2Line, RiSettings3Line, RiTerminalBoxLine, RiTerminalLine, RiTimeLine, RiUserSettingsLine, RiVipCrownLine } from '@remixicon/react';
+import { RiPushpin2Fill, RiLockLine, RiAddLine, RiFolderReduceLine, RiFoldersLine, RiFolderTransferLine, RiPencilLine, RiEdit2Line, RiErrorWarningLine, RiFolder3Line, RiGitBranchLine, RiDeleteBinLine, RiArrowDownSLine, RiBarChartBoxLine, RiBrush3Line, RiInformationLine, RiKanbanView2, RiPaletteLine, RiPriceTag3Line, RiPuzzle2Line, RiSettings3Line, RiTerminalBoxLine, RiTerminalLine, RiTimeLine, RiUserSettingsLine, RiVipCrownLine } from '@remixicon/react';
 import { Badge, Button, Chip, ColorSwatchPicker, Dropdown, Label, Tooltip } from '@heroui/react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ComponentProps, FocusEvent, MouseEvent, ReactNode } from 'react';
@@ -28,6 +28,7 @@ type Props = {
   onOpenCapabilities: () => void;
   onOpenCliManager: () => void;
   onOpenAgentProviders: () => void;
+  onOpenCleanup: () => void;
   onOpenUsage: () => void;
   onOpenQuota: () => void;
   onOpenAbout: () => void;
@@ -82,6 +83,7 @@ export function AppSidebar({
   onOpenCapabilities,
   onOpenCliManager,
   onOpenAgentProviders,
+  onOpenCleanup,
   onOpenUsage,
   onOpenQuota,
   onOpenAbout,
@@ -587,6 +589,10 @@ export function AppSidebar({
             if (isMobile) setMobileOpen(false);
             onOpenAgentProviders();
           }
+          if (key === 'cleanup') {
+            if (isMobile) setMobileOpen(false);
+            onOpenCleanup();
+          }
           if (key === 'usage') onOpenUsage();
           if (key === 'quota') onOpenQuota();
           if (key === 'about') onOpenAbout();
@@ -595,6 +601,7 @@ export function AppSidebar({
           <Dropdown.Item id="capabilities" textValue={t('app.mcpSkillManager')}><RiPuzzle2Line className="text-muted size-4 shrink-0" /><Label>{t('app.mcpSkillManager')}</Label></Dropdown.Item>
           <Dropdown.Item id="cli-manager" textValue={t('app.cliManager')}><RiTerminalBoxLine className="text-muted size-4 shrink-0" /><Label>{t('app.cliManager')}</Label></Dropdown.Item>
           <Dropdown.Item id="agent-providers" textValue={t('app.agentProviders')}><RiUserSettingsLine className="text-muted size-4 shrink-0" /><Label>{t('app.agentProviders')}</Label></Dropdown.Item>
+          <Dropdown.Item id="cleanup" textValue={t('app.cleanup')}><RiBrush3Line className="text-muted size-4 shrink-0" /><Label>{t('app.cleanup')}</Label></Dropdown.Item>
           <Dropdown.Item id="usage" textValue={t('app.usage')}><RiBarChartBoxLine className="text-muted size-4 shrink-0" /><Label>{t('app.usage')}</Label></Dropdown.Item>
           <Dropdown.Item id="quota" textValue={t('usage.quotaTitle')}><RiVipCrownLine className="text-muted size-4 shrink-0" /><Label>{t('usage.quotaTitle')}</Label></Dropdown.Item>
           <Dropdown.Item id="about" textValue={t('app.about')}><RiInformationLine className="text-muted size-4 shrink-0" /><Label>{t('app.about')}</Label></Dropdown.Item>
