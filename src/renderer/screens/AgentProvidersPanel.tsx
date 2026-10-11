@@ -86,6 +86,22 @@ export function AgentProvidersPanel({ session }: { session: TodeXSession }) {
     return () => { requestGeneration.current += 1; };
   }, [refresh]);
 
+  // Only agents installed on the backend's machine; until the provider list
+  // arrives every managed agent stays listed so the panel is never empty.
+  const installedAgents = useMemo(() => {
+    const providers = session.v2Providers;
+    if (!providers.length) return MANAGED_PROVIDER_AGENTS;
+    return MANAGED_PROVIDER_AGENTS.filter((id) => providers.some((item) => item.id === id && item.available));
+  }, [session.v2Providers]);
+
+  // A selected agent that is not installed falls back to the first one that is.
+  useEffect(() => {
+    if (installedAgents.length && !installedAgents.includes(agent)) {
+      setAgent(installedAgents[0]);
+      setEditor(null);
+    }
+  }, [agent, installedAgents]);
+
   const bucket: AgentProviderBucket | undefined = agents[agent];
 
   const applyBucket = (next: AgentProviderBucket) => {
@@ -208,7 +224,7 @@ export function AgentProvidersPanel({ session }: { session: TodeXSession }) {
       <p className="text-muted -mt-2 text-xs">{t(additiveAgent ? 'ap.globalNoteAdditive' : 'ap.globalNote')}</p>
 
       <div className="flex flex-wrap gap-2">
-        {MANAGED_PROVIDER_AGENTS.map((id) => (
+        {installedAgents.map((id) => (
           <Button key={id} size="sm" variant={agent === id ? 'primary' : 'tertiary'} onPress={() => { setAgent(id); setEditor(null); }}>
             <ProviderIcon provider={id} className="size-4" />
             {PROVIDER_DISPLAY_NAMES[id]}
@@ -218,6 +234,8 @@ export function AgentProvidersPanel({ session }: { session: TodeXSession }) {
 
       {loading ? (
         <div className="flex min-h-48 items-center justify-center"><Spinner aria-label={t('cli.reading')} /></div>
+      ) : !installedAgents.length ? (
+        <p className="text-muted py-10 text-center text-sm">{t('ap.noInstalledAgents')}</p>
       ) : !bucket ? (
         <p className="text-muted py-10 text-center text-sm">{t('ap.unsupported')}</p>
       ) : (
