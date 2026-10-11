@@ -5,10 +5,12 @@ import {
   type CliOperationAction,
   type CliUpgradeOperation,
   type CliVersionInfo,
+  type CliSettingsProvider,
   type CliVersionStatus,
   type ManagedCliProvider,
 } from '@todex/protocol/v2';
-import { ClaudeSettingsModal } from '../components/cli/ClaudeSettingsModal';
+import { CliSettingsModal } from '../components/cli/CliSettingsModal';
+import { hasCliSettings } from '../lib/cliSettings';
 import { ProviderIcon } from '../components/ProviderIcon';
 import { NoticeToast } from '../components/NoticeToast';
 import { t, useT, type MessageKey } from '../i18n';
@@ -110,7 +112,7 @@ export function CliManagerPanel({ session }: { session: TodeXSession }) {
     }
   };
 
-  const [claudeSettingsOpen, setClaudeSettingsOpen] = useState(false);
+  const [settingsProvider, setSettingsProvider] = useState<CliSettingsProvider | null>(null);
   const [removingIntegration, setRemovingIntegration] = useState(false);
   // TodeX keeps a PreToolUse hook and its MCP servers in Antigravity's global
   // config (shared with the Antigravity app); this takes them out again.
@@ -209,8 +211,8 @@ export function CliManagerPanel({ session }: { session: TodeXSession }) {
                     {t('cli.antigravityRemoveIntegration')}
                   </Button>
                 ) : null}
-                {cli.id === 'claude-code' && !notInstalled ? (
-                  <Button className="mt-2 w-full" size="sm" variant="ghost" onPress={() => setClaudeSettingsOpen(true)}>
+                {hasCliSettings(cli.id) && !notInstalled ? (
+                  <Button className="mt-2 w-full" size="sm" variant="ghost" onPress={() => setSettingsProvider(cli.id as CliSettingsProvider)}>
                     <RiSettings3Line className="size-4" />
                     {t('cliSettings.open')}
                   </Button>
@@ -220,7 +222,7 @@ export function CliManagerPanel({ session }: { session: TodeXSession }) {
           })}
         </div>
       )}
-      <ClaudeSettingsModal isOpen={claudeSettingsOpen} onOpenChange={setClaudeSettingsOpen} api={api} />
+      <CliSettingsModal provider={settingsProvider} onClose={() => setSettingsProvider(null)} api={api} />
     </div>
   );
 }

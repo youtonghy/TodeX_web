@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Button, Description, FieldError, Input, Label, ListBox, Modal, Select, Spinner, Surface, Tabs, TextArea, TextField, toast } from '@heroui/react';
 import { RiAddLine, RiDeleteBin6Line, RiEyeLine, RiEyeOffLine } from '@remixicon/react';
-import type { CliSettingsDocument, V2ApiClient } from '@todex/protocol/v2';
+import type { CliSettingsDocument, CliSettingsProvider, V2ApiClient } from '@todex/protocol/v2';
 import { isConflictError } from '@todex/protocol/connectionError';
 import { SelectOption } from '../cleanup/CleanupParts';
 import { useT, type MessageKey } from '../../i18n';
 import {
-  CLAUDE_SETTINGS_GROUPS,
+  CLI_SETTINGS,
   ENV_NAME,
   UNSET,
   applyMergePatch,
@@ -15,35 +15,39 @@ import {
   fieldId,
   getAt,
   mergePatch,
+  optionId,
   setAt,
+  type CliSettingsSchema,
   type FieldSpec,
+  type OptionValue,
   type SettingsObject,
-} from '../../lib/claudeSettings';
+} from '../../lib/cliSettings';
 
 type TabId = 'form' | 'env' | 'raw';
 type EnvRow = { key: number; name: string; value: string; revealed: boolean };
 
 const key = (value: string) => value as MessageKey;
 
-/** Settings for the Claude Code CLI on the backend host (`~/.claude/settings.json`). */
-export function ClaudeSettingsModal({ isOpen, onOpenChange, api }: {
-  isOpen: boolean;
-  onOpenChange: (open: boolean) => void;
+/** A CLI's user settings file on the backend host; open while `provider` is set. */
+export function CliSettingsModal({ provider, onClose, api }: {
+  provider: CliSettingsProvider | null;
+  onClose: () => void;
   api: () => V2ApiClient;
 }) {
   return (
-    <Modal.Backdrop isOpen={isOpen} onOpenChange={onOpenChange} isDismissable={false}>
+    <Modal.Backdrop isOpen={provider !== null} onOpenChange={(open) => { if (!open) onClose(); }} isDismissable={false}>
       <Modal.Container>
         <Modal.Dialog className="flex h-[min(760px,90vh)] flex-col sm:max-w-2xl">
-          {isOpen ? <ClaudeSettingsEditor api={api} onClose={() => onOpenChange(false)} /> : null}
+          {provider ? <CliSettingsEditor key={provider} schema={CLI_SETTINGS[provider]} api={api} onClose={onClose} /> : null}
         </Modal.Dialog>
       </Modal.Container>
     </Modal.Backdrop>
   );
 }
 
-function ClaudeSettingsEditor({ api, onClose }: { api: () => V2ApiClient; onClose: () => void }) {
+function CliSettingsEditor({ schema, api, onClose }: { schema: CliSettingsSchema; api: () => V2ApiClient; onClose: () => void }) {
   const t = useT();
+  const { provider, envPath } = schema;
   const [doc, setDoc] = useState<CliSettingsDocument>();
   const [loadError, setLoadError] = useState<string>();
   const [draft, setDraft] = useState<SettingsObject>({});
@@ -54,7 +58,7 @@ function ClaudeSettingsEditor({ api, onClose }: { api: () => V2ApiClient; onClos
   const [saving, setSaving] = useState(false);
   const nextEnvKey = useRef(0);
 
-  const toEnvRows = (settings: SettingsObject) => envRows(settings).map((row) => ({ ...row, key: nextEnvKey.current++, revealed: false }));
+  const toEnvRows = (settings: SettingsObject) => (envPath ? envRows(settings, envPath) : []).map((row) => ({ ...row, key: nextEnvKey.current++, revealed: false }));
 
   /** Takes in a document; `draft` replaces the form state (default: the saved settings). */
   const adopt = useCallback((next: CliSettingsDocument, draftSettings?: SettingsObject) => {
@@ -69,21 +73,23 @@ function ClaudeSettingsEditor({ api, onClose }: { api: () => V2ApiClient; onClos
   const load = useCallback(async () => {
     setLoadError(undefined);
     try {
-      adopt(await api().getClaudeSettings());
+      adopt(await api().getCliSettings(provider));
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : t('cliSettings.readFailed'));
     }
-  }, [adopt, api]);
+  }, [adopt, api, provider]);
 
   useEffect(() => { void load(); }, [load]);
 
   const saved = doc?.settings ?? null;
   // The form and the env tab edit one draft; env rows are folded in on save.
-  const formNext = useMemo(() => setAt(draft, ['env'], envFromRows(env)), [draft, env]);
+  const formNext = useMemo(() => (envPath ? setAt(draft, envPath, envFromRows(env)) : draft), [draft, env, envPath]);
   const patch = useMemo(() => (saved ? mergePatch(saved, formNext) : {}), [saved, formNext]);
   const formDirty = Object.keys(patch).length > 0;
   const rawDirty = Boolean(doc) && rawText !== doc?.text;
-  const rawError = useMemo(() => rawObjectError(rawText), [rawText]);
+  // TOML is checked by the backend on save.
+  const rawError = useMemo(() => (doc?.format === 'toml' ? null : rawObjectError(rawText)), [doc?.format, rawText]);
+  const fileName = doc?.path.split(/[\\/]/).pop() || doc?.path || '';
   const envInvalid = env.some((row) => row.name.trim() !== '' && !ENV_NAME.test(row.name.trim()));
   const editingRaw = tab === 'raw';
   const canSave = Boolean(doc) && !saving && (editingRaw ? rawDirty && !rawError : formDirty && !envInvalid);
@@ -93,10 +99,10 @@ function ClaudeSettingsEditor({ api, onClose }: { api: () => V2ApiClient; onClos
     setSaving(true);
     try {
       const next = editingRaw
-        ? await api().replaceClaudeSettings(doc.revision, rawText)
-        : await api().patchClaudeSettings(doc.revision, patch);
+        ? await api().replaceCliSettings(provider, doc.revision, rawText)
+        : await api().patchCliSettings(provider, doc.revision, patch);
       adopt(next);
-      toast.success(t('cliSettings.saved'));
+      toast.success(t('cliSettings.saved', { name: schema.name }));
     } catch (error) {
       if (!isConflictError(error)) {
         toast.danger(error instanceof Error ? error.message : t('cliSettings.saveFailed'));
@@ -106,7 +112,7 @@ function ClaudeSettingsEditor({ api, onClose }: { api: () => V2ApiClient; onClos
       // top (the raw text is kept as typed), so nothing is lost or silently
       // overwritten; the user reviews and saves again.
       try {
-        const latest = await api().getClaudeSettings();
+        const latest = await api().getCliSettings(provider);
         if (editingRaw) {
           setDoc(latest);
         } else {
@@ -123,7 +129,7 @@ function ClaudeSettingsEditor({ api, onClose }: { api: () => V2ApiClient; onClos
 
   const header = (
     <Modal.Header className="flex flex-col items-start gap-1">
-      <Modal.Heading>{t('cliSettings.title', { name: 'Claude Code' })}</Modal.Heading>
+      <Modal.Heading>{t('cliSettings.title', { name: schema.name })}</Modal.Heading>
       {doc ? <p className="text-muted w-full truncate text-xs" dir="ltr" title={doc.path}>{doc.path}</p> : null}
     </Modal.Header>
   );
@@ -156,23 +162,26 @@ function ClaudeSettingsEditor({ api, onClose }: { api: () => V2ApiClient; onClos
           <Tabs.ListContainer>
             <Tabs.List aria-label={t('cliSettings.tabsLabel')}>
               <Tabs.Tab id="form" isDisabled={!saved}>{t('cliSettings.tabForm')}<Tabs.Indicator /></Tabs.Tab>
-              <Tabs.Tab id="env" isDisabled={!saved} className="gap-1.5">
-                {t('cliSettings.tabEnv')}{env.length ? <span className="text-muted text-xs tabular-nums">{env.length}</span> : null}<Tabs.Indicator />
-              </Tabs.Tab>
+              {envPath ? (
+                <Tabs.Tab id="env" isDisabled={!saved} className="gap-1.5">
+                  {t('cliSettings.tabEnv')}{env.length ? <span className="text-muted text-xs tabular-nums">{env.length}</span> : null}<Tabs.Indicator />
+                </Tabs.Tab>
+              ) : null}
               <Tabs.Tab id="raw">{t('cliSettings.tabRaw')}<Tabs.Indicator /></Tabs.Tab>
             </Tabs.List>
           </Tabs.ListContainer>
           <div className="min-h-0 flex-1 overflow-y-auto">
             <Tabs.Panel id="form" className="flex flex-col gap-5">
-              <p className="text-muted text-sm">{doc.exists ? t('cliSettings.scopeHint') : t('cliSettings.missingHint')}</p>
-              {CLAUDE_SETTINGS_GROUPS.map((group) => (
+              <p className="text-muted text-sm">{doc.exists ? t(schema.hints.scope) : t('cliSettings.missingHint')}</p>
+              {schema.groups.map((group) => (
                 <section key={group.id} className="flex flex-col gap-2">
-                  <h3 className="text-muted px-1 text-xs font-medium">{t(key(`cliSettings.group.${group.id}`))}</h3>
+                  <h3 className="text-muted px-1 text-xs font-medium">{t(key(`${schema.keyPrefix}.group.${group.id}`))}</h3>
                   <Surface variant="secondary" className="divide-separator flex flex-col divide-y rounded-2xl px-4">
                     {group.fields.map((field) => (
                       <SettingsField
                         key={fieldId(field.path)}
                         field={field}
+                        keyPrefix={schema.keyPrefix}
                         value={getAt(draft, field.path)}
                         onChange={(value) => setDraft((current) => setAt(current, field.path, value))}
                       />
@@ -180,29 +189,31 @@ function ClaudeSettingsEditor({ api, onClose }: { api: () => V2ApiClient; onClos
                   </Surface>
                 </section>
               ))}
-              <p className="text-muted text-sm">{t('cliSettings.moreInRaw')}</p>
+              <p className="text-muted text-sm">{t(schema.hints.moreInRaw)}</p>
             </Tabs.Panel>
-            <Tabs.Panel id="env" className="flex flex-col gap-3">
-              <p className="text-muted text-sm">{t('cliSettings.envHint')}</p>
-              <EnvEditor rows={env} onChange={setEnv} nextKey={() => nextEnvKey.current++} />
-            </Tabs.Panel>
+            {envPath ? (
+              <Tabs.Panel id="env" className="flex flex-col gap-3">
+                {schema.hints.env ? <p className="text-muted text-sm">{t(schema.hints.env)}</p> : null}
+                <EnvEditor rows={env} onChange={setEnv} nextKey={() => nextEnvKey.current++} />
+              </Tabs.Panel>
+            ) : null}
             <Tabs.Panel id="raw" className="flex flex-col gap-3">
               {doc.parseError ? (
                 <Surface variant="secondary" className="flex flex-col gap-1 rounded-2xl p-4">
-                  <p className="text-warning text-sm font-medium">{t('cliSettings.parseError')}</p>
+                  <p className="text-warning text-sm font-medium">{t('cliSettings.parseError', { file: fileName })}</p>
                   <p className="text-muted font-mono text-xs">{doc.parseError}</p>
                 </Surface>
               ) : null}
               {rawRevealed || !doc.exists ? (
-                <TextField className="w-full" value={rawText} onChange={setRawText} isInvalid={Boolean(rawError)} aria-label="settings.json">
+                <TextField className="w-full" value={rawText} onChange={setRawText} isInvalid={Boolean(rawError)} aria-label={fileName}>
                   <TextArea className="w-full font-mono text-xs" rows={22} spellCheck="false" />
-                  {rawError ? <FieldError>{rawError}</FieldError> : <Description>{t('cliSettings.rawHint')}</Description>}
+                  {rawError ? <FieldError>{rawError}</FieldError> : <Description>{t(doc.format === 'toml' ? 'cliSettings.rawHintToml' : 'cliSettings.rawHintJson')}</Description>}
                 </TextField>
               ) : (
                 <Surface variant="secondary" className="flex items-center gap-3 rounded-2xl p-4">
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-medium">{t('cliSettings.rawHiddenTitle')}</p>
-                    <p className="text-muted text-sm">{t('cliSettings.rawHiddenHint')}</p>
+                    <p className="text-muted text-sm">{t(schema.hints.rawHidden)}</p>
                   </div>
                   <Button size="sm" variant="secondary" onPress={() => setRawRevealed(true)}>
                     <RiEyeLine className="size-4" />{t('cliSettings.reveal')}
@@ -261,13 +272,15 @@ function CompactSelect({ label, selectedKey, onChange, options }: {
   );
 }
 
-function SettingsField({ field, value, onChange }: { field: FieldSpec; value: unknown; onChange: (value: unknown) => void }) {
+function SettingsField({ field, keyPrefix, value, onChange }: {
+  field: FieldSpec; keyPrefix: string; value: unknown; onChange: (value: unknown) => void;
+}) {
   const t = useT();
   const id = fieldId(field.path);
-  const label = t(key(`cliSettings.field.${id}`));
+  const label = t(key(`${keyPrefix}.field.${id}`));
   const description = (
     <>
-      {t(key(`cliSettings.hint.${id}`))}
+      {t(key(`${keyPrefix}.hint.${id}`))}
       <span className="ms-1.5 font-mono opacity-70" dir="ltr">{id}</span>
     </>
   );
@@ -281,27 +294,30 @@ function SettingsField({ field, value, onChange }: { field: FieldSpec; value: un
     case 'attribution':
       return <AttributionField label={label} description={description} value={value} onChange={onChange} />;
     case 'bool':
-      return (
-        <FieldRow label={label} description={description}>
-          <CompactSelect
-            label={label}
-            selectedKey={value === true ? 'true' : value === false ? 'false' : UNSET}
-            onChange={(next) => onChange(next === 'true' ? true : next === 'false' ? false : undefined)}
-            options={[unset, { id: 'true', label: t('cliSettings.on') }, { id: 'false', label: t('cliSettings.off') }]}
-          />
-        </FieldRow>
-      );
     case 'enum': {
-      // A value Claude Code accepts but the list lacks (a custom theme, a
-      // strftime pattern) stays selectable so it is shown and kept as is.
-      const options = typeof value === 'string' && value && !field.options.includes(value) ? [...field.options, value] : field.options;
+      const options: OptionValue[] = field.kind === 'bool' ? [true, false] : field.options;
+      const optionLabel = (option: OptionValue) => (field.kind === 'bool'
+        ? t(option ? 'cliSettings.on' : 'cliSettings.off')
+        : t(key(`${keyPrefix}.option.${id}.${String(option)}`)));
+      // A value the CLI accepts but the list lacks (a custom theme, a
+      // notification event list, a granular approval table) stays
+      // selectable so it is shown and kept as is.
+      const known = value === undefined || options.some((option) => option === value);
+      const custom = known ? null : optionId(value);
       return (
         <FieldRow label={label} description={description}>
           <CompactSelect
             label={label}
-            selectedKey={typeof value === 'string' ? value : UNSET}
-            onChange={(next) => onChange(next === UNSET ? undefined : next)}
-            options={[unset, ...options.map((option) => ({ id: option, label: field.options.includes(option) ? t(key(`cliSettings.option.${id}.${option}`)) : option }))]}
+            selectedKey={value === undefined ? UNSET : optionId(value)}
+            onChange={(next) => {
+              if (next === UNSET) onChange(undefined);
+              else if (next !== custom) onChange(options.find((option) => optionId(option) === next));
+            }}
+            options={[
+              unset,
+              ...options.map((option) => ({ id: optionId(option), label: optionLabel(option) })),
+              ...(custom ? [{ id: custom, label: typeof value === 'string' ? value : custom }] : []),
+            ]}
           />
         </FieldRow>
       );
@@ -316,6 +332,18 @@ function SettingsField({ field, value, onChange }: { field: FieldSpec; value: un
             options={[{ id: UNSET, label: t('cliSettings.allowed') }, { id: 'disable', label: t('cliSettings.disabled') }]}
           />
         </FieldRow>
+      );
+    case 'longtext':
+      return (
+        <div className="flex flex-col gap-2 py-2.5">
+          <div className="min-w-0">
+            <p className="text-sm">{label}</p>
+            <p className="text-muted text-xs">{description}</p>
+          </div>
+          <TextField aria-label={label} className="w-full" value={typeof value === 'string' ? value : ''} onChange={(next) => onChange(next.trim() ? next : undefined)}>
+            <TextArea className="w-full text-sm" rows={3} placeholder={field.placeholder} />
+          </TextField>
+        </div>
       );
     case 'text':
       return (
