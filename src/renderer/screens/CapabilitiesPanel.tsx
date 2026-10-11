@@ -1,18 +1,29 @@
 import { useMemo, useState } from 'react';
 import { AlertDialog, Button, Card, ScrollShadow, Spinner, Tabs, toast } from '@heroui/react';
-import { RiArrowDownSLine, RiDeleteBinLine, RiFlashlightLine, RiGitlabLine, RiRefreshLine } from '@remixicon/react';
-import type { McpCatalog, McpServerCatalogDescriptor, McpServerConfig, ProviderDescriptor, ProviderKind, SkillCatalog, SkillCatalogDescriptor } from '@todex/protocol/v2';
+import { RiAddLine, RiArrowDownSLine, RiDeleteBinLine, RiEditLine, RiFlashlightLine, RiGitlabLine, RiRefreshLine } from '@remixicon/react';
+import type { CatalogScope, McpCatalog, McpServerCatalogDescriptor, McpServerConfig, ProviderDescriptor, ProviderKind, SkillCatalog, SkillCatalogDescriptor } from '@todex/protocol/v2';
 import { providerDisplayName } from '@todex/protocol/v2';
 import { ProviderIcon } from '../components/ProviderIcon';
 import { useNoticeToast } from '../components/NoticeToast';
 import { useT } from '../i18n';
 import type { SelectedSkillAttachment } from '../session/helpers';
+import { McpEditorModal, SkillEditorModal, type McpEditorTarget, type SkillEditorTarget } from './CapabilityEditor';
 
 export type CatalogState = {
   status: 'idle' | 'loading' | 'ready' | 'error';
   skills?: SkillCatalog;
   mcp?: McpCatalog;
   error?: string;
+};
+
+/** Writes to the provider's own skill folders and MCP config files. */
+export type CapabilityManager = {
+  createSkill: (provider: ProviderKind, input: { source: string; name: string; content: string }) => Promise<SkillCatalogDescriptor>;
+  updateSkill: (provider: ProviderKind, resourceId: string, content: string) => Promise<SkillCatalogDescriptor>;
+  deleteSkill: (provider: ProviderKind, resourceId: string) => Promise<void>;
+  createMcpServer: (provider: ProviderKind, input: { scope: CatalogScope; name: string; config: unknown }) => Promise<McpServerConfig>;
+  updateMcpServer: (provider: ProviderKind, resourceId: string, input: { name: string; config: unknown }) => Promise<McpServerConfig>;
+  deleteMcpServer: (provider: ProviderKind, resourceId: string) => Promise<void>;
 };
 
 type Props = {
@@ -26,13 +37,16 @@ type Props = {
   onToggleSkill?: (skill: SkillCatalogDescriptor, provider: ProviderKind) => void;
   onPreviewSkill?: (skill: SkillCatalogDescriptor, provider: ProviderKind) => Promise<string>;
   onLoadMcpConfig?: (server: McpServerCatalogDescriptor) => Promise<McpServerConfig>;
-  onDeleteMcp?: (server: McpServerCatalogDescriptor) => Promise<void>;
+  manager?: CapabilityManager;
   /** Hosted in a dialog whose heading already names the panel. */
   inDialog?: boolean;
 };
 
 type ViewMode = 'skills' | 'mcp';
 type ProviderChoice = ProviderKind | 'common';
+type PendingDelete =
+  | { kind: 'skill'; provider: ProviderKind; skill: SkillCatalogDescriptor }
+  | { kind: 'mcp'; server: McpServerCatalogDescriptor };
 
 function isCommonSource(source: string): boolean {
   return source.toLowerCase().includes('shared') || source.toLowerCase().includes('common');
@@ -49,7 +63,7 @@ export function CapabilitiesPanel({
   onToggleSkill,
   onPreviewSkill,
   onLoadMcpConfig,
-  onDeleteMcp,
+  manager,
   inDialog = false,
 }: Props) {
   const t = useT();
@@ -57,37 +71,73 @@ export function CapabilitiesPanel({
   const [providerChoice, setProviderChoice] = useState<ProviderChoice>('common');
   const [previews, setPreviews] = useState<Record<string, string>>({});
   const [mcpConfigs, setMcpConfigs] = useState<Record<string, McpServerConfig>>({});
-  const [pendingDelete, setPendingDelete] = useState<McpServerCatalogDescriptor | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(null);
   const [deleting, setDeleting] = useState(false);
-  const provider = providerChoice === 'common' ? undefined : providers.find((item) => item.id === providerChoice);
-  const providerKeys = useMemo(() => providers.map((item) => item.id), [providers]);
-  const selectedCatalogs = providerChoice === 'common'
+  const [skillEditor, setSkillEditor] = useState<(SkillEditorTarget & { provider: ProviderKind; resourceId?: string }) | null>(null);
+  const [mcpEditor, setMcpEditor] = useState<(McpEditorTarget & { provider: ProviderKind; resourceId?: string }) | null>(null);
+  // Only agents that can run right now; a tab whose agent went away falls
+  // back to the shared view.
+  const availableProviders = useMemo(() => providers.filter((item) => item.available), [providers]);
+  const provider = providerChoice === 'common' ? undefined : availableProviders.find((item) => item.id === providerChoice);
+  const choice: ProviderChoice = provider ? provider.id : 'common';
+  const providerKeys = useMemo(() => availableProviders.map((item) => item.id), [availableProviders]);
+  const selectedCatalogs = choice === 'common'
     ? providerKeys.map((key) => catalogs[key]).filter(Boolean) as CatalogState[]
-    : catalogs[providerChoice] ? [catalogs[providerChoice] as CatalogState] : [];
+    : catalogs[choice] ? [catalogs[choice] as CatalogState] : [];
   const state = selectedCatalogs.find((item) => item.status === 'loading') ?? selectedCatalogs[0];
   const catalogError = [...new Set(selectedCatalogs.map(item => item.error).filter(Boolean))].join('\n');
-  useNoticeToast(catalogError, { variant: 'danger', scope: `${workspacePath}:${providerChoice}` });
+  useNoticeToast(catalogError, { variant: 'danger', scope: `${workspacePath}:${choice}` });
   const skills = useMemo(() => {
     const items = selectedCatalogs.flatMap((item) => (item.skills?.skills ?? []).map((skill) => ({
       skill,
-      provider: (item.skills?.provider ?? providerChoice) as ProviderKind,
+      provider: (item.skills?.provider ?? choice) as ProviderKind,
+      editable: Boolean(manager && item.skills?.editable),
     })));
     // Resource ids are provider-scoped, so the common view folds one shared
     // skill across providers by name and source, like the MCP list below.
-    const keyOf = (item: (typeof items)[number]) => providerChoice === 'common'
+    const keyOf = (item: (typeof items)[number]) => choice === 'common'
       ? `${item.skill.name}:${item.skill.source}`
       : `${item.skill.resourceId}:${item.skill.name}`;
     return items.filter((item, index, list) => list.findIndex((candidate) => keyOf(candidate) === keyOf(item)) === index)
-      .filter((item) => providerChoice !== 'common' || isCommonSource(item.skill.source));
-  }, [providerChoice, selectedCatalogs]);
+      .filter((item) => choice !== 'common' || isCommonSource(item.skill.source));
+  }, [choice, manager, selectedCatalogs]);
   const mcpServers = useMemo(() => {
-    const items = selectedCatalogs.flatMap((item) => item.mcp?.servers ?? []);
+    const items = selectedCatalogs.flatMap((item) => (item.mcp?.servers ?? []).map((server) => ({
+      server,
+      editable: Boolean(manager && item.mcp?.editable),
+    })));
     return items.filter((item, index, list) => {
-      if (providerChoice !== 'common') return true;
-      if (!isCommonSource(item.source)) return false;
-      return list.findIndex((candidate) => candidate.name === item.name && candidate.source === item.source) === index;
+      if (choice !== 'common') return true;
+      if (!isCommonSource(item.server.source)) return false;
+      return list.findIndex((candidate) => candidate.server.name === item.server.name && candidate.server.source === item.server.source) === index;
     });
-  }, [providerChoice, selectedCatalogs]);
+  }, [choice, manager, selectedCatalogs]);
+  // New skills go to the selected agent's folders; the shared view creates
+  // in the shared folders through any agent that can write them.
+  const skillCreateTarget = useMemo(() => {
+    if (!manager) return null;
+    for (const item of selectedCatalogs) {
+      const sources = (item.skills?.creatableSources ?? []).filter((source) => choice !== 'common' || isCommonSource(source));
+      if (item.skills && sources.length) return { provider: item.skills.provider, sources };
+    }
+    return null;
+  }, [choice, manager, selectedCatalogs]);
+  const mcpCreateTarget = useMemo(() => {
+    if (!manager || choice === 'common') return null;
+    const scopes = catalogs[choice]?.mcp?.creatableScopes ?? [];
+    return scopes.length ? { provider: choice, scopes } : null;
+  }, [catalogs, choice, manager]);
+  const createTarget = viewMode === 'skills' ? skillCreateTarget : mcpCreateTarget;
+  const refresh = () => {
+    for (const key of choice === 'common' ? providerKeys : [choice]) onRefresh(key);
+  };
+  const openCreate = () => {
+    if (viewMode === 'skills' && skillCreateTarget) {
+      setSkillEditor({ mode: 'create', ...skillCreateTarget });
+    } else if (viewMode === 'mcp' && mcpCreateTarget) {
+      setMcpEditor({ mode: 'create', ...mcpCreateTarget });
+    }
+  };
 
   return (
     <div className={`flex h-full min-h-0 flex-col ${inDialog ? 'py-1' : 'p-5'}`}>
@@ -101,18 +151,24 @@ export function CapabilitiesPanel({
             <p className="text-muted mt-1 text-xs">{t('cap.needV2')}</p>
           )}
         </div>
-        {providerChoice !== 'common' ? (
-          <Button isIconOnly size="sm" variant="ghost" aria-label={t('workbench.refresh')} onPress={() => onRefresh(providerChoice)}>
+        <div className="flex shrink-0 items-center gap-1">
+          {createTarget ? (
+            <Button size="sm" variant="secondary" onPress={openCreate}>
+              <RiAddLine className="size-4" />
+              {viewMode === 'skills' ? t('cap.newSkill') : t('cap.newMcp')}
+            </Button>
+          ) : null}
+          <Button isIconOnly size="sm" variant="ghost" aria-label={t('workbench.refresh')} onPress={refresh}>
             <RiRefreshLine className="size-4" />
           </Button>
-        ) : null}
+        </div>
       </div>
       <div className="mb-3 flex flex-wrap gap-2">
-        <Button size="sm" variant={providerChoice === 'common' ? 'primary' : 'tertiary'} onPress={() => setProviderChoice('common')}>{t('cap.common')}</Button>
-        {providers.map((item) => (
-          <Button key={item.id} size="sm" variant={providerChoice === item.id ? 'primary' : 'tertiary'} onPress={() => setProviderChoice(item.id)}>
+        <Button size="sm" variant={choice === 'common' ? 'primary' : 'tertiary'} onPress={() => setProviderChoice('common')}>{t('cap.common')}</Button>
+        {availableProviders.map((item) => (
+          <Button key={item.id} size="sm" variant={choice === item.id ? 'primary' : 'tertiary'} onPress={() => setProviderChoice(item.id)}>
             <ProviderIcon provider={item.id} />
-            {providerDisplayName(item.id)} {item.available ? '●' : '○'}
+            {providerDisplayName(item.id)}
           </Button>
         ))}
       </div>
@@ -148,7 +204,16 @@ export function CapabilitiesPanel({
               item={item.skill}
               selected={selectedSkills.some((skill) => skill.resourceId === item.skill.resourceId || skill.name === item.skill.name)}
               canSelect={Boolean(canInvoke && onToggleSkill)}
+              editable={item.editable}
               preview={previews[item.skill.resourceId] ?? null}
+              onEdit={() => setSkillEditor({
+                mode: 'edit',
+                name: item.skill.name,
+                content: previews[item.skill.resourceId] ?? '',
+                provider: item.provider,
+                resourceId: item.skill.resourceId,
+              })}
+              onDelete={() => setPendingDelete({ kind: 'skill', provider: item.provider, skill: item.skill })}
               onToggle={() => onToggleSkill?.(item.skill, item.provider)}
               onPreview={async () => {
                 if (!onPreviewSkill) return;
@@ -163,22 +228,30 @@ export function CapabilitiesPanel({
           )) : <p className="text-muted py-10 text-center text-sm">{t('cap.noSkills')}</p>
         ) : null}
         {viewMode === 'mcp' && state?.status !== 'loading' ? (
-          mcpServers.length ? mcpServers.map((item) => (
+          mcpServers.length ? mcpServers.map(({ server, editable }) => (
             <McpRow
-              key={`${item.resourceId}:${item.name}`}
-              item={item}
-              config={mcpConfigs[item.resourceId] ?? null}
-              canDelete={Boolean(onDeleteMcp)}
+              key={`${server.resourceId}:${server.name}`}
+              item={server}
+              config={mcpConfigs[server.resourceId] ?? null}
+              editable={editable}
               onLoad={async () => {
                 if (!onLoadMcpConfig) return;
                 try {
-                  const config = await onLoadMcpConfig(item);
-                  setMcpConfigs((current) => ({ ...current, [item.resourceId]: config }));
+                  const config = await onLoadMcpConfig(server);
+                  setMcpConfigs((current) => ({ ...current, [server.resourceId]: config }));
                 } catch (error) {
                   toast.danger(error instanceof Error ? error.message : t('cap.mcpConfigFailed'));
                 }
               }}
-              onDelete={() => setPendingDelete(item)}
+              onEdit={(config) => setMcpEditor({
+                mode: 'edit',
+                name: server.name,
+                path: config.path,
+                config: config.config,
+                provider: server.provider,
+                resourceId: server.resourceId,
+              })}
+              onDelete={() => setPendingDelete({ kind: 'mcp', server })}
             />
           )) : <p className="text-muted py-10 text-center text-sm">{t('cap.noMcps')}</p>
         ) : null}
@@ -188,14 +261,16 @@ export function CapabilitiesPanel({
           <AlertDialog.Container>
             <AlertDialog.Dialog className="sm:max-w-md">
               <AlertDialog.Header>
-                <AlertDialog.Heading>{t('cap.deleteMcpTitle')}</AlertDialog.Heading>
+                <AlertDialog.Heading>{pendingDelete?.kind === 'skill' ? t('cap.deleteSkillTitle') : t('cap.deleteMcpTitle')}</AlertDialog.Heading>
               </AlertDialog.Header>
               <AlertDialog.Body>
                 <p className="text-muted text-sm">
-                  {pendingDelete ? t('cap.deleteMcpBody', {
-                    name: pendingDelete.name,
-                    path: mcpConfigs[pendingDelete.resourceId]?.path ?? pendingDelete.source,
-                  }) : null}
+                  {pendingDelete?.kind === 'skill'
+                    ? t('cap.deleteSkillBody', { name: pendingDelete.skill.name })
+                    : pendingDelete ? t('cap.deleteMcpBody', {
+                      name: pendingDelete.server.name,
+                      path: mcpConfigs[pendingDelete.server.resourceId]?.path ?? pendingDelete.server.source,
+                    }) : null}
                 </p>
               </AlertDialog.Body>
               <AlertDialog.Footer>
@@ -204,14 +279,19 @@ export function CapabilitiesPanel({
                   variant="danger"
                   isPending={deleting}
                   onPress={async () => {
-                    if (!pendingDelete || !onDeleteMcp) return;
+                    if (!pendingDelete || !manager) return;
                     setDeleting(true);
+                    const name = pendingDelete.kind === 'skill' ? pendingDelete.skill.name : pendingDelete.server.name;
                     try {
-                      await onDeleteMcp(pendingDelete);
-                      toast.success(t('cap.mcpDeleted', { name: pendingDelete.name }));
+                      if (pendingDelete.kind === 'skill') {
+                        await manager.deleteSkill(pendingDelete.provider, pendingDelete.skill.resourceId);
+                      } else {
+                        await manager.deleteMcpServer(pendingDelete.server.provider, pendingDelete.server.resourceId);
+                      }
+                      toast.success(t('cap.deleted', { name }));
                       setPendingDelete(null);
                     } catch (error) {
-                      toast.danger(error instanceof Error ? error.message : t('cap.deleteMcpFailed'));
+                      toast.danger(error instanceof Error ? error.message : t('cap.deleteFailed'));
                     } finally {
                       setDeleting(false);
                     }
@@ -224,6 +304,31 @@ export function CapabilitiesPanel({
           </AlertDialog.Container>
         </AlertDialog.Backdrop>
       </AlertDialog>
+      <SkillEditorModal
+        target={skillEditor}
+        onClose={() => setSkillEditor(null)}
+        onSubmit={async ({ source, name, content }) => {
+          if (!manager || !skillEditor) return;
+          if (skillEditor.mode === 'create') {
+            await manager.createSkill(skillEditor.provider, { source, name, content });
+          } else if (skillEditor.resourceId) {
+            const resourceId = skillEditor.resourceId;
+            await manager.updateSkill(skillEditor.provider, resourceId, content);
+            setPreviews((current) => ({ ...current, [resourceId]: content }));
+          }
+        }}
+      />
+      <McpEditorModal
+        target={mcpEditor}
+        onClose={() => setMcpEditor(null)}
+        onSubmit={async ({ scope, name, config }) => {
+          if (!manager || !mcpEditor) return;
+          const saved = mcpEditor.mode === 'create'
+            ? await manager.createMcpServer(mcpEditor.provider, { scope, name, config })
+            : mcpEditor.resourceId ? await manager.updateMcpServer(mcpEditor.provider, mcpEditor.resourceId, { name, config }) : null;
+          if (saved) setMcpConfigs((current) => ({ ...current, [saved.descriptor.resourceId]: saved }));
+        }}
+      />
     </div>
   );
 }
@@ -232,16 +337,22 @@ function SkillRow({
   item,
   selected,
   canSelect,
+  editable,
   preview,
   onToggle,
   onPreview,
+  onEdit,
+  onDelete,
 }: {
   item: SkillCatalogDescriptor;
   selected: boolean;
   canSelect: boolean;
+  editable: boolean;
   preview: string | null;
   onToggle: () => void;
   onPreview: () => Promise<void>;
+  onEdit: () => void;
+  onDelete: () => void;
 }) {
   const t = useT();
   const [expanded, setExpanded] = useState(false);
@@ -321,18 +432,34 @@ function SkillRow({
                 <p className="text-muted text-xs">{t('cap.noPreview')}</p>
               )}
 
-              {canSelect ? (
-                <div className="mt-3 flex items-center justify-between">
+              {canSelect || editable ? (
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
                   <span className="text-muted text-xs">
-                    {selected ? t('cap.attachedToChat') : t('cap.attachable')}
+                    {canSelect ? (selected ? t('cap.attachedToChat') : t('cap.attachable')) : null}
                   </span>
-                  <Button
-                    size="sm"
-                    variant={selected ? 'secondary' : 'primary'}
-                    onPress={onToggle}
-                  >
-                    {selected ? t('cap.detach') : t('cap.attach')}
-                  </Button>
+                  <div className="flex items-center gap-2">
+                    {editable ? (
+                      <>
+                        <Button size="sm" variant="secondary" onPress={onDelete}>
+                          <RiDeleteBinLine className="size-4" />
+                          {t('common.delete')}
+                        </Button>
+                        <Button size="sm" variant="secondary" onPress={onEdit} isDisabled={!preview && item.valid}>
+                          <RiEditLine className="size-4" />
+                          {t('cap.edit')}
+                        </Button>
+                      </>
+                    ) : null}
+                    {canSelect ? (
+                      <Button
+                        size="sm"
+                        variant={selected ? 'secondary' : 'primary'}
+                        onPress={onToggle}
+                      >
+                        {selected ? t('cap.detach') : t('cap.attach')}
+                      </Button>
+                    ) : null}
+                  </div>
                 </div>
               ) : null}
             </div>
@@ -346,14 +473,16 @@ function SkillRow({
 function McpRow({
   item,
   config,
-  canDelete,
+  editable,
   onLoad,
+  onEdit,
   onDelete,
 }: {
   item: McpServerCatalogDescriptor;
   config: McpServerConfig | null;
-  canDelete: boolean;
+  editable: boolean;
   onLoad: () => Promise<void>;
+  onEdit: (config: McpServerConfig) => void;
   onDelete: () => void;
 }) {
   const t = useT();
@@ -425,17 +554,19 @@ function McpRow({
                       {JSON.stringify({ [item.name]: config.config }, null, 2)}
                     </pre>
                   </div>
-                  {canDelete ? (
-                    config.format === 'native' ? (
-                      <p className="text-muted mt-3 text-xs">{t('cap.mcpNativeManaged')}</p>
-                    ) : (
-                      <div className="mt-3 flex justify-end">
-                        <Button size="sm" variant="danger" onPress={onDelete}>
-                          <RiDeleteBinLine className="size-4" />
-                          {t('cap.deleteMcp')}
-                        </Button>
-                      </div>
-                    )
+                  {config.format === 'native' ? (
+                    <p className="text-muted mt-3 text-xs">{t('cap.mcpNativeManaged')}</p>
+                  ) : editable ? (
+                    <div className="mt-3 flex justify-end gap-2">
+                      <Button size="sm" variant="secondary" onPress={onDelete}>
+                        <RiDeleteBinLine className="size-4" />
+                        {t('common.delete')}
+                      </Button>
+                      <Button size="sm" variant="secondary" onPress={() => onEdit(config)}>
+                        <RiEditLine className="size-4" />
+                        {t('cap.edit')}
+                      </Button>
+                    </div>
                   ) : null}
                 </>
               ) : (
