@@ -5,7 +5,9 @@ import { RiArrowDownSLine, RiArrowRightLine, RiCalendarLine, RiChat3Line, RiChec
 import { Button, Chip, Dropdown, Header, Label, ListBox, Modal, Select, Separator, TextArea, TextField, Tooltip } from '@heroui/react';
 import { ContextMenu, EmptyState, Kanban } from '@heroui-pro/react';
 import type { WorkspaceRecord } from '@todex/protocol/todex';
-import { conversationDisplayTitle, getConversationStatus, workspaceDisplayName, type ConversationRecord, type TimelineEntry } from '../session/helpers';
+import { providerDisplayName, type PermissionMode, type ProviderKind } from '@todex/protocol/v2';
+import { ProviderIcon } from '../components/ProviderIcon';
+import { conversationDisplayTitle, getConversationStatus, modelDisplayLabel, workspaceDisplayName, type ConversationRecord, type TimelineEntry } from '../session/helpers';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { Field } from '../components/Field';
 import { useT } from '../i18n';
@@ -607,6 +609,10 @@ function WorkspaceColumn({ workspace, meta, tasks, session, latestEntries, onOpe
 /** Arms a task schedule. The time is wall-clock in the backend's zone, which
  * is where it runs; the send settings are snapshotted now, as the backend
  * cannot ask this device for them later. */
+const PERMISSION_MODES: readonly PermissionMode[] = ['ask', 'auto', 'full-access'];
+// Model select key for "let the agent pick", when it lists no models.
+const DEFAULT_MODEL_KEY = '__default__';
+
 function ScheduleTaskDialog({ session, task, onClose }: {
   session: TodeXSession;
   task: KanbanTask | null;
@@ -620,6 +626,31 @@ function ScheduleTaskDialog({ session, task, onClose }: {
   const [text, setText] = useState('');
   const [error, setError] = useState('');
   const [openedFor, setOpenedFor] = useState<string | null>(null);
+  // New-conversation send settings, seeded from the agent's remembered choices.
+  const [provider, setProvider] = useState('');
+  const [model, setModel] = useState('');
+  const [permissionMode, setPermissionMode] = useState('');
+
+  const availableProviders = session.v2Providers.filter((item) => item.available);
+  const providerDescriptor = availableProviders.find((item) => item.id === provider);
+  const liveModels = provider ? session.providerModels[provider as ProviderKind] : undefined;
+  const providerModels = liveModels?.length ? liveModels : providerDescriptor?.models ?? [];
+  const modelOptions = model && !providerModels.some((item) => item.id === model)
+    ? [{ id: model }, ...providerModels]
+    : providerModels;
+  const permissionModes = (providerDescriptor?.capabilities.permissionConfig?.modes ?? [])
+    .filter((mode) => PERMISSION_MODES.includes(mode));
+  const permissionLabel = (mode: PermissionMode) => (
+    mode === 'ask' ? t('chat.permissionAsk') : mode === 'auto' ? t('chat.permissionAuto') : t('chat.permissionFullAccess')
+  );
+
+  /** Loads the agent's defaults, keeping explicit choices that still apply. */
+  const applyAgent = (workspaceId: string, overrides?: { provider?: string; model?: string; permissionMode?: string }) => {
+    const settings = session.kanbanScheduleSettings(workspaceId, undefined, overrides);
+    setProvider(settings?.provider ?? '');
+    setModel(settings?.model ?? '');
+    setPermissionMode(settings?.permissionMode ?? '');
+  };
 
   // Sendable targets: linked conversations that exist on the backend.
   const targets = (task ? kanbanTaskConversationIds(task) : [])
@@ -638,6 +669,11 @@ function ScheduleTaskDialog({ session, task, onClose }: {
     setAt(previous?.at ?? (zone ? kanbanBackendLocalTime(zone, Date.now() + 60 * 60_000).slice(0, 14) + '00' : ''));
     setText(previous?.text ?? kanbanTaskDraftText(task));
     setError('');
+    applyAgent(task.workspaceId, previous?.action === 'start' ? {
+      provider: previous.provider,
+      model: previous.model,
+      permissionMode: previous.permissionMode,
+    } : undefined);
   } else if (!task && openedFor !== null) {
     setOpenedFor(null);
   }
@@ -653,7 +689,11 @@ function ScheduleTaskDialog({ session, task, onClose }: {
       setError(t('kanban.scheduleNoConversations'));
       return;
     }
-    const settings = session.kanbanScheduleSettings(task.workspaceId, target?.id);
+    const settings = session.kanbanScheduleSettings(task.workspaceId, target?.id, action === 'start' ? {
+      provider: provider || undefined,
+      model: model || undefined,
+      permissionMode: permissionMode || undefined,
+    } : undefined);
     if (!settings) {
       setError(t('kanban.scheduleNoAgent'));
       return;
@@ -716,7 +756,85 @@ function ScheduleTaskDialog({ session, task, onClose }: {
                   </ListBox>
                 </Select.Popover>
               </Select>
-            ) : null}
+            ) : (
+              <>
+                <Select
+                  selectedKey={provider || null}
+                  isDisabled={availableProviders.length === 0}
+                  placeholder={t('kanban.scheduleNoAgent')}
+                  onSelectionChange={(key) => {
+                    if (task && key && key !== provider) applyAgent(task.workspaceId, { provider: String(key) });
+                  }}
+                >
+                  <Label>{t('kanban.scheduleAgent')}</Label>
+                  <Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
+                  <Select.Popover>
+                    <ListBox>
+                      {availableProviders.map((item) => (
+                        <ListBox.Item key={item.id} id={item.id} textValue={providerDisplayName(item.id, item.displayName)}>
+                          <ProviderIcon provider={item.id} className="size-5 shrink-0" />
+                          {providerDisplayName(item.id, item.displayName)}
+                          <ListBox.ItemIndicator />
+                        </ListBox.Item>
+                      ))}
+                    </ListBox>
+                  </Select.Popover>
+                </Select>
+                <div className="grid grid-cols-2 gap-4">
+                  <Select
+                    className="min-w-0"
+                    selectedKey={model || DEFAULT_MODEL_KEY}
+                    isDisabled={modelOptions.length === 0}
+                    onSelectionChange={(key) => {
+                      if (task && key && key !== DEFAULT_MODEL_KEY) applyAgent(task.workspaceId, {
+                        provider: provider || undefined,
+                        model: String(key),
+                        permissionMode: permissionMode || undefined,
+                      });
+                    }}
+                  >
+                    <Label>{t('kanban.scheduleModel')}</Label>
+                    <Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
+                    <Select.Popover>
+                      <ListBox>
+                        {modelOptions.length === 0 ? (
+                          <ListBox.Item id={DEFAULT_MODEL_KEY} textValue={t('kanban.scheduleModelDefault')}>
+                            {t('kanban.scheduleModelDefault')}
+                          </ListBox.Item>
+                        ) : modelOptions.map((item) => (
+                          <ListBox.Item key={item.id} id={item.id} textValue={modelDisplayLabel(item.id, session.modelCatalog)}>
+                            {modelDisplayLabel(item.id, session.modelCatalog)}
+                            <ListBox.ItemIndicator />
+                          </ListBox.Item>
+                        ))}
+                      </ListBox>
+                    </Select.Popover>
+                  </Select>
+                  <Select
+                    className="min-w-0"
+                    selectedKey={permissionMode || null}
+                    isDisabled={permissionModes.length === 0}
+                    placeholder={t('chat.permissionUnavailable')}
+                    onSelectionChange={(key) => {
+                      if (key && permissionModes.includes(key as PermissionMode)) setPermissionMode(String(key));
+                    }}
+                  >
+                    <Label>{t('kanban.schedulePermission')}</Label>
+                    <Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
+                    <Select.Popover>
+                      <ListBox>
+                        {permissionModes.map((mode) => (
+                          <ListBox.Item key={mode} id={mode} textValue={permissionLabel(mode)}>
+                            {permissionLabel(mode)}
+                            <ListBox.ItemIndicator />
+                          </ListBox.Item>
+                        ))}
+                      </ListBox>
+                    </Select.Popover>
+                  </Select>
+                </div>
+              </>
+            )}
             <Field
               label={t('kanban.scheduleAt')}
               value={at}
