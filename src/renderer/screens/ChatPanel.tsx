@@ -2,6 +2,7 @@ import { ConversationControls } from '../components/ConversationControls';
 import { PiExtensionPanel } from '../components/PiExtensionPanel';
 import { piCommandCompatibility, piTodexCommands } from '../session/providerCommands';
 import { ComputerLiveView } from '../components/ComputerLiveView';
+import { ConversationScheduleBar } from '../components/ConversationSchedule';
 import { NoticeToast } from '../components/NoticeToast';
 import {
   RiArrowDownDoubleLine,
@@ -1714,6 +1715,16 @@ export function ChatPanel({ session }: Props) {
                 </Button>
               ))}
             </div>
+          ) : null}
+          {conversation.schedule ? (
+            <ConversationScheduleBar
+              className="mb-2"
+              schedule={conversation.schedule}
+              heldCount={runtime?.followUps.items.length ?? 0}
+              onSendNow={() => { void session.sendScheduledNow(conversation.id); }}
+              onReschedule={(at) => session.scheduleConversation(conversation.id, at)}
+              onCancel={() => { void session.scheduleConversation(conversation.id, null); }}
+            />
           ) : null}
           <NoticeToast
             message={!currentPermission && agentProvider !== 'pi' && session.connectionState === 'open'
