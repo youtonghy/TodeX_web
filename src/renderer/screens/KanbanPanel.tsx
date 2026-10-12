@@ -9,7 +9,7 @@ import { providerDisplayName, type PermissionMode, type ProviderKind } from '@to
 import { normalizeReasoningEffort } from '@todex/protocol/todex';
 import { ModelReasoningCard } from '../components/ModelReasoningCard';
 import { ProviderIcon } from '../components/ProviderIcon';
-import { conversationDisplayTitle, getConversationStatus, modelDisplayLabel, reasoningEffortLabel, workspaceDisplayName, type ConversationRecord, type TimelineEntry } from '../session/helpers';
+import { conversationDisplayTitle, getConversationStatus, isNoneWorkspaceId, modelDisplayLabel, reasoningEffortLabel, workspaceDisplayName, type ConversationRecord, type TimelineEntry } from '../session/helpers';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { Field } from '../components/Field';
 import { useT } from '../i18n';
@@ -958,7 +958,8 @@ export function KanbanPanel({ session, onOpenConversation }: Props) {
   const [draggedColumnId, setDraggedColumnId] = useState<string | null>(null);
   const [columnDrop, setColumnDrop] = useState<{ id: string; position: ColumnDropPosition } | null>(null);
   // Columns follow the same manual order as the sidebar workspace list.
-  const orderedWorkspaces = useMemo(() => [...session.workspaces].sort(
+  // Tasks need a registered workspace, so the built-in None one is left out.
+  const orderedWorkspaces = useMemo(() => session.workspaces.filter((workspace) => !isNoneWorkspaceId(workspace.id)).sort(
     (a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || (a.createdAt - b.createdAt) || a.id.localeCompare(b.id),
   ), [session.workspaces]);
   // Only workspaces that actually hold tasks get a column; the rest are still

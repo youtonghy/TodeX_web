@@ -5,6 +5,7 @@ import { buttonVariants } from '@heroui/styles';
 import { RiArrowRightLine, RiArrowUpLine, RiCloseLine, RiFlashlightLine, RiGitBranchLine, RiGitCommitLine, RiGitMergeLine,
   RiGitPullRequestLine, RiGithubLine, RiPulseLine, RiSearchLine, RiStackLine, RiUploadCloud2Line } from '@remixicon/react';
 import { providerDisplayName } from '@todex/protocol/v2';
+import { filesWorkspaceForConversation } from '../session/helpers';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { buildGitAgentPrompt, buildGitFailurePrompt, gitAgentActionGroups, type GitAgentActionId } from '../session/gitAgentActions';
 import { externalHttpUrl, GitWorkspaceError, readGitPullRequest, readGitWorkspace, runGitWorkspaceOperation, type GitPullRequestMethod, type GitPullRequestSnapshot, type GitWorkspaceOperation, type GitWorkspaceSnapshot } from '../lib/gitWorkspace';
@@ -60,7 +61,7 @@ export function GitActionsModal({ session, isOpen, onOpenChange }: Props) {
   }, [isOpen, session.activeConversation?.id, session.activeBackendConnectionId, session.settings?.serverUrl]);
   const sendingRef = useRef(false);
   const conversation = session.activeConversation;
-  const workspace = session.workspaces.find(item => item.id === conversation?.workspaceId);
+  const workspace = filesWorkspaceForConversation(session.workspaces.find(item => item.id === conversation?.workspaceId), conversation);
   const git = useConversationGitStatus(session, isOpen, isOpen);
   const repoPath = git.selectedPath || workspace?.path || '';
   // Reloads whenever the menu (re)appears, including after returning from an action view.

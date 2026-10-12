@@ -15,7 +15,7 @@ import { WorkspaceGroupRenameDialog } from './WorkspaceGroupRenameDialog';
 import { AppIcon } from './AppIcon';
 import { WORKSPACE_ICON_CHOICES, WORKSPACE_RING_STYLES, WorkspaceStatusRing, ringStyleKey, workspaceIconComponent } from './WorkspaceIcon';
 import type { TodeXSession } from '../session/useTodeXSession';
-import { conversationDisplayTitle, formatResetInstant, getConversationStatus, isConversationHighlighted, workspaceDisplayName } from '../session/helpers';
+import { conversationDisplayTitle, formatResetInstant, getConversationStatus, isConversationHighlighted, isNoneWorkspaceId, workspaceDisplayName } from '../session/helpers';
 import { ShortcutHint } from '../lib/shortcuts';
 import { t, useT } from '../i18n';
 
@@ -110,9 +110,13 @@ export function AppSidebar({
 
   const workspaceConversations = useMemo(() => (
     session.conversations.filter(
-      (conversation) => conversation.workspaceId === session.activeWorkspaceId && !conversation.archived,
+      (conversation) => conversation.workspaceId === session.activeWorkspaceId && !conversation.archived
+        // None is shared by every backend; list only the active one's conversations.
+        && (!isNoneWorkspaceId(conversation.workspaceId)
+          || !conversation.backendConnectionId
+          || conversation.backendConnectionId === session.activeBackendConnectionId),
     )
-  ), [session.activeWorkspaceId, session.conversations]);
+  ), [session.activeBackendConnectionId, session.activeWorkspaceId, session.conversations]);
 
   // Workspaces cached under other backend profiles are read-only and render in
   // their own sections; only the active backend's workspaces are editable here.
@@ -287,7 +291,8 @@ export function AppSidebar({
   }, [session, timelineInfoMap]);
 
   // Workspaces use an explicit manual order and never move when a conversation updates.
-  const sortedWorkspaces = useMemo(() => [...ownWorkspaces].sort((a, b) => Number(pins.workspace.includes(b.id)) - Number(pins.workspace.includes(a.id)) || (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || (a.createdAt - b.createdAt) || a.id.localeCompare(b.id)), [ownWorkspaces, pins.workspace]);
+  // The built-in None workspace always leads the list.
+  const sortedWorkspaces = useMemo(() => [...ownWorkspaces].sort((a, b) => Number(isNoneWorkspaceId(b.id)) - Number(isNoneWorkspaceId(a.id)) || Number(pins.workspace.includes(b.id)) - Number(pins.workspace.includes(a.id)) || (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || (a.createdAt - b.createdAt) || a.id.localeCompare(b.id)), [ownWorkspaces, pins.workspace]);
 
   // Conversations order by the last finished/stopped turn, so a running
   // conversation no longer re-sorts while it streams. Items that have never
@@ -415,6 +420,8 @@ export function AppSidebar({
     setContextMenu(null);
   };
 
+  // The built-in None workspace keeps only pin and icon actions.
+  const contextIsNone = contextMenu?.kind === 'workspace' && isNoneWorkspaceId(contextMenu.id);
   // Legacy plaintext history is read-only: no rename or fork.
   const contextReadOnly = contextMenu?.kind === 'conversation'
     && session.conversations.find((item) => item.id === contextMenu.id)?.legacyPlaintext === true;
@@ -471,7 +478,7 @@ export function AppSidebar({
         textValue={workspaceDisplayName(workspace)}
         {...({ title: isMissing ? t('sidebar.workspaceMissingPath') : undefined } as object)}
         data-workspace-id={workspace.id}
-        data-workspace-drag={`workspace:${workspace.id}`}
+        data-workspace-drag={isNoneWorkspaceId(workspace.id) ? undefined : `workspace:${workspace.id}`}
         data-workspace-in-group={group ? 'true' : undefined}
         onContextMenu={(event) => openContextMenu(event, 'workspace', workspace.id)}
       >
@@ -977,8 +984,8 @@ export function AppSidebar({
             ) : (
             <HeroContextMenu.Menu aria-label={contextMenu.kind === 'workspace' ? t('sidebar.workspaceMenu') : t('sidebar.conversationMenu')} autoFocus="first" onClose={() => setContextMenu(null)}>
               {contextMenu.kind === 'conversation' && !contextReadOnly ? <HeroContextMenu.Item id="fork" textValue="Fork" onAction={() => runContextAction('fork')}><RiGitBranchLine className="size-4 text-muted" /><Label>Fork</Label></HeroContextMenu.Item> : null}
-              {contextReadOnly ? null : <HeroContextMenu.Item id="rename" textValue={t('sidebar.rename')} onAction={() => runContextAction('rename')}><RiPencilLine className="size-4 text-muted" /><Label>{t('sidebar.rename')}</Label></HeroContextMenu.Item>}
-              {contextMenu.kind === 'workspace' ? <HeroContextMenu.Item id="edit" textValue={t('sidebar.edit')} onAction={() => runContextAction('edit')}><RiEdit2Line className="size-4 text-muted" /><Label>{t('sidebar.edit')}</Label></HeroContextMenu.Item> : null}
+              {contextReadOnly || contextIsNone ? null : <HeroContextMenu.Item id="rename" textValue={t('sidebar.rename')} onAction={() => runContextAction('rename')}><RiPencilLine className="size-4 text-muted" /><Label>{t('sidebar.rename')}</Label></HeroContextMenu.Item>}
+              {contextMenu.kind === 'workspace' && !contextIsNone ? <HeroContextMenu.Item id="edit" textValue={t('sidebar.edit')} onAction={() => runContextAction('edit')}><RiEdit2Line className="size-4 text-muted" /><Label>{t('sidebar.edit')}</Label></HeroContextMenu.Item> : null}
               <HeroContextMenu.Item id="pin" textValue={pins[contextMenu.kind].includes(contextMenu.id) ? t('sidebar.unpin') : t('sidebar.pin')} onAction={() => runContextAction('pin')}><RiPushpin2Fill className="size-4 text-muted" /><Label>{pins[contextMenu.kind].includes(contextMenu.id) ? t('sidebar.unpin') : t('sidebar.pin')}</Label></HeroContextMenu.Item>
               {contextMenu.kind === 'workspace' ? (
                 <HeroContextMenu.SubmenuTrigger>
@@ -1068,7 +1075,7 @@ export function AppSidebar({
                   </HeroContextMenu.Popover>
                 </HeroContextMenu.SubmenuTrigger>
               ) : null}
-              {contextMoveTargets.length > 0 ? (
+              {contextMoveTargets.length > 0 && !contextIsNone ? (
                 <HeroContextMenu.SubmenuTrigger>
                   <HeroContextMenu.Item id="move-to-group" textValue={t('sidebar.moveToGroup')}>
                     <RiFolderTransferLine className="size-4 text-muted" />
@@ -1133,8 +1140,8 @@ export function AppSidebar({
                   </HeroContextMenu.Popover>
                 </HeroContextMenu.SubmenuTrigger>
               ) : null}
-              <HeroContextMenu.Separator />
-              <HeroContextMenu.Item id="delete" textValue={t('common.delete')} variant="danger" onAction={() => runContextAction('delete')}><RiDeleteBinLine className="size-4 text-danger" /><Label>{t('common.delete')}</Label></HeroContextMenu.Item>
+              {contextIsNone ? null : <HeroContextMenu.Separator />}
+              {contextIsNone ? null : <HeroContextMenu.Item id="delete" textValue={t('common.delete')} variant="danger" onAction={() => runContextAction('delete')}><RiDeleteBinLine className="size-4 text-danger" /><Label>{t('common.delete')}</Label></HeroContextMenu.Item>}
             </HeroContextMenu.Menu>
             )}
           </div>
