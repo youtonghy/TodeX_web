@@ -64,9 +64,22 @@ function wrapKey(): Promise<CryptoKey> {
   return wrapKeyPromise;
 }
 
+// The /demo page shares this origin with the real app; it keeps its keys in
+// memory so it never touches the app's key database.
+let memoryRecords: Map<string, Uint8Array> | null = null;
+
+/** Keeps every key of this page in memory instead of IndexedDB. */
+export function keepKeysInMemory(): void {
+  memoryRecords = new Map();
+}
+
 /** Record ids double as AES-GCM additional data, so a sealed value cannot be
  * moved to another record. */
 async function seal(id: string, plain: Uint8Array): Promise<void> {
+  if (memoryRecords) {
+    memoryRecords.set(id, plain);
+    return;
+  }
   const key = await wrapKey();
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv, additionalData: new TextEncoder().encode(id) }, key, plain as BufferSource);
@@ -75,6 +88,7 @@ async function seal(id: string, plain: Uint8Array): Promise<void> {
 
 /** `null` when absent; rejects with `unreadable` when the record cannot be opened. */
 async function unseal(id: string, unreadable: string): Promise<Uint8Array | null> {
+  if (memoryRecords) return memoryRecords.get(id) ?? null;
   const sealed = await run<SealedSeed | undefined>('readonly', (store) => store.get(id));
   if (!sealed) return null;
   const key = await wrapKey();
@@ -101,7 +115,8 @@ export async function loadSealedSecret(key: string): Promise<string | null> {
 /** Seals a device secret; `null` deletes it. */
 export async function saveSealedSecret(key: string, value: string | null): Promise<void> {
   if (value === null) {
-    await run('readwrite', (store) => store.delete(secretId(key)));
+    if (memoryRecords) memoryRecords.delete(secretId(key));
+    else await run('readwrite', (store) => store.delete(secretId(key)));
     return;
   }
   await seal(secretId(key), new TextEncoder().encode(value));
@@ -110,6 +125,10 @@ export async function saveSealedSecret(key: string, value: string | null): Promi
 /** Removes every history key of this origin (local data reset). */
 export function clearHistoryKeyStore(): Promise<void> {
   wrapKeyPromise = null;
+  if (memoryRecords) {
+    memoryRecords.clear();
+    return Promise.resolve();
+  }
   if (typeof indexedDB === 'undefined') return Promise.resolve();
   return new Promise((resolve, reject) => {
     const request = indexedDB.deleteDatabase(DB_NAME);
@@ -121,5 +140,9 @@ export function clearHistoryKeyStore(): Promise<void> {
 }
 
 export async function deleteHistorySeed(profileId: string): Promise<void> {
+  if (memoryRecords) {
+    memoryRecords.delete(seedId(profileId));
+    return;
+  }
   await run('readwrite', (store) => store.delete(seedId(profileId)));
 }

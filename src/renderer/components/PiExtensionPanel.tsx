@@ -1,6 +1,10 @@
-import { Accordion, Button, ScrollShadow } from '@heroui/react';
-import { Widget } from '@heroui-pro/react/widget';
+import { useId, useState, type ReactNode } from 'react';
+import { RiArrowDownSLine } from '@remixicon/react';
 import type { ConversationRuntime } from '@todex/protocol/conversationRuntime';
+import { Button } from '@/components/base/buttons/button';
+import { Card } from '@/components/ui/card';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { cx } from '@/utils/cx';
 import { useT, type MessageKey } from '../i18n';
 import { piExtensionPlainText, piRuntimeStopReason } from './piExtensionPresentation';
 
@@ -21,7 +25,33 @@ export type PiExtensionPanelProps = {
 };
 
 const noticeLabelKeys = { info: 'pi.noticeInfo', warning: 'pi.noticeWarning', error: 'pi.noticeError' } as const satisfies Record<string, MessageKey>;
-const noticeColors = { info: 'text-muted', warning: 'text-warning', error: 'text-danger' } as const;
+const noticeColors = { info: 'text-text-tertiary', warning: 'text-chart-8-active', error: 'text-text-error-primary' } as const;
+
+/** A header button that shows and hides the region below it. */
+function Disclosure({ label, defaultOpen = false, className, children }: {
+  label: ReactNode;
+  defaultOpen?: boolean;
+  className?: string;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  const regionId = useId();
+  return (
+    <div className={className}>
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-controls={regionId}
+        onClick={() => setOpen((value) => !value)}
+        className="flex w-full min-w-0 cursor-pointer items-center gap-2 rounded-lg py-1.5 text-start text-caption-1-regular text-text-secondary outline-none transition-colors hover:text-text-primary focus-visible:ring-2 focus-visible:ring-border-focus-ring"
+      >
+        <span className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-0.5">{label}</span>
+        <RiArrowDownSLine aria-hidden className={cx('size-3.5 shrink-0 transition-transform', open && 'rotate-180')} />
+      </button>
+      <div id={regionId} hidden={!open}>{open ? children : null}</div>
+    </div>
+  );
+}
 
 /** A presentation of the shared projection. Toasts, draft writes, and RPCs belong to the caller. */
 export function PiExtensionPanel({ extensionUi, placement, providerRuntime, pendingEditorRequest,
@@ -38,84 +68,64 @@ export function PiExtensionPanel({ extensionUi, placement, providerRuntime, pend
   const contentCount = widgets.length + statuses.length + notices.length;
   if (!contentCount && !editorRequest && !running && !stopped && !(above && extensionUi.title)) return null;
 
-  return <Widget className="my-2 min-w-0 gap-2 rounded-2xl p-2" data-testid={`pi-extension-${placement}`}>
-    <Accordion hideSeparator defaultExpandedKeys={['content']}>
-      <Accordion.Item id="content">
-        <Widget.Header className="min-w-0 gap-2 px-1 py-0">
-          <Accordion.Heading className="min-w-0 flex-1">
-            <Accordion.Trigger className="min-w-0 gap-2 py-1.5 text-xs">
-              <span className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-0.5 text-left">
-                <Widget.Title className="min-w-0 break-words text-xs font-medium">{title}</Widget.Title>
-                {running ? <span className="text-muted">{isConnected ? t('pi.running') : t('pi.disconnected')}</span> : null}
-                {stopped ? <span className="text-muted">{t('pi.stopped')}</span> : null}
-                {notices.length ? <span className="text-muted">{t('pi.noticeCount', { count: notices.length })}</span> : null}
-              </span>
-              <Accordion.Indicator className="size-3.5 shrink-0" />
-            </Accordion.Trigger>
-          </Accordion.Heading>
-          {running ? <Button size="sm" variant="ghost" className="shrink-0 text-xs"
-            isPending={isStopping} isDisabled={!isConnected || !onStopRuntime || isStopping}
-            aria-label={t('pi.stopAria')}
-            onPress={onStopRuntime}>{t('pi.stop')}</Button> : null}
-        </Widget.Header>
-        <Accordion.Panel>
-          <Accordion.Body className="p-0 pt-1">
-            <Widget.Content className="min-w-0 space-y-3 p-3 text-xs shadow-none">
-              {statuses.length ? <dl className="space-y-2" aria-label={t('pi.statusLabel')}>
-                {statuses.map(status => <div key={status.key} className="grid min-w-0 grid-cols-[minmax(0,7rem)_minmax(0,1fr)] gap-2">
-                  <dt className="break-words text-muted">{piExtensionPlainText(status.key)}</dt>
-                  <dd className="min-w-0 whitespace-pre-wrap break-words">{piExtensionPlainText(status.text)}</dd>
-                </div>)}
-              </dl> : null}
-              {widgets.length ? <ScrollShadow className="max-h-52 overflow-y-auto" size={16}>
-                <div className="space-y-3" aria-label={t('pi.widgetsLabel')}>
-                  {widgets.map(widget => <section key={widget.key} aria-label={piExtensionPlainText(widget.key)}>
-                    <p className="mb-1 break-words text-muted">{piExtensionPlainText(widget.key)}</p>
-                    <p className="whitespace-pre-wrap break-words font-mono leading-relaxed">{piExtensionPlainText(widget.lines.join('\n'))}</p>
-                  </section>)}
-                </div>
-              </ScrollShadow> : null}
-              {notices.length ? <Accordion hideSeparator>
-                <Accordion.Item id="notices">
-                  <Accordion.Heading>
-                    <Accordion.Trigger className="gap-2 py-0 text-xs">
-                      <span className="flex-1 text-left">{t('pi.viewNotices', { count: notices.length })}</span>
-                      <Accordion.Indicator className="size-3.5" />
-                    </Accordion.Trigger>
-                  </Accordion.Heading>
-                  <Accordion.Panel>
-                    <Accordion.Body className="p-0 pt-2">
-                      <ScrollShadow className="max-h-52 overflow-y-auto" size={16}>
-                        <ol className="space-y-3" aria-label={t('pi.noticesLabel')}>
-                          {notices.map(notice => <li key={notice.eventId} className="space-y-0.5">
-                            <p className={`text-[11px] ${noticeColors[notice.level]}`}>{t(noticeLabelKeys[notice.level])}</p>
-                            <p className="whitespace-pre-wrap break-words leading-relaxed">{piExtensionPlainText(notice.message)}</p>
-                          </li>)}
-                        </ol>
-                      </ScrollShadow>
-                    </Accordion.Body>
-                  </Accordion.Panel>
-                </Accordion.Item>
-              </Accordion> : null}
-              {!contentCount ? <p className="text-muted">{running ? t('pi.waitingMessages') : t('pi.historyKept')}</p> : null}
-              {stopped && providerRuntime?.reason ? <p className="whitespace-pre-wrap break-words text-muted">{piRuntimeStopReason(providerRuntime.reason)}</p> : null}
-            </Widget.Content>
-          </Accordion.Body>
-        </Accordion.Panel>
-      </Accordion.Item>
-    </Accordion>
-    {editorRequest ? <Widget.Content className="space-y-2 p-3 text-xs shadow-none" aria-label={t('pi.draftSuggestion')}>
-      <p className="font-medium">{t('pi.replaceDraftTitle')}</p>
-      <p className="text-muted">{t('pi.replaceDraftHint')}</p>
-      <ScrollShadow className="max-h-32 overflow-y-auto" size={12}>
-        <p className="whitespace-pre-wrap break-words">{piExtensionPlainText(editorRequest.text) || t('pi.clearDraft')}</p>
-      </ScrollShadow>
+  return <Card variant="secondary" className="my-2 flex min-w-0 flex-col gap-2 rounded-2xl p-2 text-caption-1-regular" data-testid={`pi-extension-${placement}`}>
+    <div className="flex min-w-0 items-start gap-2 px-1">
+      <Disclosure
+        defaultOpen
+        className="min-w-0 flex-1"
+        label={<>
+          <span className="min-w-0 break-words text-caption-1-medium text-text-primary">{title}</span>
+          {running ? <span className="text-text-tertiary">{isConnected ? t('pi.running') : t('pi.disconnected')}</span> : null}
+          {stopped ? <span className="text-text-tertiary">{t('pi.stopped')}</span> : null}
+          {notices.length ? <span className="text-text-tertiary">{t('pi.noticeCount', { count: notices.length })}</span> : null}
+        </>}
+      >
+        <div className="mt-1 min-w-0 space-y-3 rounded-xl bg-background-primary-default p-3">
+          {statuses.length ? <dl className="space-y-2" aria-label={t('pi.statusLabel')}>
+            {statuses.map(status => <div key={status.key} className="grid min-w-0 grid-cols-[minmax(0,7rem)_minmax(0,1fr)] gap-2">
+              <dt className="break-words text-text-tertiary">{piExtensionPlainText(status.key)}</dt>
+              <dd className="min-w-0 whitespace-pre-wrap break-words text-text-primary">{piExtensionPlainText(status.text)}</dd>
+            </div>)}
+          </dl> : null}
+          {widgets.length ? <ScrollArea className="max-h-52">
+            <div className="space-y-3" aria-label={t('pi.widgetsLabel')}>
+              {widgets.map(widget => <section key={widget.key} aria-label={piExtensionPlainText(widget.key)}>
+                <p className="mb-1 break-words text-text-tertiary">{piExtensionPlainText(widget.key)}</p>
+                <p className="whitespace-pre-wrap break-words font-mono leading-relaxed text-text-primary">{piExtensionPlainText(widget.lines.join('\n'))}</p>
+              </section>)}
+            </div>
+          </ScrollArea> : null}
+          {notices.length ? <Disclosure label={<span>{t('pi.viewNotices', { count: notices.length })}</span>}>
+            <ScrollArea className="mt-1 max-h-52">
+              <ol className="space-y-3" aria-label={t('pi.noticesLabel')}>
+                {notices.map(notice => <li key={notice.eventId} className="space-y-0.5">
+                  <p className={cx('text-caption-2-regular', noticeColors[notice.level])}>{t(noticeLabelKeys[notice.level])}</p>
+                  <p className="whitespace-pre-wrap break-words leading-relaxed text-text-primary">{piExtensionPlainText(notice.message)}</p>
+                </li>)}
+              </ol>
+            </ScrollArea>
+          </Disclosure> : null}
+          {!contentCount ? <p className="text-text-tertiary">{running ? t('pi.waitingMessages') : t('pi.historyKept')}</p> : null}
+          {stopped && providerRuntime?.reason ? <p className="whitespace-pre-wrap break-words text-text-tertiary">{piRuntimeStopReason(providerRuntime.reason)}</p> : null}
+        </div>
+      </Disclosure>
+      {running ? <Button size="xs" variant="ghost" className="mt-0.5 shrink-0"
+        disabled={!isConnected || !onStopRuntime || isStopping} aria-busy={isStopping || undefined}
+        aria-label={t('pi.stopAria')}
+        onClick={onStopRuntime}>{t('pi.stop')}</Button> : null}
+    </div>
+    {editorRequest ? <div className="space-y-2 rounded-xl bg-background-primary-default p-3" aria-label={t('pi.draftSuggestion')}>
+      <p className="text-caption-1-medium text-text-primary">{t('pi.replaceDraftTitle')}</p>
+      <p className="text-text-tertiary">{t('pi.replaceDraftHint')}</p>
+      <ScrollArea className="max-h-32">
+        <p className="whitespace-pre-wrap break-words text-text-primary">{piExtensionPlainText(editorRequest.text) || t('pi.clearDraft')}</p>
+      </ScrollArea>
       <div className="flex flex-wrap gap-2">
-        <Button size="sm" variant="secondary" isDisabled={!onReplaceEditor}
-          onPress={() => onReplaceEditor?.(editorRequest)}>{t('pi.replaceDraft')}</Button>
-        <Button size="sm" variant="ghost" isDisabled={!onDismissEditor}
-          onPress={() => onDismissEditor?.(editorRequest)}>{t('common.cancel')}</Button>
+        <Button size="xs" variant="secondary" disabled={!onReplaceEditor}
+          onClick={() => onReplaceEditor?.(editorRequest)}>{t('pi.replaceDraft')}</Button>
+        <Button size="xs" variant="ghost" disabled={!onDismissEditor}
+          onClick={() => onDismissEditor?.(editorRequest)}>{t('common.cancel')}</Button>
       </div>
-    </Widget.Content> : null}
-  </Widget>;
+    </div> : null}
+  </Card>;
 }

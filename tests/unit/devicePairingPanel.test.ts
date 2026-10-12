@@ -2,7 +2,7 @@ import { afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest';
 import * as React from 'react';
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { Toast, toast } from '@heroui/react';
+import { ToastViewport, toast } from '../../src/renderer/components/ui/toast';
 import { DevicePairingPanel } from '../../src/renderer/components/DevicePairingPanel';
 import { DevicePairingRetryableError, beginDevicePairing } from '../../src/renderer/session/devicePairing';
 import type { DevicePairingRequest } from '../../src/renderer/session/devicePairing';
@@ -24,10 +24,23 @@ beforeAll(() => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true, React });
   globalThis.ResizeObserver ??= class { observe() {} unobserve() {} disconnect() {} };
 });
-beforeEach(() => { vi.useFakeTimers(); vi.mocked(beginDevicePairing).mockReset(); });
-afterEach(() => {
-  act(() => { toast.clear(); root?.unmount(); });
+const TOAST_VARIANTS = ['info', 'success', 'warning', 'danger'] as const;
+beforeEach(() => {
+  vi.useFakeTimers();
+  vi.mocked(beginDevicePairing).mockReset();
+  // Pass-through spies: they record each toast key so afterEach can clear the stack.
+  for (const variant of TOAST_VARIANTS) vi.spyOn(toast, variant);
+});
+afterEach(async () => {
+  // The toast store is module-global: close everything this test showed and let
+  // the exit animations finish so nothing leaks into the next test.
+  for (const variant of TOAST_VARIANTS) {
+    for (const result of vi.mocked(toast[variant]).mock.results) if (result.type === 'return') act(() => toast.close(result.value));
+  }
+  await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+  act(() => { root?.unmount(); });
   container?.remove();
+  vi.restoreAllMocks();
   vi.useRealTimers();
 });
 function deferred<T>() {
@@ -61,7 +74,7 @@ function render(profile: ProfilePatch = {}) {
   root = createRoot(container);
   const rerender = (next = session) => act(() => root.render(createElement(React.Fragment, null,
     createElement(DevicePairingPanel, { session: next, deviceName: 'TodeX Web' }),
-    createElement(Toast.Provider),
+    createElement(ToastViewport),
   )));
   rerender();
   return { session, rerender, updateBackendConnection, setSettings, connect };
@@ -76,7 +89,8 @@ async function tick(ms = 2000) {
   await act(async () => { await vi.advanceTimersByTimeAsync(ms); });
   await flushNotices();
 }
-function notices() { return [...document.querySelectorAll('[data-slot="toast"]')].map(item => item.textContent).join(' '); }
+// Toast cards render into the viewport portal (aria-label 通知) as status/alert regions.
+function notices() { return [...document.querySelectorAll('[aria-label="通知"] :is([role="status"], [role="alert"])')].map(item => item.textContent).join(' '); }
 
 it('shows the code and fingerprint, then pins the device key and the verified transport in one update', async () => {
   const req = request();

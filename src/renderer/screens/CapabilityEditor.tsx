@@ -1,6 +1,11 @@
-import { useState, type ReactNode } from 'react';
-import { Button, Description, FieldError, Input, Label, ListBox, Modal, Select, Spinner, TextArea, TextField, toast } from '@heroui/react';
+import { useState } from 'react';
 import type { CatalogScope } from '@todex/protocol/v2';
+import { Button } from '@/components/base/buttons/button';
+import { Input } from '@/components/base/input/input';
+import { Select, SelectItem } from '@/components/base/select/select';
+import { Textarea } from '@/components/base/textarea/textarea';
+import { Modal } from '@/components/ui/modal';
+import { toast } from '@/components/ui/toast';
 import { useT } from '../i18n';
 
 const SKILL_NAME = /^[A-Za-z0-9_-][A-Za-z0-9._-]{0,99}$/;
@@ -24,28 +29,6 @@ export function useSkillSourceLabel() {
   };
 }
 
-function EditorShell({ isOpen, onClose, children }: { isOpen: boolean; onClose: () => void; children: ReactNode }) {
-  return (
-    <Modal.Backdrop isOpen={isOpen} onOpenChange={(open) => { if (!open) onClose(); }}>
-      <Modal.Container>
-        <Modal.Dialog className="max-h-[90vh] sm:max-w-2xl">
-          {children}
-        </Modal.Dialog>
-      </Modal.Container>
-    </Modal.Backdrop>
-  );
-}
-
-function EditorFooter({ saving, canSave, onClose, onSave }: { saving: boolean; canSave: boolean; onClose: () => void; onSave: () => void }) {
-  const t = useT();
-  return (
-    <Modal.Footer>
-      <Button variant="tertiary" isDisabled={saving} onPress={onClose}>{t('common.cancel')}</Button>
-      <Button isDisabled={!canSave} onPress={onSave}>{saving ? <Spinner size="sm" /> : null}{t('common.save')}</Button>
-    </Modal.Footer>
-  );
-}
-
 export type SkillEditorTarget =
   | { mode: 'create'; sources: string[] }
   | { mode: 'edit'; name: string; content: string };
@@ -60,9 +43,15 @@ export function SkillEditorModal({
   onSubmit: (input: { source: string; name: string; content: string }) => Promise<void>;
 }) {
   return (
-    <EditorShell isOpen={Boolean(target)} onClose={onClose}>
+    <Modal
+      isOpen={Boolean(target)}
+      onOpenChange={(open) => { if (!open) onClose(); }}
+      aria-label="Skill"
+      size="xl"
+      hideCloseButton
+    >
       {target ? <SkillEditorForm key={target.mode === 'edit' ? target.name : 'create'} target={target} onClose={onClose} onSubmit={onSubmit} /> : null}
-    </EditorShell>
+    </Modal>
   );
 }
 
@@ -100,52 +89,49 @@ function SkillEditorForm({
   };
 
   return (
-    <>
-      <Modal.Header>
-        <Modal.Heading>{creating ? t('cap.newSkill') : t('cap.editSkill', { name })}</Modal.Heading>
-      </Modal.Header>
-      <Modal.Body className="flex max-h-[70vh] flex-col gap-4 overflow-y-auto">
-        {creating ? (
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Select
-              className="w-full"
-              selectedKey={source || null}
-              onSelectionChange={(key) => { if (key !== null) setSource(String(key)); }}
-            >
-              <Label>{t('cap.location')}</Label>
-              <Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
-              <Select.Popover>
-                <ListBox>
-                  {target.sources.map((item) => (
-                    <ListBox.Item key={item} id={item} textValue={sourceLabel(item)}>{sourceLabel(item)}</ListBox.Item>
-                  ))}
-                </ListBox>
-              </Select.Popover>
-            </Select>
-            <TextField
-              className="w-full"
-              value={name}
-              onChange={(next) => {
-                // Keep the front matter name in step until the user edits the body.
-                if (content === skillTemplate(name)) setContent(skillTemplate(next));
-                setName(next);
-              }}
-              isInvalid={nameInvalid}
-            >
-              <Label>{t('cap.skillName')}</Label>
-              <Input className="w-full" placeholder="my-skill" dir="ltr" />
-              <FieldError>{t('cap.skillNameHint')}</FieldError>
-            </TextField>
-          </div>
-        ) : null}
-        <TextField className="w-full" value={content} onChange={setContent} isInvalid={contentInvalid}>
-          <Label>SKILL.md</Label>
-          <TextArea className="w-full font-mono text-xs" rows={16} />
-          <FieldError>{t('cap.frontMatterHint')}</FieldError>
-        </TextField>
-      </Modal.Body>
-      <EditorFooter saving={saving} canSave={canSave} onClose={onClose} onSave={() => void save()} />
-    </>
+    <div className="flex flex-col gap-4">
+      <h2 className="text-title-3-medium text-text-primary">{creating ? t('cap.newSkill') : t('cap.editSkill', { name })}</h2>
+      {creating ? (
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Select
+            label={t('cap.location')}
+            selectedKey={source || null}
+            onSelectionChange={(key) => setSource(String(key))}
+          >
+            {target.sources.map((item) => (
+              <SelectItem key={item} id={item} textValue={sourceLabel(item)}>{sourceLabel(item)}</SelectItem>
+            ))}
+          </Select>
+          <Input
+            label={t('cap.skillName')}
+            placeholder="my-skill"
+            value={name}
+            inputDir="ltr"
+            onChange={(next) => {
+              // Keep the front matter name in step until the user edits the body.
+              if (content === skillTemplate(name)) setContent(skillTemplate(next));
+              setName(next);
+            }}
+            isInvalid={nameInvalid}
+            hint={nameInvalid ? t('cap.skillNameHint') : undefined}
+          />
+        </div>
+      ) : null}
+      <Textarea
+        className="w-full"
+        label="SKILL.md"
+        value={content}
+        onChange={setContent}
+        rows={16}
+        isInvalid={contentInvalid}
+        hint={contentInvalid ? t('cap.frontMatterHint') : undefined}
+        inputClassName="font-mono text-caption-1-regular"
+      />
+      <div className="flex justify-end gap-2.5">
+        <Button variant="secondary" onClick={onClose} disabled={saving}>{t('common.cancel')}</Button>
+        <Button onClick={save} disabled={!canSave} aria-busy={saving || undefined}>{t('common.save')}</Button>
+      </div>
+    </div>
   );
 }
 
@@ -163,9 +149,15 @@ export function McpEditorModal({
   onSubmit: (input: { scope: CatalogScope; name: string; config: Record<string, unknown> }) => Promise<void>;
 }) {
   return (
-    <EditorShell isOpen={Boolean(target)} onClose={onClose}>
+    <Modal
+      isOpen={Boolean(target)}
+      onOpenChange={(open) => { if (!open) onClose(); }}
+      aria-label="MCP"
+      size="xl"
+      hideCloseButton
+    >
       {target ? <McpEditorForm key={target.mode === 'edit' ? target.name : 'create'} target={target} onClose={onClose} onSubmit={onSubmit} /> : null}
-    </EditorShell>
+    </Modal>
   );
 }
 
@@ -211,44 +203,41 @@ function McpEditorForm({
   };
 
   return (
-    <>
-      <Modal.Header>
-        <Modal.Heading>{creating ? t('cap.newMcp') : t('cap.editMcp', { name: target.name })}</Modal.Heading>
-        {creating ? null : <p className="text-muted truncate text-sm" dir="ltr" title={target.path}>{target.path}</p>}
-      </Modal.Header>
-      <Modal.Body className="flex max-h-[70vh] flex-col gap-4 overflow-y-auto">
-        <div className={creating ? 'grid gap-3 sm:grid-cols-2' : 'flex flex-col'}>
-          {creating ? (
-            <Select
-              className="w-full"
-              selectedKey={scope}
-              onSelectionChange={(key) => setScope(key === 'project' ? 'project' : 'user')}
-            >
-              <Label>{t('cap.location')}</Label>
-              <Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
-              <Select.Popover>
-                <ListBox>
-                  {target.scopes.map((item) => (
-                    <ListBox.Item key={item} id={item} textValue={t(item === 'project' ? 'cap.scopeProject' : 'cap.scopeUser')}>
-                      {t(item === 'project' ? 'cap.scopeProject' : 'cap.scopeUser')}
-                    </ListBox.Item>
-                  ))}
-                </ListBox>
-              </Select.Popover>
-            </Select>
-          ) : null}
-          <TextField className="w-full" value={name} onChange={setName}>
-            <Label>{t('cap.mcpName')}</Label>
-            <Input className="w-full" placeholder="my-server" dir="ltr" />
-          </TextField>
-        </div>
-        <TextField className="w-full" value={text} onChange={setText} isInvalid={!config}>
-          <Label>{t('cap.mcpConfigJson')}</Label>
-          <TextArea className="w-full font-mono text-xs" rows={14} dir="ltr" />
-          {config ? <Description>{t('cap.mcpConfigHint')}</Description> : <FieldError>{t('cap.mcpConfigInvalid')}</FieldError>}
-        </TextField>
-      </Modal.Body>
-      <EditorFooter saving={saving} canSave={canSave} onClose={onClose} onSave={() => void save()} />
-    </>
+    <div className="flex flex-col gap-4">
+      <div className="flex min-w-0 flex-col gap-1">
+        <h2 className="text-title-3-medium text-text-primary">{creating ? t('cap.newMcp') : t('cap.editMcp', { name: target.name })}</h2>
+        {creating ? null : <p className="truncate text-body-regular text-text-secondary" dir="ltr" title={target.path}>{target.path}</p>}
+      </div>
+      <div className={creating ? 'grid gap-3 sm:grid-cols-2' : 'flex flex-col'}>
+        {creating ? (
+          <Select
+            label={t('cap.location')}
+            selectedKey={scope}
+            onSelectionChange={(key) => setScope(key === 'project' ? 'project' : 'user')}
+          >
+            {target.scopes.map((item) => (
+              <SelectItem key={item} id={item} textValue={t(item === 'project' ? 'cap.scopeProject' : 'cap.scopeUser')}>
+                {t(item === 'project' ? 'cap.scopeProject' : 'cap.scopeUser')}
+              </SelectItem>
+            ))}
+          </Select>
+        ) : null}
+        <Input label={t('cap.mcpName')} placeholder="my-server" value={name} onChange={setName} inputDir="ltr" />
+      </div>
+      <Textarea
+        className="w-full"
+        label={t('cap.mcpConfigJson')}
+        value={text}
+        onChange={setText}
+        rows={14}
+        isInvalid={!config}
+        hint={config ? t('cap.mcpConfigHint') : t('cap.mcpConfigInvalid')}
+        inputClassName="font-mono text-caption-1-regular"
+      />
+      <div className="flex justify-end gap-2.5">
+        <Button variant="secondary" onClick={onClose} disabled={saving}>{t('common.cancel')}</Button>
+        <Button onClick={save} disabled={!canSave} aria-busy={saving || undefined}>{t('common.save')}</Button>
+      </div>
+    </div>
   );
 }

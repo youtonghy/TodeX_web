@@ -9,6 +9,8 @@ export type TodeXWebApi = {
   };
   theme: {
     shouldUseDark: () => Promise<boolean>;
+    /** The Appearance choice; `system` follows the OS scheme. */
+    setSource: (source: 'system' | 'light' | 'dark') => void;
     onUpdated: (listener: (dark: boolean) => void) => () => void;
   };
 };

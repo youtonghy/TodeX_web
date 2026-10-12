@@ -1,8 +1,18 @@
 import { useMemo, useState } from 'react';
-import { AlertDialog, Button, Card, ScrollShadow, Spinner, Tabs, toast } from '@heroui/react';
 import { RiAddLine, RiArrowDownSLine, RiDeleteBinLine, RiEditLine, RiFlashlightLine, RiGitlabLine, RiRefreshLine } from '@remixicon/react';
 import type { CatalogScope, McpCatalog, McpServerCatalogDescriptor, McpServerConfig, ProviderDescriptor, ProviderKind, SkillCatalog, SkillCatalogDescriptor } from '@todex/protocol/v2';
 import { providerDisplayName } from '@todex/protocol/v2';
+import { Button } from '@/components/base/buttons/button';
+import { PillTab, PillTabList } from '@/components/base/tabs/pill-tab';
+import { Tab, TabList, Tabs } from '@/components/base/tabs/tabs';
+import { Card } from '@/components/ui/card';
+import { CodeBlock } from '@/components/ui/code-block';
+import { IconAction } from '@/components/ui/icon-action';
+import { ConfirmDialog } from '@/components/ui/modal';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Spinner } from '@/components/ui/spinner';
+import { toast } from '@/components/ui/toast';
+import { cx } from '@/utils/cx';
 import { ProviderIcon } from '../components/ProviderIcon';
 import { useNoticeToast } from '../components/NoticeToast';
 import { useT } from '../i18n';
@@ -140,63 +150,53 @@ export function CapabilitiesPanel({
   };
 
   return (
-    <div className={`flex h-full min-h-0 flex-col ${inDialog ? 'py-1' : 'p-5'}`}>
+    <div className={cx('flex h-full min-h-0 flex-col', inDialog ? 'py-1' : 'p-5')}>
       <div className="mb-3 flex items-start justify-between gap-2">
-        <div>
-          {inDialog ? null : <h2 className="text-lg font-semibold">{t('cap.title')}</h2>}
-          <p className={`text-muted text-xs ${inDialog ? '' : 'mt-1'}`}>{provider ? `${providerDisplayName(provider.id, provider.displayName)} · ${workspacePath}` : t('cap.commonPath', { path: workspacePath })}</p>
+        <div className="min-w-0">
+          {inDialog ? null : <h2 className="text-title-3-semibold text-text-primary">{t('cap.title')}</h2>}
+          <p className={cx('text-caption-1-regular text-text-secondary', !inDialog && 'mt-1')}>{provider ? `${providerDisplayName(provider.id, provider.displayName)} · ${workspacePath}` : t('cap.commonPath', { path: workspacePath })}</p>
           {conversationId && canInvoke ? (
-            <p className="text-muted mt-1 text-xs">{t('cap.attachHint')}</p>
+            <p className="mt-1 text-caption-1-regular text-text-secondary">{t('cap.attachHint')}</p>
           ) : (
-            <p className="text-muted mt-1 text-xs">{t('cap.needV2')}</p>
+            <p className="mt-1 text-caption-1-regular text-text-secondary">{t('cap.needV2')}</p>
           )}
         </div>
         <div className="flex shrink-0 items-center gap-1">
           {createTarget ? (
-            <Button size="sm" variant="secondary" onPress={openCreate}>
-              <RiAddLine className="size-4" />
+            <Button size="small" variant="secondary" leadingIcon={RiAddLine} onClick={openCreate}>
               {viewMode === 'skills' ? t('cap.newSkill') : t('cap.newMcp')}
             </Button>
           ) : null}
-          <Button isIconOnly size="sm" variant="ghost" aria-label={t('workbench.refresh')} onPress={refresh}>
-            <RiRefreshLine className="size-4" />
-          </Button>
+          <IconAction icon={RiRefreshLine} size="sm" aria-label={t('workbench.refresh')} onClick={refresh} />
         </div>
       </div>
-      <div className="mb-3 flex flex-wrap gap-2">
-        <Button size="sm" variant={choice === 'common' ? 'primary' : 'tertiary'} onPress={() => setProviderChoice('common')}>{t('cap.common')}</Button>
+      <PillTabList className="mb-3 flex-wrap">
+        <PillTab variant="gray" isSelected={choice === 'common'} onSelect={() => setProviderChoice('common')}>{t('cap.common')}</PillTab>
         {availableProviders.map((item) => (
-          <Button key={item.id} size="sm" variant={choice === item.id ? 'primary' : 'tertiary'} onPress={() => setProviderChoice(item.id)}>
-            <ProviderIcon provider={item.id} />
-            {providerDisplayName(item.id)}
-          </Button>
+          <PillTab key={item.id} variant="gray" isSelected={choice === item.id} onSelect={() => setProviderChoice(item.id)}>
+            <span className="inline-flex items-center gap-1.5">
+              <ProviderIcon provider={item.id} className="size-4" />
+              {providerDisplayName(item.id)}
+            </span>
+          </PillTab>
         ))}
-      </div>
+      </PillTabList>
       <Tabs
         selectedKey={viewMode}
         onSelectionChange={(key) => setViewMode(key === 'mcp' ? 'mcp' : 'skills')}
-        className="w-full"
       >
-        <Tabs.ListContainer className="w-full">
-          <Tabs.List aria-label={t('cap.tabsLabel')} className="grid w-full grid-cols-2">
-            <Tabs.Tab id="skills">
-              Skills
-              <Tabs.Indicator />
-            </Tabs.Tab>
-            <Tabs.Tab id="mcp">
-              MCPs
-              <Tabs.Indicator />
-            </Tabs.Tab>
-          </Tabs.List>
-        </Tabs.ListContainer>
+        <TabList aria-label={t('cap.tabsLabel')} className="grid grid-cols-2 gap-0">
+          <Tab id="skills" className="justify-center">Skills</Tab>
+          <Tab id="mcp" className="justify-center">MCPs</Tab>
+        </TabList>
       </Tabs>
       {state?.status === 'loading' ? (
-        <div className="flex flex-col items-center py-10">
-          <Spinner />
-          <p className="text-muted mt-2 text-xs">{t('cap.loading')}</p>
+        <div className="flex flex-col items-center gap-2 py-10">
+          <Spinner size="md" />
+          <p className="text-caption-1-regular text-text-secondary">{t('cap.loading')}</p>
         </div>
       ) : null}
-      <ScrollShadow className="mt-3 min-h-0 flex-1">
+      <ScrollArea className="mt-3 flex-1" contentClassName="flex flex-col gap-2" surface={inDialog ? 'full' : 'secondary'}>
         {viewMode === 'skills' && state?.status !== 'loading' ? (
           skills.length ? skills.map((item) => (
             <SkillRow
@@ -225,7 +225,7 @@ export function CapabilitiesPanel({
                 }
               }}
             />
-          )) : <p className="text-muted py-10 text-center text-sm">{t('cap.noSkills')}</p>
+          )) : <p className="py-10 text-center text-body-regular text-text-secondary">{t('cap.noSkills')}</p>
         ) : null}
         {viewMode === 'mcp' && state?.status !== 'loading' ? (
           mcpServers.length ? mcpServers.map(({ server, editable }) => (
@@ -253,57 +253,42 @@ export function CapabilitiesPanel({
               })}
               onDelete={() => setPendingDelete({ kind: 'mcp', server })}
             />
-          )) : <p className="text-muted py-10 text-center text-sm">{t('cap.noMcps')}</p>
+          )) : <p className="py-10 text-center text-body-regular text-text-secondary">{t('cap.noMcps')}</p>
         ) : null}
-      </ScrollShadow>
-      <AlertDialog isOpen={Boolean(pendingDelete)} onOpenChange={(open) => { if (!open && !deleting) setPendingDelete(null); }}>
-        <AlertDialog.Backdrop>
-          <AlertDialog.Container>
-            <AlertDialog.Dialog className="sm:max-w-md">
-              <AlertDialog.Header>
-                <AlertDialog.Heading>{pendingDelete?.kind === 'skill' ? t('cap.deleteSkillTitle') : t('cap.deleteMcpTitle')}</AlertDialog.Heading>
-              </AlertDialog.Header>
-              <AlertDialog.Body>
-                <p className="text-muted text-sm">
-                  {pendingDelete?.kind === 'skill'
-                    ? t('cap.deleteSkillBody', { name: pendingDelete.skill.name })
-                    : pendingDelete ? t('cap.deleteMcpBody', {
-                      name: pendingDelete.server.name,
-                      path: mcpConfigs[pendingDelete.server.resourceId]?.path ?? pendingDelete.server.source,
-                    }) : null}
-                </p>
-              </AlertDialog.Body>
-              <AlertDialog.Footer>
-                <Button slot="close" variant="tertiary" isDisabled={deleting}>{t('common.cancel')}</Button>
-                <Button
-                  variant="danger"
-                  isPending={deleting}
-                  onPress={async () => {
-                    if (!pendingDelete || !manager) return;
-                    setDeleting(true);
-                    const name = pendingDelete.kind === 'skill' ? pendingDelete.skill.name : pendingDelete.server.name;
-                    try {
-                      if (pendingDelete.kind === 'skill') {
-                        await manager.deleteSkill(pendingDelete.provider, pendingDelete.skill.resourceId);
-                      } else {
-                        await manager.deleteMcpServer(pendingDelete.server.provider, pendingDelete.server.resourceId);
-                      }
-                      toast.success(t('cap.deleted', { name }));
-                      setPendingDelete(null);
-                    } catch (error) {
-                      toast.danger(error instanceof Error ? error.message : t('cap.deleteFailed'));
-                    } finally {
-                      setDeleting(false);
-                    }
-                  }}
-                >
-                  {t('common.delete')}
-                </Button>
-              </AlertDialog.Footer>
-            </AlertDialog.Dialog>
-          </AlertDialog.Container>
-        </AlertDialog.Backdrop>
-      </AlertDialog>
+      </ScrollArea>
+      <ConfirmDialog
+        isOpen={Boolean(pendingDelete)}
+        onOpenChange={(open) => { if (!open && !deleting) setPendingDelete(null); }}
+        title={pendingDelete?.kind === 'skill' ? t('cap.deleteSkillTitle') : t('cap.deleteMcpTitle')}
+        description={pendingDelete?.kind === 'skill'
+          ? t('cap.deleteSkillBody', { name: pendingDelete.skill.name })
+          : pendingDelete ? t('cap.deleteMcpBody', {
+            name: pendingDelete.server.name,
+            path: mcpConfigs[pendingDelete.server.resourceId]?.path ?? pendingDelete.server.source,
+          }) : null}
+        cancelLabel={t('common.cancel')}
+        confirmLabel={t('common.delete')}
+        tone="danger"
+        isPending={deleting}
+        onConfirm={async () => {
+          if (!pendingDelete || !manager) return;
+          setDeleting(true);
+          const name = pendingDelete.kind === 'skill' ? pendingDelete.skill.name : pendingDelete.server.name;
+          try {
+            if (pendingDelete.kind === 'skill') {
+              await manager.deleteSkill(pendingDelete.provider, pendingDelete.skill.resourceId);
+            } else {
+              await manager.deleteMcpServer(pendingDelete.server.provider, pendingDelete.server.resourceId);
+            }
+            toast.success(t('cap.deleted', { name }));
+            setPendingDelete(null);
+          } catch (error) {
+            toast.danger(error instanceof Error ? error.message : t('cap.deleteFailed'));
+          } finally {
+            setDeleting(false);
+          }
+        }}
+      />
       <SkillEditorModal
         target={skillEditor}
         onClose={() => setSkillEditor(null)}
@@ -375,12 +360,15 @@ function SkillRow({
 
   return (
     <Card
+      variant="secondary"
       role="button"
       tabIndex={0}
       aria-expanded={expanded}
-      className={`mb-2 p-3.5 transition-all cursor-pointer select-none hover:bg-surface-secondary/40 active:bg-surface-secondary/60 ${
-        expanded ? 'bg-surface-secondary/20 ring-1 ring-separator' : ''
-      }`}
+      className={cx(
+        'cursor-pointer gap-0 p-3.5 select-none',
+        'outline-none transition-colors duration-150 ease focus-visible:ring-2 focus-visible:ring-border-focus-ring',
+        expanded ? 'bg-background-secondary-hover' : 'hover:bg-background-secondary-hover',
+      )}
       onClick={handleToggle}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
@@ -390,71 +378,67 @@ function SkillRow({
       }}
     >
       <div className="flex gap-3">
-        <div className="bg-accent-soft flex size-9 shrink-0 items-center justify-center rounded-lg">
-          <RiFlashlightLine className="text-accent size-4" />
+        <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-badge-new-background">
+          <RiFlashlightLine aria-hidden className="size-4 text-badge-new-text" />
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center justify-between gap-2">
-            <p className="truncate font-semibold text-sm">{item.name}</p>
-            <div className="flex items-center gap-2 shrink-0">
-              <span className={`text-xs ${selected ? 'text-accent font-medium' : 'text-muted'}`}>
+            <p className="truncate text-body-semibold text-text-primary">{item.name}</p>
+            <div className="flex shrink-0 items-center gap-2">
+              <span className={selected ? 'text-caption-1-medium text-text-accent' : 'text-caption-1-regular text-text-secondary'}>
                 {selected ? t('cap.attached') : status}
               </span>
               <RiArrowDownSLine
-                className={`text-muted size-4 transition-transform duration-200 ${
-                  expanded ? 'rotate-180' : ''
-                }`}
+                aria-hidden
+                className={cx(
+                  'size-4 text-foreground-icon-tertiary transition-transform duration-200 ease-out motion-reduce:transition-none',
+                  expanded && 'rotate-180',
+                )}
               />
             </div>
           </div>
           {item.description ? (
-            <p className={`text-muted mt-1 text-xs leading-relaxed ${expanded ? 'whitespace-pre-line' : 'line-clamp-2'}`}>
+            <p className={cx('mt-1 text-caption-1-regular text-text-secondary', expanded ? 'whitespace-pre-line' : 'line-clamp-2')}>
               {item.description}
             </p>
           ) : null}
-          <p className="text-muted mt-1.5 text-[11px]">{item.scope} · {item.source}</p>
+          <p className="mt-1.5 text-caption-2-regular text-text-tertiary">{item.scope} · {item.source}</p>
 
           {expanded ? (
-            <div className="mt-3 border-t border-separator/40 pt-3" onClick={(e) => e.stopPropagation()}>
+            <div className="mt-3 cursor-default border-t border-separator-border pt-3" onClick={(e) => e.stopPropagation()}>
               {loading ? (
-                <div className="flex items-center gap-2 py-3 text-muted text-xs">
+                <div className="flex items-center gap-2 py-3 text-caption-1-regular text-text-secondary">
                   <Spinner size="sm" />
                   <span>{t('cap.loadingSkill')}</span>
                 </div>
               ) : preview ? (
-                <div className="rounded-lg bg-surface-secondary/60 border border-separator/50 p-2.5">
-                  <p className="text-muted mb-1 text-[11px] font-medium">{t('cap.previewLabel')}</p>
-                  <pre className="text-foreground/80 max-h-52 overflow-auto whitespace-pre-wrap font-mono text-[11px] leading-relaxed select-text">
+                <div className="rounded-2lg border border-border-button-default bg-background-primary-default p-2.5">
+                  <p className="mb-1 text-caption-2-medium text-text-secondary">{t('cap.previewLabel')}</p>
+                  <pre className="max-h-52 overflow-auto font-mono text-caption-2-regular whitespace-pre-wrap text-text-primary select-text">
                     {preview.slice(0, 4000)}
                   </pre>
                 </div>
               ) : (
-                <p className="text-muted text-xs">{t('cap.noPreview')}</p>
+                <p className="text-caption-1-regular text-text-secondary">{t('cap.noPreview')}</p>
               )}
 
               {canSelect || editable ? (
                 <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-                  <span className="text-muted text-xs">
+                  <span className="text-caption-1-regular text-text-secondary">
                     {canSelect ? (selected ? t('cap.attachedToChat') : t('cap.attachable')) : null}
                   </span>
                   <div className="flex items-center gap-2">
                     {editable ? (
                       <>
-                        <Button size="sm" variant="secondary" onPress={onDelete}>
-                          <RiDeleteBinLine className="size-4" />
-                          {t('common.delete')}
-                        </Button>
-                        <Button size="sm" variant="secondary" onPress={onEdit} isDisabled={!preview && item.valid}>
-                          <RiEditLine className="size-4" />
-                          {t('cap.edit')}
-                        </Button>
+                        <Button size="small" variant="secondary" leadingIcon={RiDeleteBinLine} onClick={onDelete}>{t('common.delete')}</Button>
+                        <Button size="small" variant="secondary" leadingIcon={RiEditLine} onClick={onEdit} disabled={!preview && item.valid}>{t('cap.edit')}</Button>
                       </>
                     ) : null}
                     {canSelect ? (
                       <Button
-                        size="sm"
+                        size="small"
                         variant={selected ? 'secondary' : 'primary'}
-                        onPress={onToggle}
+                        onClick={onToggle}
                       >
                         {selected ? t('cap.detach') : t('cap.attach')}
                       </Button>
@@ -505,12 +489,15 @@ function McpRow({
 
   return (
     <Card
+      variant="secondary"
       role="button"
       tabIndex={0}
       aria-expanded={expanded}
-      className={`mb-2 p-3.5 transition-all cursor-pointer select-none hover:bg-surface-secondary/40 active:bg-surface-secondary/60 ${
-        expanded ? 'bg-surface-secondary/20 ring-1 ring-separator' : ''
-      }`}
+      className={cx(
+        'cursor-pointer gap-0 p-3.5 select-none',
+        'outline-none transition-colors duration-150 ease focus-visible:ring-2 focus-visible:ring-border-focus-ring',
+        expanded ? 'bg-background-secondary-hover' : 'hover:bg-background-secondary-hover',
+      )}
       onClick={handleToggle}
       onKeyDown={(e) => {
         if (e.target !== e.currentTarget) return;
@@ -521,56 +508,53 @@ function McpRow({
       }}
     >
       <div className="flex gap-3">
-        <div className="bg-success-soft flex size-9 shrink-0 items-center justify-center rounded-lg">
-          <RiGitlabLine className="text-success size-4" />
+        <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-status-lime-background">
+          <RiGitlabLine aria-hidden className="size-4 text-status-lime-text" />
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center justify-between gap-2">
-            <p className="truncate font-semibold text-sm">{item.name}</p>
-            <div className="flex items-center gap-2 shrink-0">
-              <span className="text-muted text-xs">{status}</span>
+            <p className="truncate text-body-semibold text-text-primary">{item.name}</p>
+            <div className="flex shrink-0 items-center gap-2">
+              <span className="text-caption-1-regular text-text-secondary">{status}</span>
               <RiArrowDownSLine
-                className={`text-muted size-4 transition-transform duration-200 ${
-                  expanded ? 'rotate-180' : ''
-                }`}
+                aria-hidden
+                className={cx(
+                  'size-4 text-foreground-icon-tertiary transition-transform duration-200 ease-out motion-reduce:transition-none',
+                  expanded && 'rotate-180',
+                )}
               />
             </div>
           </div>
-          <p className="text-muted mt-1.5 text-[11px]">{item.transport} · {item.scope} · {item.source}</p>
-          {item.error ? <p className="text-danger mt-1 text-xs">{item.error}</p> : null}
+          <p className="mt-1.5 text-caption-2-regular text-text-tertiary">{item.transport} · {item.scope} · {item.source}</p>
+          {item.error ? <p className="mt-1 text-caption-1-regular text-text-error-primary">{item.error}</p> : null}
 
           {expanded ? (
-            <div className="mt-3 cursor-default border-t border-separator/40 pt-3 select-text" onClick={(e) => e.stopPropagation()}>
+            <div className="mt-3 cursor-default border-t border-separator-border pt-3 select-text" onClick={(e) => e.stopPropagation()}>
               {loading ? (
-                <div className="flex items-center gap-2 py-3 text-muted text-xs">
+                <div className="flex items-center gap-2 py-3 text-caption-1-regular text-text-secondary">
                   <Spinner size="sm" />
                   <span>{t('cap.loadingMcp')}</span>
                 </div>
               ) : config ? (
                 <>
-                  <div className="rounded-lg bg-surface-secondary/60 border border-separator/50 p-2.5">
-                    <p className="text-muted mb-1 truncate text-[11px] font-medium" title={config.path}>{config.path || 'JSON'}</p>
-                    <pre className="text-foreground/80 max-h-72 overflow-auto whitespace-pre font-mono text-[11px] leading-relaxed select-text">
-                      {JSON.stringify({ [item.name]: config.config }, null, 2)}
-                    </pre>
-                  </div>
+                  <CodeBlock
+                    className="my-0"
+                    code={JSON.stringify({ [item.name]: config.config }, null, 2)}
+                    language="json"
+                    title={<span className="normal-case" title={config.path}>{config.path || 'JSON'}</span>}
+                    codeClassName="max-h-72 overflow-auto"
+                  />
                   {config.format === 'native' ? (
-                    <p className="text-muted mt-3 text-xs">{t('cap.mcpNativeManaged')}</p>
+                    <p className="mt-3 text-caption-1-regular text-text-secondary">{t('cap.mcpNativeManaged')}</p>
                   ) : editable ? (
                     <div className="mt-3 flex justify-end gap-2">
-                      <Button size="sm" variant="secondary" onPress={onDelete}>
-                        <RiDeleteBinLine className="size-4" />
-                        {t('common.delete')}
-                      </Button>
-                      <Button size="sm" variant="secondary" onPress={() => onEdit(config)}>
-                        <RiEditLine className="size-4" />
-                        {t('cap.edit')}
-                      </Button>
+                      <Button size="small" variant="secondary" leadingIcon={RiDeleteBinLine} onClick={onDelete}>{t('common.delete')}</Button>
+                      <Button size="small" variant="secondary" leadingIcon={RiEditLine} onClick={() => onEdit(config)}>{t('cap.edit')}</Button>
                     </div>
                   ) : null}
                 </>
               ) : (
-                <p className="text-muted text-xs">{t('cap.mcpConfigFailed')}</p>
+                <p className="text-caption-1-regular text-text-secondary">{t('cap.mcpConfigFailed')}</p>
               )}
             </div>
           ) : null}

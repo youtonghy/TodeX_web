@@ -1,618 +1,50 @@
-import { useMemo, useState, type DragEvent, type Key, type ReactNode } from 'react';
-import { isTextDropItem, useDragAndDrop, type Selection } from 'react-aria-components';
-import { Plus } from '@gravity-ui/icons';
-import { RiArrowDownSLine, RiArrowRightLine, RiCalendarLine, RiChat3Line, RiCheckLine, RiCpuLine, RiDraggable, RiFolder3Line, RiKanbanView2, RiMoreFill, RiTimerLine } from '@remixicon/react';
-import { Button, Chip, Dropdown, Header, Label, ListBox, Modal, Popover, Select, Separator, TextArea, TextField, Tooltip } from '@heroui/react';
-import { ContextMenu, EmptyState, Kanban } from '@heroui-pro/react';
-import type { WorkspaceRecord } from '@todex/protocol/todex';
-import { providerDisplayName, type PermissionMode, type ProviderKind } from '@todex/protocol/v2';
+import { useId, useMemo, useState } from 'react';
+import { RiCpuLine, RiFolder3Line } from '@remixicon/react';
+import { Button as AriaButton, Dialog as AriaDialog, DialogTrigger as AriaDialogTrigger, Popover as AriaPopover } from 'react-aria-components';
 import { normalizeReasoningEffort } from '@todex/protocol/todex';
-import { ModelReasoningCard } from '../components/ModelReasoningCard';
+import { providerDisplayName, type PermissionMode, type ProviderKind } from '@todex/protocol/v2';
+import { ProjectBoard } from '@/components/application/project-board/project-board';
+import { findTaskConversation, type LatestEntries, type WorkspaceTasks } from '@/components/application/project-board/project-board-data';
+import type { TaskBoardHandlers } from '@/components/application/project-board/task-actions';
+import { Button } from '@/components/base/buttons/button';
+import { Input } from '@/components/base/input/input';
+import { Label } from '@/components/base/input/label';
+import { Select, SelectItem } from '@/components/base/select/select';
+import { Textarea } from '@/components/base/textarea/textarea';
+import { COMPOSER_POPOVER } from '@/components/chat/ComposerControls';
+import { ChevronDownSmall } from '@/components/foundations/icons/chevrons';
+import { EmptyState } from '@/components/ui/empty-state';
+import { Modal } from '@/components/ui/modal';
+import { EFFORT_TEXT, ModelReasoningCard } from '../components/ModelReasoningCard';
 import { ProviderIcon } from '../components/ProviderIcon';
-import { conversationDisplayTitle, getConversationStatus, isNoneWorkspaceId, modelDisplayLabel, reasoningEffortLabel, workspaceDisplayName, type ConversationRecord, type TimelineEntry } from '../session/helpers';
+import { cx } from '@/utils/cx';
+import { conversationDisplayTitle, isNoneWorkspaceId, modelDisplayLabel, reasoningEffortLabel, type ConversationRecord } from '../session/helpers';
 import type { TodeXSession } from '../session/useTodeXSession';
-import { Field } from '../components/Field';
 import { useT } from '../i18n';
 import {
-  addKanbanTask,
   attachKanbanTask,
-  cancelKanbanTaskSchedule,
-  isKanbanTaskOverdue,
+  getKanbanTasks,
   kanbanBackendLocalTime,
+  kanbanTaskCanStartConversation,
   kanbanTaskConversationIds,
   kanbanTaskDraftText,
-  kanbanTaskStatusLabel,
-  kanbanTaskStatuses,
   kanbanTasksForWorkspace,
   kanbanTimeZoneLabel,
-  moveKanbanTasks,
-  removeKanbanTask,
-  renameKanbanTask,
   replaceKanbanTaskConversation,
-  setKanbanTaskConversations,
   setKanbanTaskSchedule,
-  setKanbanTaskStatus,
   useKanbanTasks,
   useKanbanTimeZone,
   type KanbanTask,
   type KanbanTaskSchedule,
-  type KanbanTaskStatus,
 } from '../session/kanbanTasks';
 
 type Props = { session: TodeXSession; onOpenConversation: () => void };
 
-type ChipColor = 'accent' | 'danger' | 'default' | 'success' | 'warning';
-
-type ColumnMeta = {
-  bodyBg: string;
-  countColor: string;
-  indicator: string;
-  pillBg: string;
-};
-
-const COLUMN_META: ColumnMeta[] = [
-  {
-    bodyBg: 'bg-accent/8',
-    countColor: 'text-accent',
-    indicator: 'bg-accent',
-    pillBg: 'bg-accent/15',
-  },
-  {
-    bodyBg: 'bg-warning/8',
-    countColor: 'text-warning',
-    indicator: 'bg-warning',
-    pillBg: 'bg-warning/15',
-  },
-  {
-    bodyBg: 'bg-danger/8',
-    countColor: 'text-danger',
-    indicator: 'bg-danger',
-    pillBg: 'bg-danger/15',
-  },
-  {
-    bodyBg: 'bg-success/8',
-    countColor: 'text-success',
-    indicator: 'bg-success',
-    pillBg: 'bg-success/15',
-  },
-];
-
-const STATUS_META: Record<KanbanTaskStatus, { chip: ChipColor }> = {
-  planned: { chip: 'accent' },
-  'in-progress': { chip: 'warning' },
-  done: { chip: 'default' },
-};
-
-// Custom mime so task drags never collide with the column drag (text/plain).
-const TASK_DRAG_TYPE = 'application/x-todex-kanban-task';
-
-type ConversationGroupKind = 'working' | 'issue' | 'unread' | 'plain' | 'stale';
-
-const CONVERSATION_GROUP_ORDER: ConversationGroupKind[] = ['working', 'issue', 'unread', 'plain', 'stale'];
-
-type LatestEntries = Record<string, { latest: TimelineEntry | undefined; latestIncomingAt: number }>;
-
-type LinkedConversation = { conversation: ConversationRecord; status: ConversationGroupKind; label: string; dot: string };
-
-/** Task links hold the local id of a conversation started on this device, or
- * the backend id of one started elsewhere (another device, a schedule). */
-function findTaskConversation(conversations: ConversationRecord[], id: string): ConversationRecord | undefined {
-  return conversations.find((item) => item.id === id || item.v2ConversationId === id);
-}
-
-/** Linked ids worth keeping when clearing stale links: a conversation a
- * schedule just started may not be in the polled conversation list yet. */
-function keptTaskConversationIds(task: KanbanTask, conversations: ConversationRecord[]): string[] {
-  const pending = task.schedule?.resultConversationId;
-  return kanbanTaskConversationIds(task)
-    .filter((id) => id === pending || findTaskConversation(conversations, id));
-}
-
-function groupLinkedConversations(
-  task: KanbanTask,
-  session: TodeXSession,
-  conversations: ConversationRecord[],
-  latestEntries: LatestEntries,
-  plainLabel: string,
-  staleLabel: string,
-): { groups: { kind: ConversationGroupKind; label: string; items: LinkedConversation[] }[]; staleCount: number; linked: LinkedConversation[] } {
-  const done = task.status === 'done';
-  const linked: LinkedConversation[] = [];
-  let staleCount = 0;
-  for (const id of kanbanTaskConversationIds(task)) {
-    const conversation = findTaskConversation(conversations, id);
-    if (!conversation) {
-      staleCount += 1;
-      continue;
-    }
-    const status = done ? null : getConversationStatus(
-      session,
-      conversation,
-      latestEntries[conversation.id]?.latest,
-      latestEntries[conversation.id]?.latestIncomingAt,
-    );
-    linked.push({
-      conversation,
-      status: status?.kind ?? 'plain',
-      label: status?.label ?? plainLabel,
-      dot: status?.color ?? 'bg-muted',
-    });
-  }
-  const groups = CONVERSATION_GROUP_ORDER
-    .map((kind) => ({
-      kind,
-      label: kind === 'stale' ? staleLabel : kind === 'plain' ? plainLabel : linked.find((item) => item.status === kind)?.label ?? '',
-      items: linked.filter((item) => item.status === kind),
-    }))
-    .filter((group) => group.items.length > 0 || group.kind === 'stale' && staleCount > 0);
-  return { groups, staleCount, linked };
-}
-
-function TaskScheduleLine({ schedule }: { schedule: KanbanTaskSchedule }) {
-  const t = useT();
-  const at = schedule.at.replace('T', ' ');
-  const action = schedule.action === 'start' ? t('kanban.scheduleStart') : t('kanban.scheduleSend');
-  if (schedule.status === 'cancelled') return null;
-  const text = schedule.status === 'pending'
-    ? t('kanban.schedulePending', { at, action })
-    : schedule.status === 'running'
-      ? t('kanban.scheduleRunning')
-      : schedule.status === 'done'
-        ? t(schedule.turnId || schedule.action === 'start' ? 'kanban.scheduleDone' : 'kanban.scheduleQueued', { at })
-        : t('kanban.scheduleFailed', { error: schedule.error ?? '' });
-  return (
-    <div
-      className={`flex min-w-0 items-center gap-1 text-xs ${schedule.status === 'failed' ? 'text-danger' : schedule.status === 'done' ? 'text-muted' : 'text-accent'}`}
-      title={schedule.status === 'failed' ? schedule.error : undefined}
-    >
-      <RiTimerLine className="size-3.5 shrink-0" />
-      <span className="truncate">{text}</span>
-    </div>
-  );
-}
-
-function TaskCard({ task, session, conversations, latestEntries, onOpen, onNewConversation, onSchedule }: {
-  task: KanbanTask;
-  session: TodeXSession;
-  conversations: ConversationRecord[];
-  latestEntries: LatestEntries;
-  onOpen: (workspaceId: string, conversationId: string) => void;
-  onNewConversation: (task: KanbanTask) => void;
-  onSchedule: (task: KanbanTask) => void;
-}) {
-  const t = useT();
-  const done = task.status === 'done';
-  const { groups, staleCount, linked } = groupLinkedConversations(
-    task, session, conversations, latestEntries, t('kanban.groupPlain'), t('kanban.linkStale'),
-  );
-
-  const applyStatusSelection = (selection: Selection) => {
-    if (selection === 'all') return;
-    const status = [...selection][0];
-    if (status) setKanbanTaskStatus(task.id, String(status) as KanbanTaskStatus);
-  };
-
-  const runTaskAction = (key: Key) => {
-    const value = String(key);
-    const separator = value.indexOf(':');
-    const action = separator < 0 ? value : value.slice(0, separator);
-    const argument = separator < 0 ? '' : value.slice(separator + 1);
-    if (action === 'open') {
-      onOpen(task.workspaceId, linked[0]?.conversation.id ?? '');
-    } else if (action === 'new') {
-      onNewConversation(task);
-    } else if (action === 'schedule') {
-      onSchedule(task);
-    } else if (action === 'cancel-schedule') {
-      cancelKanbanTaskSchedule(task.id);
-    } else if (action === 'draft' && argument) {
-      const target = conversations.find((conversation) => conversation.id === argument);
-      if (!target) return;
-      const draft = kanbanTaskDraftText(task);
-      session.setConversationChatDraft(target.id, (current) => (
-        current.trim() ? `${current}\n${draft}` : draft
-      ));
-      onOpen(task.workspaceId, target.id);
-    } else if (action === 'clear-stale') {
-      setKanbanTaskConversations(task.id, keptTaskConversationIds(task, conversations));
-    } else if (action === 'rename') {
-      const title = window.prompt(t('kanban.renamePrompt'), task.title);
-      if (title) renameKanbanTask(task.id, title);
-    } else if (action === 'delete') {
-      removeKanbanTask(task.id);
-    }
-  };
-
-  // ContextMenu.Item and friends re-export the Dropdown parts, so one JSX
-  // block serves both the right-click menu and the "…" dropdown. A submenu
-  // must use its own root's popover and menu: a Dropdown popover nested in
-  // the context menu renders unstyled beside it.
-  const menuItems = (Popover: typeof Dropdown.Popover, Menu: typeof Dropdown.Menu): ReactNode => (
-    <>
-      <Dropdown.Section
-        selectionMode="single"
-        selectedKeys={new Set([task.status])}
-        onSelectionChange={applyStatusSelection}
-      >
-        <Header>{t('kanban.setStatus')}</Header>
-        {kanbanTaskStatuses.map((status) => (
-          <Dropdown.Item key={status} id={status} textValue={kanbanTaskStatusLabel(status)}>
-            <Dropdown.ItemIndicator type="dot" />
-            <Label>{kanbanTaskStatusLabel(status)}</Label>
-          </Dropdown.Item>
-        ))}
-      </Dropdown.Section>
-      <Separator />
-      <Dropdown.Item id="new" textValue={t('kanban.newConversation')}>
-        <Label>{t('kanban.newConversation')}</Label>
-      </Dropdown.Item>
-      {linked.length ? (
-        <Dropdown.Item id="open" textValue={t('kanban.openConversation')}>
-          <Label>{t('kanban.openConversation')}</Label>
-        </Dropdown.Item>
-      ) : null}
-      {linked.length ? (
-        <Dropdown.SubmenuTrigger>
-          <Dropdown.Item id="draft" textValue={t('kanban.draftToChat')}>
-            <Label>{t('kanban.draftToChat')}</Label>
-            <Dropdown.SubmenuIndicator />
-          </Dropdown.Item>
-          <Popover>
-            <Menu aria-label={t('kanban.draftToChat')} onAction={runTaskAction}>
-              {linked.map(({ conversation }) => (
-                <Dropdown.Item
-                  key={conversation.id}
-                  id={`draft:${conversation.id}`}
-                  textValue={conversationDisplayTitle(conversation, session.timeline)}
-                >
-                  <Label className="truncate">{conversationDisplayTitle(conversation, session.timeline)}</Label>
-                </Dropdown.Item>
-              ))}
-            </Menu>
-          </Popover>
-        </Dropdown.SubmenuTrigger>
-      ) : null}
-      <Dropdown.Item id="schedule" textValue={t('kanban.schedule')}>
-        <Label>{t('kanban.schedule')}</Label>
-      </Dropdown.Item>
-      {task.schedule?.status === 'pending' ? (
-        <Dropdown.Item id="cancel-schedule" textValue={t('kanban.scheduleCancel')}>
-          <Label>{t('kanban.scheduleCancel')}</Label>
-        </Dropdown.Item>
-      ) : null}
-      {staleCount ? (
-        <Dropdown.Item id="clear-stale" textValue={t('kanban.clearStale')}>
-          <Label>{t('kanban.clearStale')}</Label>
-        </Dropdown.Item>
-      ) : null}
-      <Separator />
-      <Dropdown.Item id="rename" textValue={t('kanban.renameAria')}>
-        <Label>{t('kanban.rename')}</Label>
-      </Dropdown.Item>
-      <Dropdown.Item id="delete" textValue={t('kanban.delete')} variant="danger">
-        <Label className="text-danger">{t('kanban.delete')}</Label>
-      </Dropdown.Item>
-    </>
-  );
-
-  return (
-    <Kanban.Card id={task.id} textValue={task.title} className="group/card">
-      <ContextMenu>
-        <ContextMenu.Trigger className="min-w-0">
-          <div className="flex min-w-0 flex-col gap-2">
-            <div className="flex items-start gap-2">
-              <button
-                type="button"
-                aria-label={done ? t('kanban.markUndone') : t('kanban.markDone')}
-                title={done ? t('kanban.markUndone') : t('kanban.markDone')}
-                className={`group/check mt-0.5 flex size-4 shrink-0 cursor-pointer items-center justify-center rounded-full border-2 outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent/40 ${
-                  done
-                    ? 'border-muted bg-muted text-background'
-                    : 'border-separator hover:border-muted'
-                }`}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  setKanbanTaskStatus(task.id, done ? 'planned' : 'done');
-                }}
-              >
-                <RiCheckLine className={`size-2.5 ${done ? '' : 'text-muted opacity-0 transition-opacity group-hover/check:opacity-100'}`} />
-              </button>
-              <span className={`min-w-0 break-all font-semibold leading-snug ${done ? 'text-muted' : 'text-foreground'}`}>{task.title}</span>
-            </div>
-
-            {task.description ? (
-              <p className="text-muted break-all text-xs leading-snug line-clamp-2">{task.description}</p>
-            ) : null}
-
-            {task.dueDate ? (
-              <div className={`flex min-w-0 items-center gap-1 text-xs ${isKanbanTaskOverdue(task) ? 'text-danger' : 'text-muted'}`}>
-                <RiCalendarLine className="size-3.5 shrink-0" />
-                <span className="truncate">
-                  {task.dueDate}{isKanbanTaskOverdue(task) ? t('kanban.overdue') : ''}
-                </span>
-              </div>
-            ) : null}
-
-            {task.schedule ? <TaskScheduleLine schedule={task.schedule} /> : null}
-
-            {groups.map((group) => (
-              <div key={group.kind} className="flex min-w-0 flex-col gap-0.5">
-                {groups.length > 1 || group.kind !== 'plain' ? (
-                  <span className="text-muted flex items-center gap-1.5 text-[11px] leading-snug">
-                    <span className={`size-1.5 shrink-0 rounded-full ${group.kind === 'stale' ? 'bg-muted' : group.items[0]?.dot ?? 'bg-muted'}`} />
-                    {group.label} · {group.kind === 'stale' ? staleCount : group.items.length}
-                  </span>
-                ) : null}
-                {group.kind === 'stale' ? null : group.items.map(({ conversation }) => (
-                  <button
-                    key={conversation.id}
-                    type="button"
-                    className="text-accent flex min-w-0 items-center gap-1.5 truncate text-left text-xs outline-none hover:underline focus-visible:ring-2 focus-visible:ring-accent/40"
-                    onClick={(event) => { event.stopPropagation(); onOpen(task.workspaceId, conversation.id); }}
-                  >
-                    <RiChat3Line className="text-muted size-3.5 shrink-0" />
-                    <span className="min-w-0 truncate">{conversationDisplayTitle(conversation, session.timeline)}</span>
-                  </button>
-                ))}
-              </div>
-            ))}
-
-            <div className="flex items-center gap-1">
-              <Chip color={STATUS_META[task.status].chip} size="sm" variant="soft">
-                {kanbanTaskStatusLabel(task.status)}
-              </Chip>
-
-              <span className="flex-1" />
-
-              {/* Pointer users drag the card itself; this icon hints at it. */}
-              <RiDraggable aria-hidden className="text-muted size-3.5 opacity-0 transition-opacity group-hover/card:opacity-100" />
-              {/* Keyboard-operable drag trigger; visually hidden until focused. */}
-              <Kanban.DragHandle aria-label={t('kanban.reorderTask')} />
-
-              <Dropdown>
-                <Dropdown.Trigger
-                  aria-label={t('kanban.taskActions')}
-                  className="text-muted hover:text-foreground flex size-6 cursor-pointer items-center justify-center rounded-md outline-none hover:bg-surface-secondary focus-visible:ring-2 focus-visible:ring-accent/40"
-                >
-                  <RiMoreFill className="size-4" />
-                </Dropdown.Trigger>
-                <Dropdown.Popover>
-                  <Dropdown.Menu aria-label={t('kanban.taskActions')} onAction={runTaskAction}>
-                    {menuItems(Dropdown.Popover, Dropdown.Menu)}
-                  </Dropdown.Menu>
-                </Dropdown.Popover>
-              </Dropdown>
-            </div>
-          </div>
-        </ContextMenu.Trigger>
-        <ContextMenu.Popover>
-          <ContextMenu.Menu aria-label={t('kanban.taskActions')} onAction={runTaskAction}>
-            {menuItems(ContextMenu.Popover, ContextMenu.Menu)}
-          </ContextMenu.Menu>
-        </ContextMenu.Popover>
-      </ContextMenu>
-    </Kanban.Card>
-  );
-}
-
-function StatusSection({ workspace, status, items, collapsed, onToggleCollapsed, onOpenTask, children }: {
-  workspace: WorkspaceRecord;
-  status: KanbanTaskStatus;
-  items: KanbanTask[];
-  collapsed: boolean;
-  onToggleCollapsed: () => void;
-  onOpenTask: (task: KanbanTask) => void;
-  children: (task: KanbanTask) => ReactNode;
-}) {
-  const t = useT();
-  const dropIndex = (target: { key: Key; dropPosition: 'before' | 'after' | 'on' }, excluding: Set<string>) => {
-    const remaining = items.filter((item) => !excluding.has(item.id));
-    const index = remaining.findIndex((item) => item.id === String(target.key));
-    return index < 0 ? remaining.length : index + (target.dropPosition === 'before' ? 0 : 1);
-  };
-  const { dragAndDropHooks } = useDragAndDrop({
-    getItems: (keys) => [...keys].map((key) => ({ [TASK_DRAG_TYPE]: String(key) })),
-    acceptedDragTypes: [TASK_DRAG_TYPE],
-    getDropOperation: () => 'move',
-    renderDropIndicator: (target) => <Kanban.DropIndicator target={target} />,
-    onReorder: (event) => {
-      if (event.target.type !== 'item') return;
-      const ids = [...event.keys].map(String);
-      moveKanbanTasks(ids, {
-        workspaceId: workspace.id,
-        status,
-        index: dropIndex(event.target, new Set(ids)),
-      });
-    },
-    onInsert: async (event) => {
-      if (event.target.type !== 'item') return;
-      const ids = (await Promise.all(
-        event.items.filter(isTextDropItem).map((item) => item.getText(TASK_DRAG_TYPE)),
-      )).filter(Boolean);
-      if (!ids.length) return;
-      moveKanbanTasks(ids, {
-        workspaceId: workspace.id,
-        status,
-        index: dropIndex(event.target, new Set()),
-      });
-    },
-    onRootDrop: async (event) => {
-      const ids = (await Promise.all(
-        event.items.filter(isTextDropItem).map((item) => item.getText(TASK_DRAG_TYPE)),
-      )).filter(Boolean);
-      if (!ids.length) return;
-      moveKanbanTasks(ids, { workspaceId: workspace.id, status, index: items.length });
-    },
-  });
-
-  return (
-    <div>
-      <button
-        type="button"
-        aria-expanded={!collapsed}
-        className="text-muted hover:text-foreground flex w-full items-center gap-1 px-3 pt-2 text-left text-xs outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
-        onClick={onToggleCollapsed}
-      >
-        <RiArrowDownSLine className={`size-3.5 shrink-0 transition-transform ${collapsed ? '-rotate-90' : ''}`} />
-        {kanbanTaskStatusLabel(status)} · {items.length}
-      </button>
-      {collapsed ? null : (
-        <Kanban.CardList
-          aria-label={t('kanban.columnAria', { workspace: workspaceDisplayName(workspace), status: kanbanTaskStatusLabel(status) })}
-          className="pb-1 pt-1"
-          dragAndDropHooks={dragAndDropHooks}
-          items={items}
-          onAction={(key) => {
-            const task = items.find((item) => item.id === String(key));
-            if (task) onOpenTask(task);
-          }}
-        >
-          {(task: KanbanTask) => children(task)}
-        </Kanban.CardList>
-      )}
-    </div>
-  );
-}
-
-type ColumnDropPosition = 'before' | 'after';
-
-function WorkspaceColumn({ workspace, meta, tasks, session, latestEntries, onOpenConversation, onScheduleTask, dragging, dropPosition, onHandleDragStart, onColumnDragOver, onColumnDrop, onColumnDragEnd }: {
-  workspace: WorkspaceRecord;
-  meta: ColumnMeta;
-  tasks: KanbanTask[];
-  session: TodeXSession;
-  latestEntries: LatestEntries;
-  onOpenConversation: (workspaceId: string, conversationId: string) => void;
-  onScheduleTask: (task: KanbanTask) => void;
-  dragging: boolean;
-  dropPosition: ColumnDropPosition | null;
-  onHandleDragStart: (event: DragEvent<HTMLElement>) => void;
-  onColumnDragOver: (event: DragEvent<HTMLElement>) => void;
-  onColumnDrop: (event: DragEvent<HTMLElement>) => void;
-  onColumnDragEnd: () => void;
-}) {
-  const t = useT();
-  const [collapsedStatuses, setCollapsedStatuses] = useState<Partial<Record<KanbanTaskStatus, boolean>>>({});
-  const conversations = session.conversations
-    .filter((conversation) => conversation.workspaceId === workspace.id && !conversation.archived)
-    .sort((a, b) => b.updatedAt - a.updatedAt);
-
-  /** Starts another conversation for the task, prefilled with its draft. It
-   * is created on the backend right away: an unsent local draft is dropped
-   * as soon as another one opens, and only the backend id resolves on other
-   * devices and for schedules. */
-  const startTaskConversation = (task: KanbanTask) => {
-    const created = session.createConversation(task.workspaceId, { title: task.title, fresh: true });
-    if (!created) return;
-    attachKanbanTask(task.id, created.id);
-    session.setConversationChatDraft(created.id, kanbanTaskDraftText(task));
-    onOpenConversation(task.workspaceId, created.id);
-    void session.materializeConversation(created.id, task.title).then((record) => {
-      if (record?.v2ConversationId) replaceKanbanTaskConversation(task.id, created.id, record.v2ConversationId);
-    });
-  };
-
-  const openTaskConversation = (task: KanbanTask) => {
-    const linked = kanbanTaskConversationIds(task)
-      .map((id) => findTaskConversation(conversations, id))
-      .find(Boolean);
-    if (linked) onOpenConversation(task.workspaceId, linked.id);
-    else startTaskConversation(task);
-  };
-
-  return (
-    <Kanban.Column
-      className={`relative gap-0 transition-opacity ${dragging ? 'opacity-50' : ''}`}
-      onDragOver={onColumnDragOver}
-      onDrop={onColumnDrop}
-    >
-      {dropPosition ? (
-        <span
-          aria-hidden
-          className={`bg-accent pointer-events-none absolute inset-y-1 z-20 w-1 rounded-full ${dropPosition === 'before' ? '-left-2.5' : '-right-2.5'}`}
-        />
-      ) : null}
-      <div className="bg-background sticky top-0 z-10 pt-2">
-        <Kanban.ColumnHeader
-          className={`rounded-t-[calc(var(--radius-2xl)_+_var(--radius-sm))] px-3 py-2.5 ${meta.bodyBg}`}
-        >
-          <span className={`flex min-w-0 items-center gap-2 rounded-[calc(var(--radius)*infinity)] px-3 py-1 ${meta.pillBg}`}>
-            <Kanban.ColumnIndicator className={meta.indicator} />
-            <Tooltip delay={300}>
-              <Tooltip.Trigger className="min-w-0 cursor-default outline-none">
-                <Kanban.ColumnTitle className="truncate">{workspaceDisplayName(workspace)}</Kanban.ColumnTitle>
-              </Tooltip.Trigger>
-              <Tooltip.Content className="max-w-xs break-all">{workspace.path}</Tooltip.Content>
-            </Tooltip>
-          </span>
-          <Kanban.ColumnCount className={meta.countColor}>{tasks.length}</Kanban.ColumnCount>
-          <Kanban.ColumnActions>
-            <Tooltip delay={300}>
-              <Tooltip.Trigger
-                aria-label={t('kanban.reorderColumn')}
-                className="text-muted hover:text-foreground flex size-6 cursor-grab items-center justify-center rounded-md outline-none hover:bg-surface-secondary focus-visible:ring-2 focus-visible:ring-accent/40 active:cursor-grabbing"
-              >
-                <span draggable onDragStart={onHandleDragStart} onDragEnd={onColumnDragEnd} className="flex">
-                  <RiDraggable className="size-4" />
-                </span>
-              </Tooltip.Trigger>
-              <Tooltip.Content>{t('kanban.reorderColumn')}</Tooltip.Content>
-            </Tooltip>
-            <Tooltip delay={300}>
-              <Button
-                isIconOnly
-                aria-label={t('kanban.enterWorkspace')}
-                className={meta.countColor}
-                size="sm"
-                variant="ghost"
-                onPress={() => onOpenConversation(workspace.id, '')}
-              >
-                <RiArrowRightLine />
-              </Button>
-              <Tooltip.Content>{t('kanban.enterWorkspace')}</Tooltip.Content>
-            </Tooltip>
-          </Kanban.ColumnActions>
-        </Kanban.ColumnHeader>
-      </div>
-      <Kanban.ColumnBody className={`min-h-0 rounded-t-none pb-2 ${meta.bodyBg}`}>
-        {kanbanTaskStatuses.map((status) => {
-          const items = tasks.filter((task) => task.status === status);
-          if (!items.length) return null;
-          const collapsed = collapsedStatuses[status] ?? status === 'done';
-          return (
-            <StatusSection
-              key={status}
-              workspace={workspace}
-              status={status}
-              items={items}
-              collapsed={collapsed}
-              onToggleCollapsed={() => setCollapsedStatuses((current) => ({ ...current, [status]: !collapsed }))}
-              onOpenTask={openTaskConversation}
-            >
-              {(task: KanbanTask) => (
-                <TaskCard
-                  task={task}
-                  session={session}
-                  conversations={conversations}
-                  latestEntries={latestEntries}
-                  onOpen={onOpenConversation}
-                  onNewConversation={startTaskConversation}
-                  onSchedule={onScheduleTask}
-                />
-              )}
-            </StatusSection>
-          );
-        })}
-      </Kanban.ColumnBody>
-    </Kanban.Column>
-  );
-}
+const PERMISSION_MODES: readonly PermissionMode[] = ['ask', 'auto', 'full-access'];
 
 /** Arms a task schedule. The time is wall-clock in the backend's zone, which
  * is where it runs; the send settings are snapshotted now, as the backend
  * cannot ask this device for them later. */
-const PERMISSION_MODES: readonly PermissionMode[] = ['ask', 'auto', 'full-access'];
-
 function ScheduleTaskDialog({ session, task, onClose }: {
   session: TodeXSession;
   task: KanbanTask | null;
@@ -630,6 +62,7 @@ function ScheduleTaskDialog({ session, task, onClose }: {
   const [provider, setProvider] = useState('');
   const [model, setModel] = useState('');
   const [reasoningEffort, setReasoningEffort] = useState<string | null>(null);
+  const modelLabelId = useId();
   const [permissionMode, setPermissionMode] = useState('');
 
   const availableProviders = session.v2Providers.filter((item) => item.available);
@@ -664,6 +97,9 @@ function ScheduleTaskDialog({ session, task, onClose }: {
     .map((id) => findTaskConversation(session.conversations, id))
     .filter((conversation): conversation is ConversationRecord => Boolean(conversation?.v2ConversationId && !conversation.archived));
 
+  // A task holds one conversation: once it has one, a schedule sends to it.
+  const startAllowed = !task || kanbanTaskConversationIds(task).length === 0;
+
   // Reset the form whenever the dialog opens for a task.
   if (task && openedFor !== task.id) {
     const previous = task.schedule?.status === 'pending' ? task.schedule : undefined;
@@ -671,7 +107,7 @@ function ScheduleTaskDialog({ session, task, onClose }: {
       ? targets.find((conversation) => conversation.v2ConversationId === previous.conversationId)
       : undefined;
     setOpenedFor(task.id);
-    setAction(target ? 'send' : 'start');
+    setAction(target || !startAllowed ? 'send' : 'start');
     setConversationId(target?.id ?? targets[0]?.id ?? '');
     setAt(previous?.at ?? (zone ? kanbanBackendLocalTime(zone, Date.now() + 60 * 60_000).slice(0, 14) + '00' : ''));
     setText(previous?.text ?? kanbanTaskDraftText(task));
@@ -690,6 +126,10 @@ function ScheduleTaskDialog({ session, task, onClose }: {
     if (!task || !zone) return;
     if (!at || at <= kanbanBackendLocalTime(zone)) {
       setError(t('kanban.schedulePast'));
+      return;
+    }
+    if (action === 'start' && !startAllowed) {
+      setError(t('kanban.scheduleOneConversation'));
       return;
     }
     const target = action === 'send' ? targets.find((conversation) => conversation.id === conversationId) : undefined;
@@ -718,280 +158,171 @@ function ScheduleTaskDialog({ session, task, onClose }: {
   };
 
   return (
-    <Modal.Backdrop isOpen={Boolean(task)} onOpenChange={(open) => { if (!open) onClose(); }}>
-      <Modal.Container>
-        <Modal.Dialog className="sm:max-w-lg">
-          <Modal.CloseTrigger />
-          <Modal.Header>
-            <Modal.Heading>{t('kanban.scheduleTitle')}</Modal.Heading>
-          </Modal.Header>
-          <Modal.Body className="flex flex-col gap-4">
-            <Select
-              selectedKey={action}
-              disabledKeys={targets.length ? [] : ['send']}
-              onSelectionChange={(key) => setAction(String(key) === 'send' ? 'send' : 'start')}
+    <Modal
+      isOpen={Boolean(task)}
+      onOpenChange={(open) => { if (!open) onClose(); }}
+      title={t('kanban.scheduleTitle')}
+      size="lg"
+      bodyClassName="flex flex-col gap-4"
+      footer={(
+        <>
+          <Button variant="secondary" onClick={onClose}>{t('common.cancel')}</Button>
+          <Button onClick={submit} disabled={!zone || !at || !text.trim()}>{t('kanban.scheduleSave')}</Button>
+        </>
+      )}
+    >
+      <Select
+        label={t('kanban.scheduleAction')}
+        className="w-full"
+        popoverClassName="w-(--trigger-width)"
+        selectedKey={action}
+        disabledKeys={[...(startAllowed ? [] : ['start']), ...(targets.length ? [] : ['send'])]}
+        onSelectionChange={(key) => setAction(String(key) === 'send' ? 'send' : 'start')}
+      >
+        <SelectItem id="start" textValue={t('kanban.scheduleStart')}>{t('kanban.scheduleStart')}</SelectItem>
+        <SelectItem id="send" textValue={t('kanban.scheduleSend')}>{t('kanban.scheduleSend')}</SelectItem>
+      </Select>
+      {action === 'send' ? (
+        <Select
+          label={t('kanban.scheduleConversation')}
+          className="w-full"
+          popoverClassName="w-(--trigger-width)"
+          selectedKey={conversationId}
+          onSelectionChange={(key) => setConversationId(String(key))}
+        >
+          {targets.map((conversation) => (
+            <SelectItem
+              key={conversation.id}
+              id={conversation.id}
+              textValue={conversationDisplayTitle(conversation, session.timeline)}
             >
-              <Label>{t('kanban.scheduleAction')}</Label>
-              <Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
-              <Select.Popover>
-                <ListBox>
-                  <ListBox.Item id="start" textValue={t('kanban.scheduleStart')}>
-                    {t('kanban.scheduleStart')}
-                    <ListBox.ItemIndicator />
-                  </ListBox.Item>
-                  <ListBox.Item id="send" textValue={t('kanban.scheduleSend')}>
-                    {t('kanban.scheduleSend')}
-                    <ListBox.ItemIndicator />
-                  </ListBox.Item>
-                </ListBox>
-              </Select.Popover>
-            </Select>
-            {action === 'send' ? (
-              <Select selectedKey={conversationId} onSelectionChange={(key) => setConversationId(String(key))}>
-                <Label>{t('kanban.scheduleConversation')}</Label>
-                <Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
-                <Select.Popover>
-                  <ListBox>
-                    {targets.map((conversation) => (
-                      <ListBox.Item
-                        key={conversation.id}
-                        id={conversation.id}
-                        textValue={conversationDisplayTitle(conversation, session.timeline)}
-                      >
-                        {conversationDisplayTitle(conversation, session.timeline)}
-                        <ListBox.ItemIndicator />
-                      </ListBox.Item>
-                    ))}
-                  </ListBox>
-                </Select.Popover>
-              </Select>
-            ) : (
-              <>
-                <Select
-                  selectedKey={provider || null}
-                  isDisabled={availableProviders.length === 0}
-                  placeholder={t('kanban.scheduleNoAgent')}
-                  onSelectionChange={(key) => {
-                    if (task && key && key !== provider) applyAgent(task.workspaceId, { provider: String(key) });
-                  }}
+              {conversationDisplayTitle(conversation, session.timeline)}
+            </SelectItem>
+          ))}
+        </Select>
+      ) : (
+        <>
+          <Select
+            label={t('kanban.scheduleAgent')}
+            className="w-full"
+            popoverClassName="w-(--trigger-width)"
+            selectedKey={provider || null}
+            isDisabled={availableProviders.length === 0}
+            placeholder={t('kanban.scheduleNoAgent')}
+            onSelectionChange={(key) => {
+              if (task && key && key !== provider) applyAgent(task.workspaceId, { provider: String(key) });
+            }}
+          >
+            {availableProviders.map((item) => (
+              <SelectItem key={item.id} id={item.id} textValue={providerDisplayName(item.id, item.displayName)}>
+                <ProviderIcon provider={item.id} className="size-5 shrink-0" />
+                {providerDisplayName(item.id, item.displayName)}
+              </SelectItem>
+            ))}
+          </Select>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="flex min-w-0 flex-col gap-1">
+              <Label id={modelLabelId}>{t('kanban.scheduleModel')}</Label>
+              <AriaDialogTrigger>
+                <AriaButton
+                  aria-labelledby={modelLabelId}
+                  isDisabled={providerModels.length === 0}
+                  className={cx(
+                    'group flex w-full cursor-pointer items-center justify-between gap-1.5 rounded-2lg px-2.5 py-2',
+                    'border border-border-button-default bg-background-primary-default text-body-medium text-text-primary shadow-xs',
+                    'transition-[background-color,border-color] duration-200 ease',
+                    'hover:border-border-button-hover hover:bg-background-primary-hover',
+                    'outline-none focus-visible:ring-2 focus-visible:ring-border-focus-ring focus-visible:ring-offset-2',
+                    'disabled:cursor-not-allowed disabled:bg-background-primary-disabled disabled:text-text-tertiary disabled:shadow-none',
+                  )}
                 >
-                  <Label>{t('kanban.scheduleAgent')}</Label>
-                  <Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
-                  <Select.Popover>
-                    <ListBox>
-                      {availableProviders.map((item) => (
-                        <ListBox.Item key={item.id} id={item.id} textValue={providerDisplayName(item.id, item.displayName)}>
-                          <ProviderIcon provider={item.id} className="size-5 shrink-0" />
-                          {providerDisplayName(item.id, item.displayName)}
-                          <ListBox.ItemIndicator />
-                        </ListBox.Item>
-                      ))}
-                    </ListBox>
-                  </Select.Popover>
-                </Select>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="flex min-w-0 flex-col gap-1">
-                    <Label>{t('kanban.scheduleModel')}</Label>
-                    <Popover>
-                      <Button
-                        className="composer-model-control__trigger w-full min-w-0 justify-start"
-                        variant="secondary"
-                        isDisabled={providerModels.length === 0}
-                        aria-label={t('kanban.scheduleModel')}
-                        data-effort={effortLevel}
-                      >
-                        <RiCpuLine className="size-4 shrink-0 text-[var(--effort-color,var(--muted))]" />
-                        <span className="truncate">{model ? modelDisplayLabel(model, session.modelCatalog) : t('kanban.scheduleModelDefault')}</span>
-                        {displayedEffort ? (
-                          <span className="shrink-0 text-xs font-semibold text-[var(--effort-color,var(--accent))]">
-                            · {reasoningEffortLabel(displayedEffort)}
-                          </span>
-                        ) : null}
-                        <RiArrowDownSLine className="ms-auto size-4 shrink-0 text-muted" />
-                      </Button>
-                      <Popover.Content className="composer-model-popover" placement="bottom start" offset={4}>
-                        <Popover.Dialog className="composer-model-popover__dialog" aria-label={t('chat.modelPopover')}>
-                          <ModelReasoningCard
-                            currentModel={model}
-                            currentModelDescriptor={modelDescriptor}
-                            modelCatalog={session.modelCatalog}
-                            providerModels={providerModels}
-                            supportedReasoningEfforts={supportedEfforts}
-                            currentReasoningEffort={reasoningEffort}
-                            displayedReasoningEffort={displayedEffort}
-                            onSelectModel={(modelId) => {
-                              if (task) applyAgent(task.workspaceId, {
-                                provider: provider || undefined,
-                                model: modelId,
-                                permissionMode: permissionMode || undefined,
-                              });
-                            }}
-                            onSelectReasoningEffort={setReasoningEffort}
-                          />
-                        </Popover.Dialog>
-                      </Popover.Content>
-                    </Popover>
-                  </div>
-                  <Select
-                    className="min-w-0"
-                    selectedKey={permissionMode || null}
-                    isDisabled={permissionModes.length === 0}
-                    placeholder={t('chat.permissionUnavailable')}
-                    onSelectionChange={(key) => {
-                      if (key && permissionModes.includes(key as PermissionMode)) setPermissionMode(String(key));
-                    }}
-                  >
-                    <Label>{t('kanban.schedulePermission')}</Label>
-                    <Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
-                    <Select.Popover>
-                      <ListBox>
-                        {permissionModes.map((mode) => (
-                          <ListBox.Item key={mode} id={mode} textValue={permissionLabel(mode)}>
-                            {permissionLabel(mode)}
-                            <ListBox.ItemIndicator />
-                          </ListBox.Item>
-                        ))}
-                      </ListBox>
-                    </Select.Popover>
-                  </Select>
-                </div>
-              </>
-            )}
-            <Field
-              label={t('kanban.scheduleAt')}
-              value={at}
-              onChange={(value) => { setAt(value); setError(''); }}
-              type="datetime-local"
-              description={zone ? t('kanban.scheduleZone', { zone: kanbanTimeZoneLabel(zone) }) : t('kanban.scheduleZoneUnknown')}
-            />
-            <TextField value={text} onChange={setText}>
-              <Label>{t('kanban.scheduleText')}</Label>
-              <TextArea rows={4} maxLength={20000} />
-            </TextField>
-            {error ? <p className="text-danger text-sm">{error}</p> : null}
-          </Modal.Body>
-          <Modal.Footer>
-            <Button variant="tertiary" onPress={onClose}>{t('common.cancel')}</Button>
-            <Button onPress={submit} isDisabled={!zone || !at || !text.trim()}>{t('kanban.scheduleSave')}</Button>
-          </Modal.Footer>
-        </Modal.Dialog>
-      </Modal.Container>
-    </Modal.Backdrop>
-  );
-}
-
-function NewTaskDialog({ session, workspaces, open, onOpenChange }: {
-  session: TodeXSession;
-  workspaces: WorkspaceRecord[];
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-}) {
-  const t = useT();
-  const [workspaceId, setWorkspaceId] = useState('');
-  const [title, setTitle] = useState('');
-  const [description, setDescription] = useState('');
-  const [dueDate, setDueDate] = useState('');
-  const effectiveWorkspaceId = workspaceId || session.activeWorkspaceId || workspaces[0]?.id || '';
-
-  const close = () => {
-    setWorkspaceId('');
-    setTitle('');
-    setDescription('');
-    setDueDate('');
-    onOpenChange(false);
-  };
-
-  const submit = () => {
-    if (!addKanbanTask(effectiveWorkspaceId, title, { description, dueDate })) return;
-    close();
-  };
-
-  return (
-    <Modal.Backdrop isOpen={open} onOpenChange={(next) => (next ? onOpenChange(true) : close())}>
-      <Modal.Container>
-        <Modal.Dialog className="sm:max-w-lg">
-          <Modal.CloseTrigger />
-          <Modal.Header>
-            <Modal.Heading>{t('kanban.newTask')}</Modal.Heading>
-          </Modal.Header>
-          <Modal.Body className="flex flex-col gap-4">
+                  <span className="flex min-w-0 items-center gap-1.5">
+                    <RiCpuLine aria-hidden className={cx('size-4 shrink-0', effortLevel ? EFFORT_TEXT[effortLevel] : 'text-foreground-icon-secondary')} />
+                    <span className="truncate">{model ? modelDisplayLabel(model, session.modelCatalog) : t('kanban.scheduleModelDefault')}</span>
+                    {displayedEffort ? (
+                      <span className={cx('shrink-0 text-caption-1-semibold', effortLevel ? EFFORT_TEXT[effortLevel] : 'text-text-accent')}>
+                        · {reasoningEffortLabel(displayedEffort)}
+                      </span>
+                    ) : null}
+                  </span>
+                  <ChevronDownSmall className="size-4 shrink-0 text-text-secondary transition-transform duration-200 ease group-aria-expanded:rotate-180" />
+                </AriaButton>
+                <AriaPopover placement="bottom start" offset={4} className={cx(COMPOSER_POPOVER, 'w-[min(20.5rem,calc(100vw-2rem))] overflow-hidden')}>
+                  <AriaDialog aria-label={t('chat.modelPopover')} className="outline-none">
+                    <ModelReasoningCard
+                      currentModel={model}
+                      currentModelDescriptor={modelDescriptor}
+                      modelCatalog={session.modelCatalog}
+                      providerModels={providerModels}
+                      supportedReasoningEfforts={supportedEfforts}
+                      currentReasoningEffort={reasoningEffort}
+                      displayedReasoningEffort={displayedEffort}
+                      onSelectModel={(modelId) => {
+                        if (task) applyAgent(task.workspaceId, {
+                          provider: provider || undefined,
+                          model: modelId,
+                          permissionMode: permissionMode || undefined,
+                        });
+                      }}
+                      onSelectReasoningEffort={setReasoningEffort}
+                    />
+                  </AriaDialog>
+                </AriaPopover>
+              </AriaDialogTrigger>
+            </div>
             <Select
-              selectedKey={effectiveWorkspaceId}
-              onSelectionChange={(key) => setWorkspaceId(String(key))}
+              label={t('kanban.schedulePermission')}
+              className="w-full min-w-0"
+              popoverClassName="w-(--trigger-width)"
+              selectedKey={permissionMode || null}
+              isDisabled={permissionModes.length === 0}
+              placeholder={t('chat.permissionUnavailable')}
+              onSelectionChange={(key) => {
+                if (key && permissionModes.includes(key as PermissionMode)) setPermissionMode(String(key));
+              }}
             >
-              <Label>{t('kanban.workspace')}</Label>
-              <Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
-              <Select.Popover>
-                <ListBox>
-                  {workspaces.map((workspace) => (
-                    <ListBox.Item key={workspace.id} id={workspace.id} textValue={workspaceDisplayName(workspace)}>
-                      {workspaceDisplayName(workspace)}
-                      <ListBox.ItemIndicator />
-                    </ListBox.Item>
-                  ))}
-                </ListBox>
-              </Select.Popover>
+              {permissionModes.map((mode) => (
+                <SelectItem key={mode} id={mode} textValue={permissionLabel(mode)}>{permissionLabel(mode)}</SelectItem>
+              ))}
             </Select>
-            <Field label={t('kanban.titlePlaceholder')} value={title} onChange={setTitle} />
-            <TextField value={description} onChange={setDescription}>
-              <Label>{t('kanban.descLabel')}</Label>
-              <TextArea placeholder={t('kanban.descPlaceholder')} rows={3} maxLength={2000} />
-            </TextField>
-            <Field label={t('kanban.dueDateAria')} value={dueDate} onChange={setDueDate} type="date" />
-          </Modal.Body>
-          <Modal.Footer>
-            <Button variant="tertiary" onPress={close}>{t('common.cancel')}</Button>
-            <Button onPress={submit} isDisabled={!title.trim() || !effectiveWorkspaceId}>{t('kanban.add')}</Button>
-          </Modal.Footer>
-        </Modal.Dialog>
-      </Modal.Container>
-    </Modal.Backdrop>
+          </div>
+        </>
+      )}
+      <Input
+        label={t('kanban.scheduleAt')}
+        name="schedule-at"
+        type="datetime-local"
+        value={at}
+        onChange={(value) => { setAt(value); setError(''); }}
+        hint={zone ? t('kanban.scheduleZone', { zone: kanbanTimeZoneLabel(zone) }) : t('kanban.scheduleZoneUnknown')}
+      />
+      <Textarea label={t('kanban.scheduleText')} value={text} onChange={setText} rows={4} maxLength={20000} />
+      {error ? <p className="text-body-regular text-text-error-primary">{error}</p> : null}
+    </Modal>
   );
 }
 
+/** The task board: the BoardUI project-board template (status columns, task
+ * sheet, create dialog) over the kanban store, plus the schedule dialog. */
 export function KanbanPanel({ session, onOpenConversation }: Props) {
   const t = useT();
   const allTasks = useKanbanTasks();
-  const [creating, setCreating] = useState(false);
   const [schedulingTaskId, setSchedulingTaskId] = useState<string | null>(null);
   const schedulingTask = allTasks.find((task) => task.id === schedulingTaskId && !task.deletedAt) ?? null;
-  const [draggedColumnId, setDraggedColumnId] = useState<string | null>(null);
-  const [columnDrop, setColumnDrop] = useState<{ id: string; position: ColumnDropPosition } | null>(null);
-  // Columns follow the same manual order as the sidebar workspace list.
+  // Columns list workspaces in the same manual order as the sidebar.
   // Tasks need a registered workspace, so the built-in None one is left out.
   const orderedWorkspaces = useMemo(() => session.workspaces.filter((workspace) => !isNoneWorkspaceId(workspace.id)).sort(
     (a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || (a.createdAt - b.createdAt) || a.id.localeCompare(b.id),
   ), [session.workspaces]);
-  // Only workspaces that actually hold tasks get a column; the rest are still
-  // reachable through the new-task dialog's workspace picker.
-  const columns = orderedWorkspaces
-    .map((workspace) => ({
-      workspace,
-      tasks: kanbanTasksForWorkspace(
-        allTasks,
-        workspace.id,
-        workspace.backendConnectionId ?? session.activeBackendConnectionId,
-      ),
-    }))
-    .filter((column) => column.tasks.length > 0);
-  const total = columns.reduce((count, column) => count + column.tasks.length, 0);
-
-  const clearColumnDrag = () => {
-    setDraggedColumnId(null);
-    setColumnDrop(null);
-  };
-
-  const moveColumn = (sourceId: string, targetId: string, position: ColumnDropPosition) => {
-    if (sourceId === targetId) return;
-    const moved = orderedWorkspaces.find((workspace) => workspace.id === sourceId);
-    if (!moved) return;
-    const next = orderedWorkspaces.filter((workspace) => workspace.id !== sourceId);
-    let index = next.findIndex((workspace) => workspace.id === targetId);
-    if (index < 0) return;
-    if (position === 'after') index += 1;
-    next.splice(index, 0, moved);
-    next.forEach((workspace, order) => session.updateWorkspace(workspace.id, { sortOrder: order }));
-  };
+  const groups = useMemo<WorkspaceTasks[]>(() => orderedWorkspaces.map((workspace) => ({
+    workspace,
+    tasks: kanbanTasksForWorkspace(allTasks, workspace.id, workspace.backendConnectionId ?? session.activeBackendConnectionId),
+  })), [orderedWorkspaces, allTasks, session.activeBackendConnectionId]);
+  const total = groups.reduce((count, group) => count + group.tasks.length, 0);
+  const conversations = useMemo(
+    () => session.conversations.filter((conversation) => !conversation.archived).sort((a, b) => b.updatedAt - a.updatedAt),
+    [session.conversations],
+  );
 
   const latestEntries = useMemo(() => {
     const map: LatestEntries = {};
@@ -1010,129 +341,53 @@ export function KanbanPanel({ session, onOpenConversation }: Props) {
     onOpenConversation();
   };
 
+  /** Starts the task's conversation, prefilled with its draft. It
+   * is created on the backend right away: an unsent local draft is dropped
+   * as soon as another one opens, and only the backend id resolves on other
+   * devices and for schedules. */
+  const startTaskConversation = (task: KanbanTask) => {
+    if (!kanbanTaskCanStartConversation(task, getKanbanTasks())) return;
+    const created = session.createConversation(task.workspaceId, { title: task.title, fresh: true });
+    if (!created) return;
+    attachKanbanTask(task.id, created.id);
+    session.setConversationChatDraft(created.id, kanbanTaskDraftText(task));
+    openConversation(task.workspaceId, created.id);
+    void session.materializeConversation(created.id, task.title).then((record) => {
+      if (record?.v2ConversationId) replaceKanbanTaskConversation(task.id, created.id, record.v2ConversationId);
+    });
+  };
+
+  const handlers: TaskBoardHandlers = {
+    session,
+    conversations,
+    latestEntries,
+    onOpenConversation: openConversation,
+    onStartConversation: startTaskConversation,
+    onSchedule: (task) => setSchedulingTaskId(task.id),
+  };
+
   return (
-    <div className="flex h-full min-h-0 flex-col bg-background">
-      <div className="window-drag flex shrink-0 items-center justify-between gap-3 px-6 pt-8 pb-4">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <RiKanbanView2 className="text-accent size-5" />
-            <h1 className="truncate text-lg font-semibold">{t('sidebar.kanban')}</h1>
-            <Chip color="accent" size="sm" variant="soft">{t('kanban.taskCount', { count: total })}</Chip>
-          </div>
-          <p className="text-muted mt-1 text-sm">{t('kanban.subtitle')}</p>
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
-          {columns.length ? (
-            <Button size="sm" onPress={() => setCreating(true)}>
-              <Plus />
-              {t('kanban.newTask')}
-            </Button>
-          ) : null}
-          <Button size="sm" variant="secondary" onPress={onOpenConversation}>
-            {t('kanban.backToChat')}
-            <RiArrowRightLine />
-          </Button>
-        </div>
-      </div>
+    <div className="flex h-full min-h-0 flex-col px-3 pt-1 pb-3 sm:px-6 sm:pb-5">
       {orderedWorkspaces.length === 0 ? (
-        <div className="flex min-h-0 flex-1 items-center justify-center p-6">
-          <EmptyState>
-            <EmptyState.Header>
-              <EmptyState.Media variant="icon">
-                <RiFolder3Line />
-              </EmptyState.Media>
-              <EmptyState.Title>{t('kanban.noWorkspaces')}</EmptyState.Title>
-              <EmptyState.Description>{t('kanban.noWorkspacesHint')}</EmptyState.Description>
-            </EmptyState.Header>
-          </EmptyState>
-        </div>
-      ) : columns.length === 0 ? (
-        <div className="flex min-h-0 flex-1 items-center justify-center p-6">
-          <EmptyState>
-            <EmptyState.Header>
-              <EmptyState.Media variant="icon">
-                <RiKanbanView2 />
-              </EmptyState.Media>
-              <EmptyState.Title>{t('kanban.noTasksYet')}</EmptyState.Title>
-              <EmptyState.Description>{t('kanban.noTasksHint')}</EmptyState.Description>
-            </EmptyState.Header>
-            <EmptyState.Content>
-              <Button size="sm" onPress={() => setCreating(true)}>
-                <Plus />
-                {t('kanban.newTask')}
-              </Button>
-            </EmptyState.Content>
+        <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4">
+          <EmptyState icon={RiFolder3Line} title={t('kanban.noWorkspaces')} description={t('kanban.noWorkspacesHint')}>
+            <Button size="small" variant="secondary" onClick={onOpenConversation}>{t('kanban.backToChat')}</Button>
           </EmptyState>
         </div>
       ) : (
-        <div
-          className="min-h-0 flex-1 overflow-auto pr-3"
-          onDragLeave={(event) => {
-            if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
-              setColumnDrop(null);
-            }
-          }}
-        >
-          {/* Cap column width so a lone workspace doesn't stretch full-width. */}
-          <Kanban hideScrollBar className="auto-cols-[minmax(280px,360px)] items-start overflow-visible px-5 pb-5" isEnabled={false}>
-            {columns.map(({ workspace, tasks }, index) => (
-              <WorkspaceColumn
-                key={workspace.id}
-                workspace={workspace}
-                meta={COLUMN_META[index % COLUMN_META.length]}
-                tasks={tasks}
-                session={session}
-                latestEntries={latestEntries}
-                onOpenConversation={openConversation}
-                onScheduleTask={(task) => setSchedulingTaskId(task.id)}
-                dragging={draggedColumnId === workspace.id}
-                dropPosition={columnDrop?.id === workspace.id ? columnDrop.position : null}
-                onHandleDragStart={(event) => {
-                  event.dataTransfer.setData('text/plain', workspace.id);
-                  event.dataTransfer.effectAllowed = 'move';
-                  const column = event.currentTarget.closest('section');
-                  if (column) event.dataTransfer.setDragImage(column, 24, 24);
-                  setDraggedColumnId(workspace.id);
-                }}
-                onColumnDragOver={(event) => {
-                  if (!draggedColumnId) return;
-                  event.preventDefault();
-                  event.dataTransfer.dropEffect = 'move';
-                  if (draggedColumnId === workspace.id) {
-                    if (columnDrop) setColumnDrop(null);
-                    return;
-                  }
-                  const rect = event.currentTarget.getBoundingClientRect();
-                  const position: ColumnDropPosition = event.clientX < rect.left + rect.width / 2 ? 'before' : 'after';
-                  if (columnDrop?.id !== workspace.id || columnDrop.position !== position) {
-                    setColumnDrop({ id: workspace.id, position });
-                  }
-                }}
-                onColumnDrop={(event) => {
-                  if (!draggedColumnId) return;
-                  event.preventDefault();
-                  const sourceId = draggedColumnId;
-                  const rect = event.currentTarget.getBoundingClientRect();
-                  const position: ColumnDropPosition = event.clientX < rect.left + rect.width / 2 ? 'before' : 'after';
-                  clearColumnDrag();
-                  moveColumn(sourceId, workspace.id, position);
-                }}
-                onColumnDragEnd={clearColumnDrag}
-              />
-            ))}
-          </Kanban>
-        </div>
+        <ProjectBoard
+          groups={groups}
+          workspaces={orderedWorkspaces}
+          total={total}
+          handlers={handlers}
+          defaultWorkspaceId={session.activeWorkspaceId}
+          onBack={onOpenConversation}
+        />
       )}
       <ScheduleTaskDialog
         session={session}
         task={schedulingTask}
         onClose={() => setSchedulingTaskId(null)}
-      />
-      <NewTaskDialog
-        session={session}
-        workspaces={orderedWorkspaces}
-        open={creating}
-        onOpenChange={setCreating}
       />
     </div>
   );

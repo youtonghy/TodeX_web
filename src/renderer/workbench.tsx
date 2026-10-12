@@ -1,6 +1,6 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { App } from './App';
+import { AppRoot } from './AppRoot';
 import { installWebPlatformBridge } from './lib/webPlatform';
 import { applyAppearance } from './lib/appearance';
 import '@fontsource-variable/inter';
@@ -16,4 +16,4 @@ document.documentElement.dataset.windowChrome = window.todexWeb.app.windowChrome
 const root = document.getElementById('root');
 if (!root) throw new Error('root element missing');
 
-createRoot(root).render(<StrictMode><App /></StrictMode>);
+createRoot(root).render(<StrictMode><AppRoot /></StrictMode>);

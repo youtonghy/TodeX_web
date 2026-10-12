@@ -1,11 +1,16 @@
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
-import { Alert, Button, Input, ListBox, Select, Spinner, TextArea, TextField, toast } from '@heroui/react';
+import { useCallback, useEffect, useState } from 'react';
 import { RiAddLine } from '@remixicon/react';
 import type { CliInstructionsDocument, CliSettingsProvider, InstructionPreset, InstructionPresetSync, V2ApiClient } from '@todex/protocol/v2';
 import { isConflictError } from '@todex/protocol/connectionError';
-import { SelectOption } from '../cleanup/CleanupParts';
-import { useT } from '../../i18n';
-import { CLI_SETTINGS } from '../../lib/cliSettings';
+import { Button } from '@/components/base/buttons/button';
+import { Input } from '@/components/base/input/input';
+import { Select, SelectItem } from '@/components/base/select/select';
+import { Textarea } from '@/components/base/textarea/textarea';
+import { Alert } from '@/components/ui/alert';
+import { Spinner } from '@/components/ui/spinner';
+import { toast } from '@/components/ui/toast';
+import { useT } from '@/i18n';
+import { CLI_SETTINGS } from '@/lib/cliSettings';
 
 /** Select key for "the file keeps its own text". */
 const OWN = '__own';
@@ -25,25 +30,6 @@ export function reportPresetSync(t: Translate, name: string, sync: InstructionPr
   for (const item of sync.filter((entry) => entry.status === 'failed')) {
     toast.danger(t('cliInstructions.syncFailed', { name: cliDisplayName(item.provider), message: item.message ?? '' }));
   }
-}
-
-/** An inline status notice with optional actions under its text. */
-export function InlineNotice({ status, title, description, actions }: {
-  status: 'warning' | 'danger';
-  title: string;
-  description?: ReactNode;
-  actions?: ReactNode;
-}) {
-  return (
-    <Alert status={status}>
-      <Alert.Indicator />
-      <Alert.Content>
-        <Alert.Title>{title}</Alert.Title>
-        {description ? <Alert.Description>{description}</Alert.Description> : null}
-        {actions ? <div className="mt-2 flex flex-wrap gap-2">{actions}</div> : null}
-      </Alert.Content>
-    </Alert>
-  );
 }
 
 /**
@@ -178,16 +164,16 @@ export function CliInstructionsPanel({ state }: { state: CliInstructionsState })
 
   if (loadError) {
     return (
-      <InlineNotice
+      <Alert
         status="danger"
         title={t('cliInstructions.readFailed')}
         description={loadError}
-        actions={<Button size="sm" variant="secondary" onPress={() => void state.load()}>{t('cliSettings.retry')}</Button>}
+        actions={<Button size="small" variant="secondary" onClick={() => void state.load()}>{t('cliSettings.retry')}</Button>}
       />
     );
   }
   if (!doc) {
-    return <div className="flex min-h-48 items-center justify-center"><Spinner aria-label={t('cliInstructions.reading')} /></div>;
+    return <div className="flex min-h-48 items-center justify-center"><Spinner size="md" aria-label={t('cliInstructions.reading')} /></div>;
   }
 
   const file = fileName(doc.path);
@@ -197,88 +183,94 @@ export function CliInstructionsPanel({ state }: { state: CliInstructionsState })
 
   return (
     <div className="flex flex-col gap-3">
-      <p className="text-muted truncate text-xs" dir="ltr" title={doc.path}>{doc.path}</p>
+      <p className="truncate px-3 text-body-2-regular text-text-secondary" dir="ltr" title={doc.path}>{doc.path}</p>
       {doc.overridePath ? (
-        <InlineNotice status="warning" title={t('cliInstructions.overrideTitle')} description={t('cliInstructions.overrideHint', { path: doc.overridePath, file })} />
+        <Alert status="warning" title={t('cliInstructions.overrideTitle')} description={t('cliInstructions.overrideHint', { path: doc.overridePath, file })} />
       ) : null}
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-sm">{t('cliInstructions.source')}</span>
+      <div className="flex flex-wrap items-center gap-2 px-3">
+        <span className="text-body-regular text-text-primary">{t('cliInstructions.source')}</span>
         <Select
           aria-label={t('cliInstructions.source')}
           className="w-56"
+          triggerClassName="h-8 rounded-lg px-2 py-1.5"
+          popoverClassName="w-(--trigger-width)"
           isDisabled={busy}
           selectedKey={pendingPreset ?? doc.presetId ?? OWN}
           onSelectionChange={(key) => { if (key != null) state.chooseSource(String(key)); }}
         >
-          <Select.Trigger className="w-full"><Select.Value /><Select.Indicator /></Select.Trigger>
-          <Select.Popover>
-            <ListBox>
-              <SelectOption id={OWN} label={t('cliInstructions.sourceOwn')} />
-              {presets.map((item) => <SelectOption key={item.id} id={item.id} label={item.name} />)}
-            </ListBox>
-          </Select.Popover>
+          <SelectItem id={OWN} textValue={t('cliInstructions.sourceOwn')}>{t('cliInstructions.sourceOwn')}</SelectItem>
+          {presets.map((item) => (
+            <SelectItem key={item.id} id={item.id} textValue={item.name}>{item.name}</SelectItem>
+          ))}
         </Select>
         {!doc.presetId && newName === null ? (
-          <Button size="sm" variant="ghost" isDisabled={busy} onPress={() => setNewName('')}>
-            <RiAddLine className="size-4" />{t('cliInstructions.saveAsPreset')}
+          <Button size="small" variant="ghost" leadingIcon={RiAddLine} disabled={busy} onClick={() => setNewName('')}>
+            {t('cliInstructions.saveAsPreset')}
           </Button>
         ) : null}
       </div>
       {newName !== null ? (
-        <div className="flex flex-wrap items-start gap-2">
-          <TextField aria-label={t('cliInstructions.presetName')} className="w-56" value={newName} onChange={setNewName} autoFocus>
-            <Input className="w-full" placeholder={t('cliInstructions.presetName')} />
-          </TextField>
+        <div className="flex flex-wrap items-start gap-2 px-3">
+          <Input
+            aria-label={t('cliInstructions.presetName')}
+            size="small"
+            className="w-56"
+            placeholder={t('cliInstructions.presetName')}
+            value={newName}
+            onChange={setNewName}
+            autoFocus
+          />
           <Button
-            size="sm"
-            isDisabled={busy || trimmedName === ''}
-            onPress={() => { void state.saveAsPreset(trimmedName).then((created) => { if (created) setNewName(null); }); }}
+            size="small"
+            disabled={busy || trimmedName === ''}
+            onClick={() => { void state.saveAsPreset(trimmedName).then((created) => { if (created) setNewName(null); }); }}
           >
             {t('cliInstructions.createAndFollow')}
           </Button>
-          <Button size="sm" variant="secondary" onPress={() => setNewName(null)}>{t('common.cancel')}</Button>
+          <Button size="small" variant="secondary" onClick={() => setNewName(null)}>{t('common.cancel')}</Button>
         </div>
       ) : null}
       {pending ? (
-        <InlineNotice
+        <Alert
           status="warning"
           title={t('cliInstructions.confirmTitle', { name: pending.name, file })}
           description={t('cliInstructions.confirmHint')}
           actions={(
             <>
-              <Button size="sm" variant="danger" isDisabled={busy} onPress={() => void state.applySource(pending.id)}>{t('cliInstructions.confirmReplace')}</Button>
-              <Button size="sm" variant="secondary" onPress={state.cancelPending}>{t('common.cancel')}</Button>
+              <Button size="small" variant="danger" disabled={busy} onClick={() => void state.applySource(pending.id)}>{t('cliInstructions.confirmReplace')}</Button>
+              <Button size="small" variant="secondary" onClick={state.cancelPending}>{t('common.cancel')}</Button>
             </>
           )}
         />
       ) : null}
       {doc.drifted && preset ? (
-        <InlineNotice
+        <Alert
           status="warning"
           title={t('cliInstructions.driftedTitle', { name: preset.name })}
           description={t('cliInstructions.driftedHint', { file })}
           actions={(
             <>
-              <Button size="sm" variant="secondary" isDisabled={busy} onPress={() => void state.applySource(preset.id)}>{t('cliInstructions.overwrite')}</Button>
-              <Button size="sm" variant="secondary" isDisabled={busy} onPress={() => void state.applySource(null)}>{t('cliInstructions.keepOwn')}</Button>
+              <Button size="small" variant="secondary" disabled={busy} onClick={() => void state.applySource(preset.id)}>{t('cliInstructions.overwrite')}</Button>
+              <Button size="small" variant="secondary" disabled={busy} onClick={() => void state.applySource(null)}>{t('cliInstructions.keepOwn')}</Button>
             </>
           )}
         />
       ) : null}
-      <p className="text-muted text-sm">
+      <p className="px-3 text-body-2-regular text-text-secondary">
         {editingPreset && preset
           ? t('cliInstructions.editingPreset', { name: preset.name, names: others })
           : doc.exists ? t('cliInstructions.ownHint', { file }) : t('cliInstructions.missingHint', { file })}
       </p>
-      <TextField
+      <Textarea
         className="w-full"
         aria-label={editingPreset && preset ? preset.name : file}
         value={draft}
         onChange={setDraft}
         isReadOnly={doc.drifted}
-      >
-        <TextArea className="w-full font-mono text-xs" rows={20} spellCheck="false" />
-      </TextField>
+        rows={20}
+        spellCheck="false"
+        inputClassName="font-mono text-caption-1-regular"
+      />
     </div>
   );
 }

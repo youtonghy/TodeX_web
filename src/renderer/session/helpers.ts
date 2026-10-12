@@ -51,17 +51,6 @@ export function isStaleCancelResult(result: Record<string, unknown>): boolean {
   return result.cancelled === false;
 }
 import { providerDisplayName } from '@todex/protocol/v2';
-import {
-  buildConversationRenderItems as sharedBuildConversationRenderItems,
-  executionGroupId as sharedExecutionGroupId,
-  isCollapsibleProgressEntry as sharedIsCollapsibleProgressEntry,
-  isStepProgressEntry as sharedIsStepProgressEntry,
-  isThinkingProgressEntry as sharedIsThinkingProgressEntry,
-  shouldAppendV2ConversationEvent as sharedShouldAppendV2ConversationEvent,
-  reduceConversationEvents as sharedReduceConversationEvents,
-  type ConversationBlockCategory,
-  type ConversationBlockPhase,
-} from '@todex/protocol/mobileParity';
 import { ConnectionError, ConnectionErrorType, type ConnectionFailureCode } from '@todex/protocol/connectionError';
 import { matchesMessage, t, type MessageKey } from '../i18n';
 
@@ -109,6 +98,17 @@ import {
   cursorFromEvent as transportCursorFromEvent,
   sessionIdFromEvent as transportSessionIdFromEvent,
 } from '@todex/protocol/transport';
+import {
+  buildConversationRenderItems as sharedBuildConversationRenderItems,
+  executionGroupId as sharedExecutionGroupId,
+  isCollapsibleProgressEntry as sharedIsCollapsibleProgressEntry,
+  isStepProgressEntry as sharedIsStepProgressEntry,
+  isThinkingProgressEntry as sharedIsThinkingProgressEntry,
+  shouldAppendV2ConversationEvent as sharedShouldAppendV2ConversationEvent,
+  reduceConversationEvents as sharedReduceConversationEvents,
+  type ConversationBlockCategory,
+  type ConversationBlockPhase,
+} from '@todex/protocol/mobileParity';
 
 export type ServerVersion = {
   name: string;
@@ -422,6 +422,8 @@ export type ComposerAttachmentDraft = {
   messageId?: string;
 };
 
+/** A message headed for the backend follow-up queue (`conversation.queue.add`).
+ * The id is the queue item id and the prompt's clientRequestId. */
 export type QueuedChatSubmission = {
   id: string;
   text: string;
@@ -659,7 +661,7 @@ export function getConversationStatus(
   latestIncomingAt?: number,
 ): ConversationStatus | null {
   if (isConversationHighlighted(conversation, session.activeConversationId, session.turnIds)) {
-    return { kind: 'working', color: 'bg-green-500', border: 'border-green-500', label: t('sidebar.statusWorking') };
+    return { kind: 'working', color: 'bg-chart-7', border: 'border-chart-7', label: t('sidebar.statusWorking') };
   }
   // The dot is an attention marker: it clears once the conversation has been
   // seen (lastReadAt), regardless of which state produced it.
@@ -670,11 +672,11 @@ export function getConversationStatus(
     (/error|failed|异常|失败/i.test(conversation.nativeStatus || '') && conversation.updatedAt > lastReadAt) ||
     (/error|failed|异常|失败/i.test(latestEntry?.title || '') && latestEntryUnread)
   ) {
-    return { kind: 'issue', color: 'bg-amber-500', border: 'border-amber-500', label: t('sidebar.statusIssue') };
+    return { kind: 'issue', color: 'bg-chart-8', border: 'border-chart-8', label: t('sidebar.statusIssue') };
   }
   const incomingAt = latestIncomingAt ?? (latestEntry?.kind === 'incoming' ? latestEntry.at : 0);
   if (incomingAt > lastReadAt) {
-    return { kind: 'unread', color: 'bg-blue-500', border: 'border-blue-500', label: t('sidebar.statusUnread') };
+    return { kind: 'unread', color: 'bg-accent-500', border: 'border-accent-500', label: t('sidebar.statusUnread') };
   }
   return null;
 }
@@ -1276,7 +1278,6 @@ export function isDefaultConversationTitle(title: string): boolean {
 export function conversationDisplayTitle(
   conversation: Pick<ConversationRecord, 'id' | 'title' | 'preview' | 'provider'>,
   timeline: TimelineEntry[],
-  firstPromptOverride?: string,
 ): string {
   const title = conversation.title.trim();
   const genericTitles = new Set([
@@ -1304,10 +1305,10 @@ export function conversationDisplayTitle(
   if (preview && preview !== '暂无预览' && preview !== '还没有消息') {
     return preview;
   }
-  const firstPrompt = firstPromptOverride !== undefined ? firstPromptOverride : [...timeline]
+  const firstPrompt = [...timeline]
     .filter((entry) => entry.conversationId === conversation.id && entry.kind === 'outgoing' && entry.subtitle.trim())
-    .sort((left, right) => left.at - right.at)[0]?.subtitle ?? '';
-  return summarize(firstPrompt) || title || t('chat.untitledConversation');
+    .sort((left, right) => left.at - right.at)[0];
+  return summarize(firstPrompt?.subtitle || '') || title || t('chat.untitledConversation');
 }
 
 export type ConversationContextUsage = {
@@ -1376,20 +1377,22 @@ export type WorkspaceMentionHistory = {
 };
 
 export const REASONING_EFFORT_LABELS: Record<string, string> = {
-  none: 'None',
-  minimal: 'Minimal',
-  low: 'Low',
-  medium: 'Medium',
-  high: 'High',
-  xhigh: 'Extra high',
-  max: 'Max',
-  ultra: 'Ultra',
-  ultracode: 'Ultracode',
+  none: 'off',
+  off: 'off',
+  minimal: 'minimal',
+  low: 'low',
+  medium: 'medium',
+  high: 'high',
+  xhigh: 'xhigh',
+  max: 'max',
+  ultra: 'ultra',
+  highest: 'ultra',
+  ultracode: 'ultracode',
 };
 
 export function reasoningEffortLabel(value: string | null | undefined): string {
   const normalized = normalizeReasoningEffort(value);
-  return normalized ? REASONING_EFFORT_LABELS[normalized] ?? normalized : 'Default';
+  return normalized ? REASONING_EFFORT_LABELS[normalized] ?? normalized : 'default';
 }
 
 export function modelDisplayLabel(model: string | null | undefined, catalog: CodexModelCatalogItem[]): string {
@@ -1556,7 +1559,11 @@ export function nextSocketBacklogStreak(previous: SocketBacklogStreak | null, no
   return { count: continues ? previous.count + 1 : 1, lastDropAt: now };
 }
 export const MAX_TRANSPORT_HELLO_SESSION_CURSORS = 12;
-export const MAX_TIMELINE_ITEMS = 260;
+// Keep enough local history for completed execution traces to remain
+// inspectable after a long Claude Code turn. The backend remains the source
+// of truth for replay, while the desktop cache avoids silently evicting the
+// context users are currently reviewing.
+export const MAX_TIMELINE_ITEMS = 1000;
 /** In-memory ceiling for timeline rows outside any conversation. Lazy
  * history loading keeps older pages mounted, so this is far above the
  * persisted slice. */
@@ -2003,7 +2010,16 @@ export type BackendTransportProfile = Pick<ConnectionSettings, 'serverUrl' | 'de
  * unpaired loopback host is plaintext.
  */
 export function backendTransport(settings: BackendTransportProfile): SecureTransport {
+  if (transportOverride) return transportOverride;
   return withLocalizedRequestLimits(cachedSecureTransport(settings, cachedDeviceIdentity(settings.deviceSecret)));
+}
+
+let transportOverride: SecureTransport | null = null;
+
+/** Routes every backend call through `transport` instead of the network; the
+ * dev-only demo preview (`?demo`) uses it to serve fixtures. */
+export function overrideBackendTransport(transport: SecureTransport | null): void {
+  transportOverride = transport;
 }
 
 const localizedTransports = new WeakMap<SecureTransport, SecureTransport>();
@@ -2261,11 +2277,21 @@ export function isV2Conversation(conversation: ConversationRecord | null | undef
   return Boolean(conversation?.v2ConversationId || (conversation?.provider && conversation.provider !== ''));
 }
 
-/** The connected backend holds this conversation's follow-ups
- * (`conversation.queue.*`); it is the only store for queued messages. */
+/** The connected backend holds queued follow-ups for this provider
+ * (`conversation.queue.*`). It is the only place queued messages live. */
+export function providerHasBackendQueue(providers: readonly ProviderDescriptor[], providerId: string | undefined): boolean {
+  return Boolean(providerId && providers.find((provider) => provider.id === providerId)?.capabilities.backendQueue === true);
+}
+
+/** The backend can also pause the queue by user request, hand an item back
+ * (`conversation.queue.pause|take`) and add one already paused. */
+export function providerHasBackendQueueControl(providers: readonly ProviderDescriptor[], providerId: string | undefined): boolean {
+  return providerHasBackendQueue(providers, providerId)
+    && providers.find((provider) => provider.id === providerId)?.capabilities.backendQueueControl === true;
+}
+
 export function hasBackendQueue(providers: readonly ProviderDescriptor[], conversation: ConversationRecord | null | undefined): boolean {
-  return Boolean(conversation?.v2ConversationId && conversation.provider
-    && providers.find((provider) => provider.id === conversation.provider)?.capabilities.backendQueue === true);
+  return Boolean(conversation?.v2ConversationId && providerHasBackendQueue(providers, conversation.provider));
 }
 
 export function conversationImageInputSupport(
@@ -2389,6 +2415,9 @@ export function canSwitchConversationAgent(
   if (options.thinking) {
     return false;
   }
+  if (conversation.v2ConversationId || normalizeThreadId(conversation.threadId)) {
+    return false;
+  }
   // lastSequence also advances for subscribe/metadata events, so it cannot
   // mean "the user has started this chat". Lock only after a real message.
   return !(options.timeline ?? []).some(
@@ -2434,11 +2463,11 @@ export function mergeManifestConversations(
   workspaces: WorkspaceRecord[],
   backendConnectionId: string,
 ): ConversationRecord[] {
-  // The backend is the source of truth for v2 conversations. Drop locally
-  // cached v2 records whose manifest no longer exists instead of leaving a
-  // dead row that will fail on the next prompt. Merge field-by-field and keep
-  // the previous array/object identity when nothing actually changed so the
-  // sidebar does not re-render or re-sort on every poll.
+  // The backend is authoritative after materialization. Provider-backed local
+  // drafts have no v2ConversationId yet and must survive manifest refreshes.
+  // Merge field-by-field and keep the previous array/object identity when
+  // nothing actually changed so the sidebar does not re-render or re-sort on
+  // every poll.
   // Manifests only describe the backend they were listed from: conversations
   // and workspaces owned by another backend are out of scope. Untagged
   // records predate backend profiles and belong to the active backend.
@@ -2451,7 +2480,8 @@ export function mergeManifestConversations(
   let changed = false;
   const next = current.filter((item) => (
     !isV2Conversation(item)
-    || manifestIds.has(item.v2ConversationId || item.id)
+    || !item.v2ConversationId
+    || manifestIds.has(item.v2ConversationId)
     || !conversationInScope(item)
   ));
   if (next.length !== current.length) {
@@ -2468,7 +2498,9 @@ export function mergeManifestConversations(
     const existingIndex = next.findIndex((item) => item.v2ConversationId === manifest.id || item.id === manifest.id);
     if (existingIndex >= 0) {
       const existing = next[existingIndex];
-      const manifestUpdatedAt = Date.parse(manifest.updatedAt) || existing.updatedAt;
+      // Local timestamps stay put unless the backend reports a newer one;
+      // a manifest without parseable times must not re-stamp the record.
+      const manifestUpdatedAt = Date.parse(manifest.updatedAt) || 0;
       const updatedAt = Math.max(existing.updatedAt, manifestUpdatedAt);
       const lastSequence = Math.max(existing.lastSequence ?? 0, manifest.lastSequence ?? 0);
       const title = manifest.title || providerDisplayName(manifest.provider);
@@ -2531,6 +2563,26 @@ export function reduceV2ConversationEvents(
   workspaceId: string,
 ): V2ConversationReplayState {
   return sharedReduceConversationEvents(events, workspaceId);
+}
+
+export function mergeConversationTimeline(
+  replayed: readonly TimelineEntry[],
+  live: readonly TimelineEntry[],
+): TimelineEntry[] {
+  const merged = new Map<string, TimelineEntry>();
+  for (const entry of [...replayed, ...live]) {
+    const previous = merged.get(entry.id);
+    if (!previous || (entry.sequence ?? 0) >= (previous.sequence ?? 0)) {
+      merged.set(entry.id, entry);
+    }
+  }
+  return [...merged.values()].sort((left, right) => {
+    if (left.sequence !== undefined && right.sequence !== undefined && left.sequence !== right.sequence) {
+      return right.sequence - left.sequence;
+    }
+    if (left.at !== right.at) return right.at - left.at;
+    return right.id.localeCompare(left.id);
+  });
 }
 
 export function modeLabelOf(mode: ConversationRecord['mode']): string {

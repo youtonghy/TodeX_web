@@ -2,7 +2,8 @@ import { afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest';
 import * as React from 'react';
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { Toast, toast } from '@heroui/react';
+import { MotionGlobalConfig } from 'motion/react';
+import { ToastViewport, toast } from '../../src/renderer/components/ui/toast';
 import { GitActionsModal } from '../../src/renderer/components/GitActionsModal';
 import { GitWorkspaceError, readGitLog, readGitPullRequest, readGitScan, readGitStatus, readGitWorkspace, runGitWorkspaceOperation, type GitLogCommit } from '../../src/renderer/lib/gitWorkspace';
 import { buildGitAgentPrompt, gitAgentActionGroups } from '../../src/renderer/session/gitAgentActions';
@@ -15,6 +16,18 @@ vi.hoisted(() => {
 vi.mock('../../src/renderer/lib/gitWorkspace', async importOriginal => {
   const actual = await importOriginal<typeof import('../../src/renderer/lib/gitWorkspace')>();
   return { ...actual, readGitWorkspace: vi.fn(), runGitWorkspaceOperation: vi.fn(), readGitPullRequest: vi.fn(), readGitStatus: vi.fn(), readGitScan: vi.fn(), readGitLog: vi.fn() };
+});
+// Every toast shown during a test, so it can be dismissed before the next one starts.
+const shownToasts: string[] = [];
+beforeEach(() => {
+  for (const variant of ['info', 'success', 'warning', 'danger'] as const) {
+    const show = toast[variant];
+    vi.spyOn(toast, variant).mockImplementation((title, options) => {
+      const key = show(title, options);
+      shownToasts.push(key);
+      return key;
+    });
+  }
 });
 beforeEach(() => {
   vi.mocked(readGitWorkspace).mockReset().mockResolvedValue({ repositoryPath: '/project/current', initialized: true, currentBranch: 'main', branches: [{ name: 'main', current: true, remote: false }], worktrees: [], dirty: false });
@@ -43,11 +56,20 @@ beforeAll(() => {
   HTMLElement.prototype.scrollIntoView ??= () => {};
   // jsdom has no Web Animations API; the Tabs indicator transition queries it.
   Element.prototype.getAnimations ??= () => [];
+  // Finish toast exit animations immediately so dismissed toasts leave the DOM.
+  MotionGlobalConfig.skipAnimations = true;
 });
-afterEach(() => {
-  act(() => { toast.clear(); root?.unmount(); });
+afterEach(async () => {
+  await clearToasts();
+  act(() => { root?.unmount(); });
   container?.remove();
 });
+
+/** Dismiss every toast and wait until it has left the notification viewport. */
+async function clearToasts() {
+  act(() => { for (const key of shownToasts.splice(0)) toast.close(key); });
+  await vi.waitFor(() => expect(notices()).toBe(''));
+}
 
 function render({ active = true, outcome = 'sent', pending = false, busy = false, openGitWorktree, workspacePath = '/project/current', tab = 'operations' }: {
   active?: boolean; outcome?: 'sent' | 'queued'; pending?: boolean; busy?: boolean;
@@ -79,7 +101,7 @@ function render({ active = true, outcome = 'sent', pending = false, busy = false
   root = createRoot(container);
   act(() => root.render(createElement(React.Fragment, null,
     createElement(GitActionsModal, { session, isOpen: true, onOpenChange }),
-    createElement(Toast.Provider),
+    createElement(ToastViewport),
   )));
   if (tab === 'operations') act(() => { menuTab('操作').click(); });
   return { session, sendAgentMessage, setChatDraft, onOpenChange, finish, draft, attachments };
@@ -93,7 +115,9 @@ function menuTab(label: string) {
 async function settle() { for (let index = 0; index < 6; index++) await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); }); }
 
 async function flushNotices() { await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); }); }
-function notices() { return [...document.querySelectorAll('[data-slot="toast"]')].map(item => item.textContent).join(' '); }
+function notices() {
+  return [...document.querySelectorAll('[aria-label="通知"] [role="status"], [aria-label="通知"] [role="alert"]')].map(item => item.textContent).join(' ');
+}
 
 function action(title: string) {
   const item = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')]
@@ -189,7 +213,7 @@ it('requires an explicit fallback click and includes failed operation parameters
   await flushNotices();
   expect(notices()).toContain('Branch exists');
   expect(document.querySelector('[role="dialog"]')?.textContent).not.toContain('Branch exists');
-  act(() => { toast.clear(); });
+  await clearToasts();
   await act(async () => { button('交给 Agent 处理').click(); });
   expect(state.sendAgentMessage).toHaveBeenCalledTimes(1);
   const [prompt, id] = state.sendAgentMessage.mock.calls[0] as unknown as [string, string];

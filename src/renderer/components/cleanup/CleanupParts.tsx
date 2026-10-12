@@ -1,7 +1,18 @@
 import { useMemo, useState, type ReactNode } from 'react';
-import { AlertDialog, Button, Card, Checkbox, Description, Label, ListBox, Meter, SearchField, Select, Spinner, Switch, Tooltip, toast } from '@heroui/react';
-import { EmptyState } from '@heroui-pro/react';
-import { RiChat3Line, RiDeleteBin6Line, RiEyeLine, RiRefreshLine } from '@remixicon/react';
+import { RiChat3Line, RiDeleteBin6Line, RiEyeLine, RiRefreshLine, RiSearchLine } from '@remixicon/react';
+import { Button } from '@/components/base/buttons/button';
+import { Checkbox } from '@/components/base/checkbox/checkbox';
+import { Input } from '@/components/base/input/input';
+import { Select, SelectItem } from '@/components/base/select/select';
+import { Switch } from '@/components/base/switch/switch';
+import { Card, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { EmptyState } from '@/components/ui/empty-state';
+import { IconAction } from '@/components/ui/icon-action';
+import { ConfirmDialog } from '@/components/ui/modal';
+import { Meter } from '@/components/ui/progress-bar';
+import { SpinnerIcon } from '@/components/ui/spinner';
+import { toast } from '@/components/ui/toast';
+import { cx } from '@/utils/cx';
 import type { HistoryCleanupPolicy, HistoryCleanupPolicyResponse, HistoryCleanupResult } from '@todex/protocol/v2';
 import { ProviderIcon } from '../ProviderIcon';
 import { getLocale, t, useT } from '../../i18n';
@@ -51,47 +62,6 @@ export function reportCleanupResult(result: HistoryCleanupResult, labels: { clea
   }
 }
 
-export function SelectOption({ id, label }: { id: string; label: string }) {
-  return (
-    <ListBox.Item id={id} textValue={label}>
-      {label}
-      <ListBox.ItemIndicator />
-    </ListBox.Item>
-  );
-}
-
-function ConfirmCleanup({ isOpen, onClose, title, body, confirmLabel, isPending, onConfirm }: {
-  isOpen: boolean;
-  onClose: () => void;
-  title: string;
-  body: string;
-  confirmLabel: string;
-  isPending: boolean;
-  onConfirm: () => void;
-}) {
-  const t = useT();
-  return (
-    <AlertDialog isOpen={isOpen} onOpenChange={(open) => { if (!open && !isPending) onClose(); }}>
-      <AlertDialog.Backdrop>
-        <AlertDialog.Container>
-          <AlertDialog.Dialog className="sm:max-w-md">
-            <AlertDialog.Header>
-              <AlertDialog.Heading>{title}</AlertDialog.Heading>
-            </AlertDialog.Header>
-            <AlertDialog.Body>
-              <p className="text-muted text-sm">{body}</p>
-            </AlertDialog.Body>
-            <AlertDialog.Footer>
-              <Button slot="close" variant="tertiary" isDisabled={isPending}>{t('common.cancel')}</Button>
-              <Button variant="danger" isPending={isPending} onPress={onConfirm}>{confirmLabel}</Button>
-            </AlertDialog.Footer>
-          </AlertDialog.Dialog>
-        </AlertDialog.Container>
-      </AlertDialog.Backdrop>
-    </AlertDialog>
-  );
-}
-
 /** Count, disk usage and (with a size limit) how full it is. */
 export function StorageSummaryCard({ title, description, count, countLabel, totalBytes, measuredAt, capacity, loading, onRefresh, children }: {
   title: ReactNode;
@@ -107,43 +77,35 @@ export function StorageSummaryCard({ title, description, count, countLabel, tota
 }) {
   const t = useT();
   return (
-    <Card className="min-w-0 gap-3 p-4">
+    <Card>
       <div className="flex items-start gap-3">
-        <Card.Header className="min-w-0 flex-1">
-          <Card.Title>{title}</Card.Title>
-          <Card.Description>{description}</Card.Description>
-        </Card.Header>
-        <Button isIconOnly size="sm" variant="ghost" aria-label={t('cleanup.refreshAria')} isDisabled={loading} onPress={onRefresh}>
-          <RiRefreshLine className="size-4" />
-        </Button>
+        <CardHeader className="flex-1">
+          <CardTitle>{title}</CardTitle>
+          <CardDescription>{description}</CardDescription>
+        </CardHeader>
+        <IconAction icon={RiRefreshLine} size="md" aria-label={t('cleanup.refreshAria')} disabled={loading} onClick={onRefresh} />
       </div>
       <div className="grid grid-cols-2 gap-3">
-        <div className="bg-surface-secondary flex flex-col gap-1 rounded-lg p-3">
-          <span className="text-muted text-xs">{countLabel}</span>
-          <span className="text-xl font-semibold tabular-nums">{count}</span>
-        </div>
-        <div className="bg-surface-secondary flex flex-col gap-1 rounded-lg p-3">
-          <span className="text-muted text-xs">{t('cleanup.storage')}</span>
-          <span className="text-xl font-semibold tabular-nums">{formatStorageBytes(totalBytes)}</span>
-        </div>
+        <Card variant="secondary" className="gap-1">
+          <span className="text-caption-1-regular text-text-secondary">{countLabel}</span>
+          <span className="text-title-2-medium text-text-primary tabular-nums">{count}</span>
+        </Card>
+        <Card variant="secondary" className="gap-1">
+          <span className="text-caption-1-regular text-text-secondary">{t('cleanup.storage')}</span>
+          <span className="text-title-2-medium text-text-primary tabular-nums">{formatStorageBytes(totalBytes)}</span>
+        </Card>
       </div>
       {capacity ? (
         <Meter
-          size="sm"
-          color={totalBytes >= capacity * 0.9 ? 'warning' : 'accent'}
+          label={t('cleanup.capacityLabel')}
+          valueLabel={`${formatStorageBytes(totalBytes)} / ${formatStorageBytes(capacity)}`}
           value={Math.min(totalBytes, capacity)}
           maxValue={capacity}
-          valueLabel={`${formatStorageBytes(totalBytes)} / ${formatStorageBytes(capacity)}`}
-        >
-          <Label>{t('cleanup.capacityLabel')}</Label>
-          <Meter.Output />
-          <Meter.Track>
-            <Meter.Fill />
-          </Meter.Track>
-        </Meter>
+          tone={totalBytes >= capacity * 0.9 ? 'warning' : 'accent'}
+        />
       ) : null}
       {children}
-      {measuredAt ? <p className="text-muted text-xs">{t('cleanup.measuredAt', { time: formatDateTime(measuredAt) })}</p> : null}
+      {measuredAt ? <p className="text-caption-1-regular text-text-tertiary">{t('cleanup.measuredAt', { time: formatDateTime(measuredAt) })}</p> : null}
     </Card>
   );
 }
@@ -196,63 +158,51 @@ export function CleanupPolicyCard({ hint, state, sizes = true, onSave, onRun, ch
   };
 
   return (
-    <Card className="min-w-0 gap-3 p-4">
+    <Card>
       <div className="flex items-start gap-3">
-        <Card.Header className="min-w-0 flex-1">
-          <Card.Title>{t('cleanup.autoTitle')}</Card.Title>
-          <Card.Description>{hint}</Card.Description>
-        </Card.Header>
+        <CardHeader className="flex-1">
+          <CardTitle>{t('cleanup.autoTitle')}</CardTitle>
+          <CardDescription>{hint}</CardDescription>
+        </CardHeader>
         <Switch
           aria-label={t('cleanup.autoTitle')}
           isSelected={policy?.enabled ?? false}
           isDisabled={!policy || saving || !hasThreshold}
           onChange={(enabled) => void save({ enabled })}
-        >
-          <Switch.Control>
-            <Switch.Thumb />
-          </Switch.Control>
-        </Switch>
+        />
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
         <Select
+          label={t('cleanup.ageRule')}
+          hint={t('cleanup.ageHint')}
           className="w-full"
+          popoverClassName="w-(--trigger-width)"
           isDisabled={!policy || saving}
           selectedKey={policy?.maxAgeDays != null ? String(policy.maxAgeDays) : OFF}
           onSelectionChange={(key) => void save({ maxAgeDays: key === OFF || key == null ? null : Number(key) })}
         >
-          <Label>{t('cleanup.ageRule')}</Label>
-          <Select.Trigger className="w-full"><Select.Value /><Select.Indicator /></Select.Trigger>
-          <Description>{t('cleanup.ageHint')}</Description>
-          <Select.Popover>
-            <ListBox>
-              <SelectOption id={OFF} label={t('cleanup.off')} />
-              {withCurrent(AGE_OPTIONS, policy?.maxAgeDays ?? null).map((days) => (
-                <SelectOption key={days} id={String(days)} label={t('cleanup.days', { count: days })} />
-              ))}
-            </ListBox>
-          </Select.Popover>
+          <SelectItem id={OFF} textValue={t('cleanup.off')}>{t('cleanup.off')}</SelectItem>
+          {withCurrent(AGE_OPTIONS, policy?.maxAgeDays ?? null).map((days) => (
+            <SelectItem key={days} id={String(days)} textValue={t('cleanup.days', { count: days })}>{t('cleanup.days', { count: days })}</SelectItem>
+          ))}
         </Select>
         {sizes ? <Select
+          label={t('cleanup.capacityRule')}
+          hint={t('cleanup.capacityHint')}
           className="w-full"
+          popoverClassName="w-(--trigger-width)"
           isDisabled={!policy || saving}
           selectedKey={policy?.maxTotalBytes != null ? String(policy.maxTotalBytes) : OFF}
           onSelectionChange={(key) => void save({ maxTotalBytes: key === OFF || key == null ? null : Number(key) })}
         >
-          <Label>{t('cleanup.capacityRule')}</Label>
-          <Select.Trigger className="w-full"><Select.Value /><Select.Indicator /></Select.Trigger>
-          <Description>{t('cleanup.capacityHint')}</Description>
-          <Select.Popover>
-            <ListBox>
-              <SelectOption id={OFF} label={t('cleanup.off')} />
-              {withCurrent(CAPACITY_OPTIONS, policy?.maxTotalBytes ?? null).map((bytes) => (
-                <SelectOption key={bytes} id={String(bytes)} label={formatStorageBytes(bytes)} />
-              ))}
-            </ListBox>
-          </Select.Popover>
+          <SelectItem id={OFF} textValue={t('cleanup.off')}>{t('cleanup.off')}</SelectItem>
+          {withCurrent(CAPACITY_OPTIONS, policy?.maxTotalBytes ?? null).map((bytes) => (
+            <SelectItem key={bytes} id={String(bytes)} textValue={formatStorageBytes(bytes)}>{formatStorageBytes(bytes)}</SelectItem>
+          ))}
         </Select> : null}
       </div>
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-        <div className="text-muted flex min-w-0 flex-1 flex-col gap-0.5 text-xs">
+        <div className="flex min-w-0 flex-1 flex-col gap-0.5 text-caption-1-regular text-text-tertiary">
           <span>
             {lastRun
               ? lastRun.error
@@ -262,17 +212,19 @@ export function CleanupPolicyCard({ hint, state, sizes = true, onSave, onRun, ch
           </span>
           {policy?.enabled && state?.nextRunAt ? <span>{t('cleanup.nextRun', { time: formatDateTime(state.nextRunAt) })}</span> : null}
         </div>
-        <Button variant="secondary" size="sm" isDisabled={!hasThreshold || running} onPress={() => setConfirming(true)}>
+        <Button variant="secondary" size="small" disabled={!hasThreshold || running} onClick={() => setConfirming(true)}>
           {t('cleanup.runNow')}
         </Button>
       </div>
       {children}
-      <ConfirmCleanup
+      <ConfirmDialog
         isOpen={confirming}
-        onClose={() => setConfirming(false)}
+        onOpenChange={(open) => { if (!open) setConfirming(false); }}
         title={t('cleanup.confirmPolicyTitle')}
-        body={t('cleanup.confirmPolicyBody')}
+        description={t('cleanup.confirmPolicyBody')}
         confirmLabel={t('cleanup.runNow')}
+        cancelLabel={t('common.cancel')}
+        tone="danger"
         isPending={running}
         onConfirm={() => void run()}
       />
@@ -358,100 +310,84 @@ export function SelectableHistoryList({ items, loading, sizes = true, emptyLabel
   };
 
   return (
-    <Card className="min-w-0 gap-3 p-4">
+    <Card>
       <div className="flex flex-wrap items-center gap-2">
-        <SearchField aria-label={t('cleanup.search')} className="min-w-40 flex-1" value={query} onChange={setQuery}>
-          <SearchField.Group>
-            <SearchField.SearchIcon />
-            <SearchField.Input className="w-full" placeholder={t('cleanup.search')} />
-            <SearchField.ClearButton />
-          </SearchField.Group>
-        </SearchField>
+        <Input
+          aria-label={t('cleanup.search')}
+          placeholder={t('cleanup.search')}
+          leadingIcon={RiSearchLine}
+          size="small"
+          className="min-w-40 flex-1"
+          value={query}
+          onChange={setQuery}
+        />
         <Select
           aria-label={t('cleanup.sort')}
-          className="w-40"
+          size="sm"
+          className="w-36"
+          popoverClassName="w-(--trigger-width)"
           selectedKey={sort}
           onSelectionChange={(key) => setSort(key === 'newest' || key === 'largest' ? key : 'oldest')}
         >
-          <Select.Trigger className="w-full"><Select.Value /><Select.Indicator /></Select.Trigger>
-          <Select.Popover>
-            <ListBox>
-              <SelectOption id="oldest" label={t('cleanup.sortOldest')} />
-              <SelectOption id="newest" label={t('cleanup.sortNewest')} />
-              {sizes ? <SelectOption id="largest" label={t('cleanup.sortLargest')} /> : null}
-            </ListBox>
-          </Select.Popover>
+          <SelectItem id="oldest" textValue={t('cleanup.sortOldest')}>{t('cleanup.sortOldest')}</SelectItem>
+          <SelectItem id="newest" textValue={t('cleanup.sortNewest')}>{t('cleanup.sortNewest')}</SelectItem>
+          {sizes ? <SelectItem id="largest" textValue={t('cleanup.sortLargest')}>{t('cleanup.sortLargest')}</SelectItem> : null}
         </Select>
       </div>
-      <div className="border-separator flex flex-wrap items-center gap-3 border-b pb-3">
+      <div className="flex flex-wrap items-center gap-3 border-b border-separator-border pb-3">
         <Checkbox
           isSelected={allSelected}
           isIndeterminate={selectedVisible.length > 0 && !allSelected}
           isDisabled={selectable.length === 0}
           onChange={(on) => toggle(selectable.map((item) => item.id), on)}
         >
-          <Checkbox.Content>
-            <Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>
-            {t('cleanup.selectAll')}
-          </Checkbox.Content>
+          {t('cleanup.selectAll')}
         </Checkbox>
-        <span className="text-muted flex-1 text-xs tabular-nums">
+        <span className="flex-1 text-caption-1-regular text-text-secondary tabular-nums">
           {chosen.length > 0 ? (sizes ? t('cleanup.selectedSummary', { count: chosen.length, size: formatStorageBytes(chosenBytes) }) : t('cleanup.selectedCount', { count: chosen.length })) : null}
         </span>
-        <Button variant="danger" size="sm" isDisabled={chosen.length === 0 || cleaning} onPress={() => setConfirming(true)}>
-          <RiDeleteBin6Line className="size-4" />
+        <Button variant="danger" size="small" leadingIcon={RiDeleteBin6Line} disabled={chosen.length === 0 || cleaning} onClick={() => setConfirming(true)}>
           {t('cleanup.cleanSelected')}
         </Button>
       </div>
       {loading && items.length === 0 ? (
-        <div className="flex justify-center py-8"><Spinner size="sm" aria-label={t('cleanup.refreshAria')} /></div>
+        <div className="flex justify-center py-8"><SpinnerIcon className="size-5 text-foreground-icon-tertiary" /></div>
       ) : visible.length === 0 ? (
-        <EmptyState size="sm">
-          <EmptyState.Header>
-            <EmptyState.Media variant="icon"><RiChat3Line /></EmptyState.Media>
-            <EmptyState.Title>{query ? t('cleanup.noMatches') : emptyLabel}</EmptyState.Title>
-          </EmptyState.Header>
-        </EmptyState>
+        <EmptyState size="sm" icon={RiChat3Line} title={query ? t('cleanup.noMatches') : emptyLabel} />
       ) : (
         <ul className="flex flex-col">
           {visible.map((item) => (
-            <li key={item.id} className={`flex items-center gap-1 rounded-lg pe-1${item.locked ? '' : ' hover:bg-default'}`}>
+            <li key={item.id} className={cx('flex items-center gap-1 rounded-xl pe-1', !item.locked && 'hover:bg-background-secondary-hover')}>
               <Checkbox
-                className="min-w-0 flex-1"
                 isSelected={selected.has(item.id) && !item.locked}
                 isDisabled={item.locked}
                 onChange={(on) => toggle([item.id], on)}
                 aria-label={item.title}
+                className="min-w-0 flex-1 px-2 py-2 *:last:flex *:last:min-w-0 *:last:flex-1"
               >
-                <Checkbox.Content className="flex w-full min-w-0 items-center gap-3 px-2 py-2">
-                  <Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>
+                <span className="flex min-w-0 flex-1 items-center gap-3">
                   <ProviderIcon provider={item.provider} className="size-4 shrink-0" />
                   <span className="flex min-w-0 flex-1 flex-col">
-                    <span className="truncate text-sm font-medium">{item.title}</span>
-                    <span className="text-muted truncate text-xs" title={item.subtitleTitle}>{item.subtitle}</span>
+                    <span className="truncate text-body-medium text-text-primary">{item.title}</span>
+                    <span className="truncate text-caption-1-regular text-text-tertiary" title={item.subtitleTitle}>{item.subtitle}</span>
                   </span>
                   {item.badge}
-                  <span className="text-muted shrink-0 text-xs tabular-nums">{item.bytes == null ? '—' : formatStorageBytes(item.bytes)}</span>
-                </Checkbox.Content>
+                  <span className="shrink-0 text-body-2-regular text-text-secondary tabular-nums">{item.bytes == null ? '—' : formatStorageBytes(item.bytes)}</span>
+                </span>
               </Checkbox>
-              {item.onView ? (
-                <Tooltip delay={200}>
-                  <Button isIconOnly size="sm" variant="ghost" aria-label={t('cleanup.view')} onPress={item.onView}>
-                    <RiEyeLine className="size-4" />
-                  </Button>
-                  <Tooltip.Content className="text-xs">{t('cleanup.view')}</Tooltip.Content>
-                </Tooltip>
-              ) : null}
+              {item.onView ? <IconAction icon={RiEyeLine} size="sm" tooltip={t('cleanup.view')} aria-label={t('cleanup.view')} onClick={item.onView} /> : null}
             </li>
           ))}
         </ul>
       )}
-      <ConfirmCleanup
+      <ConfirmDialog
         isOpen={confirming}
-        onClose={() => setConfirming(false)}
+        onOpenChange={(open) => { if (!open) setConfirming(false); }}
         title={confirmTitle(chosen.length)}
-        body={confirmBody(sizes ? formatStorageBytes(chosenBytes) : null)}
+        description={confirmBody(sizes ? formatStorageBytes(chosenBytes) : null)}
         confirmLabel={t('cleanup.cleanSelected')}
+        cancelLabel={t('common.cancel')}
+        tone="danger"
         isPending={cleaning}
         onConfirm={() => void clean()}
       />

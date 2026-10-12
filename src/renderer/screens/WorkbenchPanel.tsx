@@ -1,26 +1,48 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { ReactNode } from 'react';
-import { RiCloseLine, RiDeleteBinLine, RiDownload2Line, RiEdit2Line, RiFolderAddLine, RiLinksLine, RiLink, RiServerLine, RiTerminalBoxLine, RiTerminalWindowLine, RiUpload2Line, RiGitBranchLine, RiAddLine, RiArrowLeftDoubleLine, RiArrowRightDoubleLine, RiFileTextLine, RiFolder3Line, RiGlobalLine, RiFocus3Line, RiLayoutColumnLine, RiLayoutRowLine, RiRefreshLine, RiStopCircleLine } from '@remixicon/react';
-import { AlertDialog, Badge, Button, Chip, Dropdown, Input, Label, Modal, ScrollShadow, Spinner, TextField, Tooltip, toast } from '@heroui/react';
-import type { Selection } from '@heroui/react';
-import { FileTree } from '@heroui-pro/react';
-import { Resizable } from '@heroui-pro/react/resizable';
-import type { PanelImperativeHandle } from '@heroui-pro/react/resizable';
+import type { ButtonHTMLAttributes, ComponentType, MouseEvent as ReactMouseEvent, ReactNode, RefObject } from 'react';
+import { RiAppsLine, RiCloseLine, RiDeleteBinLine, RiDownload2Line, RiEdit2Line, RiFolderAddLine, RiLinksLine, RiLink, RiServerLine, RiTerminalBoxLine, RiTerminalWindowLine, RiUpload2Line, RiGitBranchLine, RiAddLine, RiArrowLeftDoubleLine, RiArrowRightDoubleLine, RiExternalLinkLine, RiBracesLine, RiFileCodeLine, RiFileLine, RiFilePdf2Line, RiFileSettingsLine, RiFileTextLine, RiFileZipLine, RiImageLine, RiLockLine, RiMarkdownLine, RiFolder3Line, RiFolderOpenLine, RiGlobalLine, RiFocus3Line, RiLayoutColumnLine, RiLayoutRowLine, RiRefreshLine, RiStopCircleLine } from '@remixicon/react';
+import { Focusable, Pressable } from 'react-aria-components';
+import type { Key, Selection } from 'react-aria-components';
+import { Badge } from '@/components/base/badges/badge';
+import { Chip } from '@/components/base/badges/chip';
+import { Button } from '@/components/base/buttons/button';
+import { Input } from '@/components/base/input/input';
+import { PillTabList } from '@/components/base/tabs/pill-tab';
+import { Tooltip, TooltipTrigger } from '@/components/base/tooltip/tooltip';
+import { TreeView, TreeViewItem } from '@/components/base/tree-view/tree-view';
+import { EmptyState } from '@/components/ui/empty-state';
+import { IconAction } from '@/components/ui/icon-action';
+import { ContextMenu, Menu, MenuItem, MenuPopover, MenuSeparator, MenuTrigger } from '@/components/ui/menu';
+import { ConfirmDialog, Modal } from '@/components/ui/modal';
+import { Resizable, type PanelImperativeHandle } from '@/components/ui/resizable';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Spinner } from '@/components/ui/spinner';
+import { toast } from '@/components/ui/toast';
+import { cx } from '@/utils/cx';
 import { WorkspaceFilePreview, type PreviewFile, type ReferenceSelection, type WorkspaceFileSaveOutcome } from '../components/WorkspaceFilePreview';
 import { useNoticeToast } from '../components/NoticeToast';
-import type { TodeXSession } from '../session/useTodeXSession';
-import { useRemoteConnector } from '../components/ssh/useRemoteConnector';
+import { XtermTerminal } from '../components/XtermTerminal';
 import { SshExecPane } from '../components/ssh/SshExecPane';
 import { AgentBrowserLiveView } from '../components/AgentBrowserLiveView';
-import { rememberSessionSshExecTabs, sessionSshExecTabsFor, useSshExecClear, visibleSshExecs } from '../session/sshExecTabs';
-import { normalizeRemoteFilesBinding, remoteFileSource, remoteFilesBinding, workspaceFileSource, type FileSource, type FileSourceEntry, type RemoteFilesBinding } from '../session/fileSources';
-import { latencyLabelOf, terminalIdForConversation, terminalStatusLabel, type TerminalTarget } from '../session/helpers';
-import type { OpenPanelOptions, WorkbenchItem, WorkbenchRequest, WorkbenchTab } from '../lib/panels';
 import { prepareBrowserSnapshot } from '../lib/browserSnapshot';
+import { rememberSessionSshExecTabs, sessionSshExecTabsFor, useSshExecClear, visibleSshExecs } from '../session/sshExecTabs';
+import type { TodeXSession } from '../session/useTodeXSession';
+import { useRemoteConnector } from '../components/ssh/useRemoteConnector';
+import { normalizeRemoteFilesBinding, remoteFileSource, remoteFilesBinding, workspaceFileSource, type FileSource, type FileSourceEntry, type RemoteFilesBinding, sortFileEntries } from '../session/fileSources';
+import {
+  DEFAULT_TERMINAL_COLS,
+  DEFAULT_TERMINAL_ROWS,
+  latencyLabelOf,
+  terminalIdForConversation,
+  terminalStatusLabel,
+  type TerminalTarget,
+} from '../session/helpers';
+import type { OpenPanelOptions, WorkbenchItem, WorkbenchRequest, WorkbenchTab } from '../lib/panels';
 import { normalizeWorkbenchLayout } from '../session/workbenchLayout';
 import { SETTINGS_STORAGE_KEY, attachmentId, backendApi, referenceToken, uniqueReferenceName } from '../session/helpers';
 import { isConflictError } from '@todex/protocol/connectionError';
 import { isNotFoundError, type SshExecRun } from '@todex/protocol/ssh';
+import { isLoopbackUrl } from '@todex/protocol/mobileParity';
 import { t, useT, type MessageKey } from '../i18n';
 
 type Props = {
@@ -75,6 +97,51 @@ const REMOTE_ICONS = {
 };
 
 type WorkbenchTabAxis = 'horizontal' | 'vertical';
+
+type IconComponent = ComponentType<{ className?: string; 'aria-hidden'?: boolean | 'true' | 'false' }>;
+
+const EXPANDABLE_TONES = {
+  secondary: 'border-border-button-default bg-background-primary-default text-text-primary shadow-xs enabled:hover:border-border-button-hover enabled:hover:bg-background-primary-hover enabled:active:bg-background-primary-active',
+  primary: 'border-transparent bg-accent-500 text-text-white shadow-xs enabled:hover:bg-accent-600 enabled:active:bg-accent-700',
+  danger: 'border-transparent bg-background-tertiary-error text-text-error-primary enabled:hover:bg-background-quaternary-error enabled:active:bg-background-quaternary-error',
+} as const;
+
+/** Toolbar pill that shows its icon and slides its label open on hover or
+ * keyboard focus. */
+function ExpandableAction({ icon: Icon, label, tone = 'secondary', iconClassName, className, type = 'button', ...props }: Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'children'> & {
+  icon: IconComponent;
+  label: string;
+  tone?: keyof typeof EXPANDABLE_TONES;
+  iconClassName?: string;
+}) {
+  return (
+    <button
+      type={type}
+      {...props}
+      className={cx(
+        'group/expand inline-flex h-8 shrink-0 cursor-pointer items-center overflow-hidden rounded-full border',
+        'outline-none transition-colors duration-150 ease focus-visible:ring-2 focus-visible:ring-border-focus-ring',
+        'disabled:cursor-not-allowed disabled:opacity-50',
+        EXPANDABLE_TONES[tone],
+        className,
+      )}
+    >
+      <span className="inline-flex size-[30px] shrink-0 items-center justify-center">
+        <Icon aria-hidden className={cx('size-4', iconClassName)} />
+      </span>
+      <span
+        className={cx(
+          'max-w-0 overflow-hidden whitespace-nowrap text-caption-1-medium opacity-0',
+          'transition-[max-width,opacity,padding] duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:transition-none',
+          'group-hover/expand:max-w-24 group-hover/expand:pe-2.5 group-hover/expand:opacity-100',
+          'group-focus-visible/expand:max-w-24 group-focus-visible/expand:pe-2.5 group-focus-visible/expand:opacity-100',
+        )}
+      >
+        {label}
+      </span>
+    </button>
+  );
+}
 
 const WORKBENCH_TAB_AXIS_KEY = `${SETTINGS_STORAGE_KEY}.workbenchTabAxis.v1`;
 
@@ -206,8 +273,10 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
   }, [restored, tab, target]);
 
   const updateTabTarget = useCallback((id: string, nextTarget: OpenPanelOptions) => {
-    setItems(current => current.some(item => item.id === id && item.target !== nextTarget) ? current.map(item => item.id === id ? { ...item, target: nextTarget } : item) : current);
-    if (id === activeId && items.some(item => item.id === id && item.type === tab) && nextTarget === requestedTargetRef.current) onTargetConsumed?.();
+    setItems(current => current.some(item => item.id === id && item.target !== nextTarget)
+      ? current.map(item => item.id === id ? { ...item, target: nextTarget } : item) : current);
+    if (id === activeId && items.some(item => item.id === id && item.type === tab)
+      && nextTarget === requestedTargetRef.current) onTargetConsumed?.();
   }, [activeId, items, onTargetConsumed, tab]);
 
   const active = items.find((item) => item.id === activeId) ?? null;
@@ -325,10 +394,9 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
     return true;
   }, [activeId, closeTab]);
 
-  // Browsers reserve Cmd+W for closing the browser tab, so this only runs in
-  // hosts that deliver the key (e.g. embedded webviews); the desktop client
-  // handles the same shortcut via IPC instead.
   useEffect(() => {
+    // Browsers reserve Cmd+W for closing the browser tab, so this only runs
+    // in hosts that deliver the key (e.g. embedded webviews).
     const onKeyDown = (event: KeyboardEvent) => {
       if (!event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
       if (event.key.toLowerCase() !== 'w') return;
@@ -368,7 +436,7 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
     const location = item.type === 'ssh-exec'
       ? ''
       : item.type === 'agent-browser'
-      ? ''
+      ? [...(session.conversationRuntimeById[item.agentBrowser?.conversationId ?? '']?.desktopBrowser.actions ?? [])].reverse().find(action => action.url)?.url || ''
       : item.ssh
       ? `ssh ${item.ssh.host}`
       : item.remote
@@ -380,83 +448,94 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
             : item.target?.filePath || workspacePath;
     const title = item.type === 'ssh-exec' ? workbenchLabel(item.type) : location ? `${workbenchLabel(item.type)} ${location}` : item.title;
     const isActive = item.id === activeId;
-    const tabIconClass = `size-4 transition-opacity${isActive ? ' group-hover:opacity-0 group-focus-within:opacity-0 [@media(hover:none)]:opacity-0' : ''}`;
+    const tabIconClass = cx('size-4 transition-opacity duration-150', isActive && 'group-hover/tab:opacity-0 group-focus-within/tab:opacity-0 [@media(hover:none)]:opacity-0');
     return (
       <div
         key={item.id}
-        className={vertical
-          ? 'group relative flex size-10 shrink-0 items-center justify-center'
-          : `group relative flex h-10 shrink-0 items-center border-r border-separator ${isActive ? 'bg-surface text-foreground' : 'text-muted'}`}
+        // The pill list slides its selection background under this slot.
+        data-pill-selected={isActive ? '' : undefined}
+        data-pill-variant="blue"
+        className="group/tab relative z-10 flex size-9 shrink-0 items-center justify-center"
       >
-        <Tooltip delay={200}>
-          <Button
-            isIconOnly variant="ghost" aria-label={title} aria-pressed={isActive}
-            className={vertical
-              ? `size-9 min-w-9 rounded-lg ${isActive ? 'bg-surface-secondary text-foreground' : 'text-muted'}`
-              : 'size-10 min-w-10 rounded-none text-inherit'}
-            onPress={() => { setActiveId(item.id); onTabChange(item.type); }}
-          >
-            {item.sshExec ? (
-              <SshExecTabIcon conversationId={item.sshExec.conversationId} runs={session.conversationRuntimeById[item.sshExec.conversationId]?.sshExecs} className={tabIconClass} />
-            ) : <Icon aria-hidden="true" className={tabIconClass} />}
-          </Button>
-          <Tooltip.Content placement={vertical ? 'right' : 'bottom'} className="max-w-sm break-all text-xs">
+        <TooltipTrigger delay={200}>
+          <Focusable>
+            <button
+              type="button" aria-label={title} aria-pressed={isActive}
+              className={cx(
+                'flex size-9 cursor-pointer items-center justify-center rounded-full outline-none',
+                'transition-colors duration-150 ease focus-visible:ring-2 focus-visible:ring-border-focus-ring',
+                isActive ? 'text-accent-500' : 'text-foreground-icon-secondary hover:bg-pill-tab-blue-hover-background hover:text-foreground-icon-primary',
+              )}
+              onClick={() => { setActiveId(item.id); onTabChange(item.type); }}
+            >
+              {item.sshExec ? (
+                <SshExecTabIcon conversationId={item.sshExec.conversationId} runs={session.conversationRuntimeById[item.sshExec.conversationId]?.sshExecs} className={tabIconClass} />
+              ) : <Icon aria-hidden="true" className={tabIconClass} />}
+            </button>
+          </Focusable>
+          <Tooltip placement={vertical ? 'right' : 'bottom'} className="max-w-sm break-all">
             {title}
-          </Tooltip.Content>
-        </Tooltip>
-        <Button
-          isIconOnly size="sm" variant="ghost" aria-label={t('workbench.closeTab', { title })}
-          className={`pointer-events-none absolute inset-0 m-auto size-6 min-w-6 rounded-md text-muted opacity-0 transition-opacity${isActive ? ' group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 [@media(hover:none)]:pointer-events-auto [@media(hover:none)]:opacity-100' : ''}`}
-          onPress={() => closeTab(item.id)}
-        >
-          <RiCloseLine aria-hidden="true" className="size-4" />
-        </Button>
+          </Tooltip>
+        </TooltipTrigger>
+        <IconAction
+          icon={RiCloseLine} size="xs" aria-label={t('workbench.closeTab', { title })}
+          className={cx(
+            'pointer-events-none absolute inset-0 m-auto rounded-full opacity-0 transition-[opacity,background-color,color]',
+            isActive && 'group-hover/tab:pointer-events-auto group-hover/tab:opacity-100 group-focus-within/tab:pointer-events-auto group-focus-within/tab:opacity-100 [@media(hover:none)]:pointer-events-auto [@media(hover:none)]:opacity-100',
+          )}
+          onClick={() => closeTab(item.id)}
+        />
       </div>
     );
   });
 
   const newTabDropdown = (
-    <Dropdown>
-      <Dropdown.Trigger isDisabled={!restored} aria-label={t('workbench.newTab')} className="inline-flex size-8 items-center justify-center rounded-lg text-muted hover:text-foreground hover:bg-surface-secondary transition-colors cursor-pointer"><RiAddLine className="size-4" /></Dropdown.Trigger>
-      <Dropdown.Popover>
-        <Dropdown.Menu onAction={(key) => addTab(String(key) as WorkbenchTab)}>
-          <Dropdown.Item id="terminal" textValue={t('workbench.tabTerminal')}>{t('workbench.tabTerminal')}</Dropdown.Item>
-          <Dropdown.Item id="browser" textValue={t('workbench.tabBrowser')}>{t('workbench.tabBrowser')}</Dropdown.Item>
-          <Dropdown.Item id="files" textValue={t('workbench.tabFiles')}>{t('workbench.tabFiles')}</Dropdown.Item>
-          <Dropdown.Item id="git-diff" textValue="Git Diff">Git Diff</Dropdown.Item>
-        </Dropdown.Menu>
-      </Dropdown.Popover>
-    </Dropdown>
+    <MenuTrigger>
+      <Pressable isDisabled={!restored}>
+        <IconAction icon={RiAddLine} aria-label={t('workbench.newTab')} disabled={!restored} />
+      </Pressable>
+      <MenuPopover placement={vertical ? 'right top' : 'bottom end'}>
+        <Menu aria-label={t('workbench.newTab')} onAction={(key) => addTab(String(key) as WorkbenchTab)}>
+          <MenuItem id="terminal" icon={WORKBENCH_ICONS.terminal} textValue={t('workbench.tabTerminal')}>{t('workbench.tabTerminal')}</MenuItem>
+          <MenuItem id="browser" icon={WORKBENCH_ICONS.browser} textValue={t('workbench.tabBrowser')}>{t('workbench.tabBrowser')}</MenuItem>
+          <MenuItem id="files" icon={WORKBENCH_ICONS.files} textValue={t('workbench.tabFiles')}>{t('workbench.tabFiles')}</MenuItem>
+          <MenuItem id="git-diff" icon={WORKBENCH_ICONS['git-diff']} textValue="Git Diff">Git Diff</MenuItem>
+        </Menu>
+      </MenuPopover>
+    </MenuTrigger>
   );
 
   const axisToggle = (
-    <Tooltip delay={200}>
-      <Button
-        isIconOnly variant="ghost" aria-label={axisLabel}
-        className="inline-flex size-8 items-center justify-center rounded-lg text-muted hover:text-foreground hover:bg-surface-secondary transition-colors cursor-pointer"
-        onPress={toggleAxis}
-      >
-        {vertical ? <RiLayoutRowLine className="size-4" /> : <RiLayoutColumnLine className="size-4" />}
-      </Button>
-      <Tooltip.Content placement={vertical ? 'right' : 'bottom'} className="text-xs">
-        {axisLabel}
-      </Tooltip.Content>
-    </Tooltip>
+    <IconAction
+      icon={vertical ? RiLayoutRowLine : RiLayoutColumnLine}
+      aria-label={axisLabel}
+      tooltip
+      tooltipPlacement={vertical ? 'right' : 'bottom'}
+      onClick={toggleAxis}
+    />
   );
 
+  // Remounts when nothing is selected so the sliding pill does not linger.
+  const tabList = items.length ? (
+    <PillTabList key={active ? 'tabs' : 'none'} className={vertical ? 'flex-col gap-0.5' : 'gap-1'}>
+      {tabStrip}
+    </PillTabList>
+  ) : null;
+
   return (
-    <div className={`flex h-full min-h-0${vertical ? '' : ' flex-col'}`}>
+    <div className={cx('flex h-full min-h-0', !vertical && 'flex-col')}>
       <div className={vertical
-        ? 'flex w-11 shrink-0 flex-col border-r border-separator'
-        : 'flex min-h-10 items-center border-b border-separator px-2'}
+        ? 'flex w-11 shrink-0 flex-col border-e border-separator-border'
+        : 'flex min-h-11 shrink-0 items-center gap-1 border-b border-separator-border px-2'}
       >
-        <div className={vertical
-          ? 'flex min-h-0 flex-1 flex-col items-center gap-0.5 overflow-y-auto py-1'
-          : 'flex min-w-0 flex-1 overflow-x-auto'}
-        >
-          {tabStrip}
-          {vertical && !sshMode ? newTabDropdown : null}
-        </div>
+        {vertical ? (
+          <ScrollArea className="min-h-0 flex-1" contentClassName="flex flex-col items-center gap-0.5 py-1" surface="secondary">
+            {tabList}
+            {sshMode ? null : newTabDropdown}
+          </ScrollArea>
+        ) : (
+          <div className="flex min-w-0 flex-1 items-center overflow-x-auto py-1">{tabList}</div>
+        )}
         {vertical ? (
           <div className="flex items-center justify-center py-1.5">{axisToggle}</div>
         ) : (
@@ -468,12 +547,13 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
       </div>
       <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
         {!active ? (
-          <div className="text-muted flex h-full items-center justify-center px-6 text-center text-sm">{sshMode ? t('ssh.workbenchEmpty') : t('workbench.noTabs')}</div>
+          <div className="flex h-full items-center justify-center px-6 text-center text-body-medium text-text-tertiary">{sshMode ? t('ssh.workbenchEmpty') : t('workbench.noTabs')}</div>
         ) : null}
         {items.map((item) => (
           <div key={item.id} className={item.id === active?.id ? 'h-full' : 'hidden'}>
             {item.type === 'terminal' ? (
               <TerminalPane
+                isActive={item.id === active?.id}
                 session={session}
                 terminalId={terminalIdForConversation(scopeKey, item.id)}
                 workspaceTarget={workspaceTerminalTarget}
@@ -500,18 +580,21 @@ function SshExecTabIcon({ conversationId, runs = NO_SSH_EXECS, className }: { co
   const clear = useSshExecClear(conversationId);
   const count = useMemo(() => visibleSshExecs(runs, clear).length, [clear, runs]);
   return (
-    <Badge.Anchor className={className}>
+    <span className={cx('relative inline-flex', className)}>
       <RiTerminalWindowLine aria-hidden="true" className="size-4" />
-      {count ? <Badge color="accent" variant="soft" size="sm" className="tabular-nums">{count > 99 ? '99+' : count}</Badge> : null}
-    </Badge.Anchor>
+      {count ? (
+        <Badge color="primary" className="absolute -end-2.5 -top-2 min-w-4 px-0.5 text-caption-2-semibold tabular-nums">
+          {count > 99 ? '99+' : count}
+        </Badge>
+      ) : null}
+    </span>
   );
 }
 
-const SECRET_PROMPT_PATTERN = /(password|passphrase)[^\n]*:\s*$/i;
-
-function TerminalPane({ session, terminalId, workspaceTarget, sshHost, autoConnect = true }: {
+function TerminalPane({ session, terminalId, isActive, workspaceTarget, sshHost, autoConnect = true }: {
   session: TodeXSession;
   terminalId: string;
+  isActive: boolean;
   workspaceTarget: TerminalTarget | null;
   /** Set for SSH tabs: the terminal runs `ssh -tt <host>` on the backend. */
   sshHost?: string;
@@ -520,7 +603,6 @@ function TerminalPane({ session, terminalId, workspaceTarget, sshHost, autoConne
   autoConnect?: boolean;
 }) {
   const t = useT();
-  const [input, setInput] = useState('');
   const target = useMemo<TerminalTarget | null>(
     () => (sshHost ? { kind: 'ssh', host: sshHost } : workspaceTarget),
     [sshHost, workspaceTarget],
@@ -536,13 +618,12 @@ function TerminalPane({ session, terminalId, workspaceTarget, sshHost, autoConne
   const statusCheckTimerRef = useRef<number | null>(null);
   const reconnectAttemptRef = useRef(0);
   const terminalByIdRef = useRef(session.terminalById);
+  const terminalSizeRef = useRef({ rows: DEFAULT_TERMINAL_ROWS, cols: DEFAULT_TERMINAL_COLS });
   const terminal = terminalId ? session.terminalById[terminalId] : undefined;
-  const lines = terminal?.output ?? [];
 
   terminalByIdRef.current = session.terminalById;
 
   useEffect(() => {
-    setInput('');
     autoStartAttempts.current.clear();
     manualStopRef.current = false;
     reconnectAttemptRef.current = 0;
@@ -555,6 +636,11 @@ function TerminalPane({ session, terminalId, workspaceTarget, sshHost, autoConne
       statusCheckTimerRef.current = null;
     }
   }, [terminalId, backendIdentity]);
+
+  useEffect(() => {
+    if (!terminal) return;
+    terminalSizeRef.current = { rows: terminal.rows, cols: terminal.cols };
+  }, [terminal?.cols, terminal?.rows]);
 
   useEffect(() => {
     if (!target || !terminalId || session.connectionState !== 'open') {
@@ -573,12 +659,13 @@ function TerminalPane({ session, terminalId, workspaceTarget, sshHost, autoConne
     const timeoutId = window.setTimeout(() => {
       const latest = terminalByIdRef.current[terminalId];
       if ((!latest || latest.status === 'idle') && (!isSsh || autoConnect)) {
+        const size = terminalSizeRef.current;
         session.startTerminalSession(target, {
           terminalId,
           cwd: workspace?.path ?? '',
           shell: '',
-          rows: 24,
-          cols: 80,
+          rows: size.rows,
+          cols: size.cols,
         });
       }
     }, 300);
@@ -644,12 +731,13 @@ function TerminalPane({ session, terminalId, workspaceTarget, sshHost, autoConne
         if (latest?.stopRequested) {
           return;
         }
+        const size = terminalSizeRef.current;
         session.startTerminalSession(target, {
           terminalId,
           cwd: latest?.cwd || workspace?.path || '',
           shell: latest?.shell || '',
-          rows: latest?.rows || 24,
-          cols: latest?.cols || 80,
+          rows: size.rows,
+          cols: size.cols,
           preserveOutput: true,
         });
       }, 300);
@@ -666,6 +754,20 @@ function TerminalPane({ session, terminalId, workspaceTarget, sshHost, autoConne
     };
   }, [target, isSsh, session.connectionState, session.requestTerminalStatus, session.startTerminalSession, terminal?.status, terminal?.stopRequested, terminalId, workspace]);
 
+  const handleTerminalData = useCallback((data: string) => {
+    const current = terminalByIdRef.current[terminalId];
+    if (!target || !current || current.status !== 'running') return;
+    session.sendTerminalInput(terminalId, tenantId, data);
+  }, [session.sendTerminalInput, target, tenantId, terminalId]);
+
+  const handleTerminalResize = useCallback((rows: number, cols: number) => {
+    terminalSizeRef.current = { rows, cols };
+    const current = terminalByIdRef.current[terminalId];
+    if (!target || !current || current.status !== 'running') return;
+    if (current.rows === rows && current.cols === cols) return;
+    session.resizeTerminalSession(terminalId, tenantId, rows, cols);
+  }, [session.resizeTerminalSession, target, tenantId, terminalId]);
+
   const defaultPath = workspace?.path || '';
   const [cwdDraft, setCwdDraft] = useState(defaultPath);
 
@@ -676,7 +778,7 @@ function TerminalPane({ session, terminalId, workspaceTarget, sshHost, autoConne
   const handleCwdSubmit = (targetPath: string) => {
     const trimmed = targetPath.trim();
     if (!trimmed || !terminalId || !workspace) return;
-    session.sendTerminalInput(terminalId, tenantId, `cd "${trimmed.replace(/"/g, '\\"')}"\n`);
+    session.sendTerminalInput(terminalId, tenantId, `cd "${trimmed.replace(/"/g, '\\"')}"\r`);
   };
 
   const sshEnded = isSsh && (
@@ -684,21 +786,11 @@ function TerminalPane({ session, terminalId, workspaceTarget, sshHost, autoConne
     || terminal?.status === 'error'
     || (!autoConnect && (!terminal || terminal.status === 'idle'))
   );
-  // This pane is a line-based console, not a TTY emulator: mask the input
-  // while ssh is asking for a password or key passphrase.
-  const lastLine = lines[lines.length - 1];
-  const secretPrompt = isSsh && lastLine?.kind === 'stdout' && SECRET_PROMPT_PATTERN.test(lastLine.text);
   const reconnectSsh = () => {
     if (!target || !terminalId) return;
     manualStopRef.current = false;
-    session.startTerminalSession(target, {
-      terminalId,
-      cwd: '',
-      shell: '',
-      rows: terminal?.rows || 24,
-      cols: terminal?.cols || 80,
-      preserveOutput: true,
-    });
+    const size = terminalSizeRef.current;
+    session.startTerminalSession(target, { terminalId, cwd: '', shell: '', rows: size.rows, cols: size.cols, preserveOutput: true });
   };
 
   return (
@@ -706,9 +798,9 @@ function TerminalPane({ session, terminalId, workspaceTarget, sshHost, autoConne
       <div className="mb-3 flex items-center justify-between gap-3">
         {isSsh ? (
           <div className="flex min-w-0 flex-1 items-center gap-2">
-            <RiServerLine className="text-muted size-4 shrink-0" />
-            <span className="truncate text-sm font-medium">{sshHost}</span>
-            {terminal ? <Chip size="sm" variant="soft">{terminalStatusLabel(terminal.status)}</Chip> : null}
+            <RiServerLine className="size-4 shrink-0 text-foreground-icon-secondary" />
+            <span className="truncate text-body-medium text-text-primary">{sshHost}</span>
+            {terminal ? <Chip variant="caption" color="soft">{terminalStatusLabel(terminal.status)}</Chip> : null}
           </div>
         ) : (
           <form
@@ -718,40 +810,37 @@ function TerminalPane({ session, terminalId, workspaceTarget, sshHost, autoConne
             }}
             className="min-w-0 flex-1"
           >
-            <TextField aria-label={t('workbench.terminalPath')} className="w-full" value={cwdDraft} onChange={setCwdDraft}>
-              <Input
-                placeholder="/path/to/directory..."
-                className="text-xs"
-              />
-            </TextField>
+            <Input
+              aria-label={t('workbench.terminalPath')}
+              size="small"
+              value={cwdDraft}
+              onChange={setCwdDraft}
+              placeholder="/path/to/directory..."
+              inputClassName="text-caption-1-regular"
+            />
           </form>
         )}
         <div className="flex shrink-0 items-center gap-2">
-          <Chip size="sm" variant="soft">
+          <Chip variant="caption" color="soft">
             {session.connectionState === 'open'
               ? session.connectionHealth.latencyMs === null ? t('workbench.detecting') : latencyLabelOf(session.connectionHealth.latencyMs)
               : t('workbench.disconnected')}
           </Chip>
           {sshEnded ? (
-            <Button
-              size="sm"
-              variant="secondary"
-              isDisabled={session.connectionState !== 'open'}
-              onPress={reconnectSsh}
+            <ExpandableAction
+              icon={RiRefreshLine}
+              label={t('ssh.terminal.reconnect')}
+              disabled={session.connectionState !== 'open'}
+              onClick={reconnectSsh}
               aria-label={t('ssh.terminal.reconnect')}
-              className="expandable-action-btn"
-            >
-              <span className="expandable-action-btn__icon">
-                <RiRefreshLine className="size-4" />
-              </span>
-              <span className="expandable-action-btn__label">{t('ssh.terminal.reconnect')}</span>
-            </Button>
+            />
           ) : (
-            <Button
-              size="sm"
-              variant="danger-soft"
-              isDisabled={!terminalId || !terminal || terminal.status === 'exited'}
-              onPress={() => {
+            <ExpandableAction
+              tone="danger"
+              icon={RiStopCircleLine}
+              label={t('workbench.stop')}
+              disabled={!terminalId || !terminal || terminal.status === 'exited'}
+              onClick={() => {
                 manualStopRef.current = true;
                 if (reconnectTimerRef.current !== null) {
                   window.clearTimeout(reconnectTimerRef.current);
@@ -766,57 +855,26 @@ function TerminalPane({ session, terminalId, workspaceTarget, sshHost, autoConne
                 }
               }}
               aria-label={t('workbench.stopTerminal')}
-              className="expandable-action-btn"
-            >
-              <span className="expandable-action-btn__icon">
-                <RiStopCircleLine className="size-4" />
-              </span>
-              <span className="expandable-action-btn__label">{t('workbench.stop')}</span>
-            </Button>
+            />
           )}
         </div>
       </div>
-      <div className="bg-surface-secondary flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-separator">
-        <ScrollShadow className="min-h-0 flex-1 px-4 py-3">
-          <div className="font-mono text-xs leading-5">
-            {lines.length ? lines.map((entry) => (
-              <div
-                key={entry.id}
-                className={entry.kind === 'stderr' || entry.kind === 'error'
-                  ? 'whitespace-pre-wrap break-words text-danger'
-                  : entry.kind === 'input'
-                    ? 'whitespace-pre-wrap break-words text-success'
-                    : 'text-foreground whitespace-pre-wrap break-words'}
-              >
-                {entry.text}
-              </div>
-            )) : (
-              <div className="text-muted">{session.connectionState === 'open' ? t('workbench.terminalConnecting') : t('workbench.terminalWaiting')}</div>
-            )}
-          </div>
-        </ScrollShadow>
-        <form
-          className="bg-surface flex gap-2 border-t border-separator p-2.5"
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (!input.trim() || !terminalId || !target) return;
-            session.sendTerminalInput(terminalId, tenantId, `${input}\n`);
-            setInput('');
-          }}
-        >
-          <span className="text-success self-center font-mono text-sm">$</span>
-          <TextField aria-label={t('workbench.terminalInput')} className="min-w-0 flex-1" value={input} onChange={setInput}>
-            <Input type={secretPrompt ? 'password' : 'text'} autoComplete="off" placeholder={t('workbench.commandPlaceholder')} className="border-0 bg-transparent font-mono text-xs" />
-          </TextField>
-          <Button size="sm" variant="secondary" type="submit" isDisabled={!target || terminal?.status !== 'running'}>
-            {t('workbench.send')}
-          </Button>
-        </form>
+      <div className="min-h-0 flex-1 overflow-hidden rounded-2xl bg-background-secondary-default">
+        <XtermTerminal
+          entries={terminal?.output ?? []}
+          isActive={isActive}
+          isDisabled={!target || terminal?.status !== 'running'}
+          onData={handleTerminalData}
+          onResize={handleTerminalResize}
+        />
       </div>
     </div>
   );
 }
 
+/** A Workbench browser tab. The page is a native view drawn by the main
+ * process (see `previewViews.ts`); this pane holds the address bar and the
+ * rectangle the view fills. Only loopback pages and workspace HTML files load. */
 function BrowserPane({ workspacePath, session, target, onTargetChange }: { workspacePath?: string; session: TodeXSession; target?: OpenPanelOptions; onTargetChange?: (target: OpenPanelOptions) => void }) {
   const t = useT();
   const targetChangeRef = useRef(onTargetChange);
@@ -920,8 +978,8 @@ function BrowserPane({ workspacePath, session, target, onTargetChange }: { works
         };
         const rootStyle = getComputedStyle(document.documentElement);
         const tokenColor = (name: string) => rootStyle.getPropertyValue(name).trim() || '#128DDB';
-        const hoverOverlay = createOverlay(tokenColor('--chart-4'));
-        const selectedOverlay = createOverlay(tokenColor('--accent'));
+        const hoverOverlay = createOverlay(tokenColor('--color-chart-4'));
+        const selectedOverlay = createOverlay(tokenColor('--color-accent-500'));
         const positionOverlay = (overlay: HTMLDivElement, element: HTMLElement | null) => {
           if (!element || !element.isConnected) {
             overlay.style.display = 'none';
@@ -1023,42 +1081,44 @@ function BrowserPane({ workspacePath, session, target, onTargetChange }: { works
     };
   }, [appendReference, frame, inspect]);
 
+  const reload = () => {
+    const next = draft.trim();
+    if (next) void loadSnapshot(next);
+  };
+
   return (
     <div className="flex h-full min-h-0 flex-col px-4 pb-4 pt-3">
       <div className="mb-3 flex items-center justify-between gap-3">
         <form
           onSubmit={(e) => {
             e.preventDefault();
-            const target = draft.trim();
-            if (target) void loadSnapshot(target);
+            reload();
           }}
           className="min-w-0 flex-1"
         >
-          <TextField aria-label={t('workbench.address')} className="w-full" value={draft} onChange={setDraft}>
-            <Input placeholder="http://127.0.0.1:..." className="text-xs" />
-          </TextField>
+          <Input
+            aria-label={t('workbench.address')}
+            size="small"
+            value={draft}
+            onChange={setDraft}
+            placeholder="http://127.0.0.1:..."
+            inputClassName="text-caption-1-regular"
+          />
         </form>
         <div className="flex shrink-0 items-center gap-2">
-          <Button
-            size="sm"
-            variant="tertiary"
-            isDisabled={!url && !srcDoc}
-            onPress={() => {
-              const target = draft.trim();
-              if (target) void loadSnapshot(target);
-            }}
+          <ExpandableAction
+            icon={RiRefreshLine}
+            label={t('workbench.refresh')}
+            disabled={!url && !srcDoc}
+            onClick={reload}
             aria-label={t('workbench.refreshPage')}
-            className="expandable-action-btn"
-          >
-            <span className="expandable-action-btn__icon">
-              <RiRefreshLine className="size-4" />
-            </span>
-            <span className="expandable-action-btn__label">{t('workbench.refresh')}</span>
-          </Button>
-          <Button
-            size="sm"
-            variant={inspect ? 'primary' : 'tertiary'}
-            onPress={() => {
+          />
+          <ExpandableAction
+            tone={inspect ? 'primary' : 'secondary'}
+            icon={RiFocus3Line}
+            label={inspect ? t('workbench.exitInspect') : t('workbench.selectElement')}
+            // The picker can be armed before a page loads; it attaches once it does.
+            onClick={() => {
               setInspect((current) => {
                 if (!current) {
                   selectedRef.current = null;
@@ -1068,30 +1128,29 @@ function BrowserPane({ workspacePath, session, target, onTargetChange }: { works
               });
             }}
             aria-label={inspect ? t('workbench.exitInspect') : t('workbench.selectElement')}
-            className="expandable-action-btn"
-          >
-            <span className="expandable-action-btn__icon">
-              <RiFocus3Line className="size-4" />
-            </span>
-            <span className="expandable-action-btn__label">{inspect ? t('workbench.exitInspect') : t('workbench.selectElement')}</span>
-          </Button>
+          />
         </div>
       </div>
       {srcDoc ? (
-        <div className="bg-surface min-h-0 flex-1 overflow-hidden rounded-xl">
+        <div className="relative min-h-0 flex-1 overflow-hidden rounded-xl border border-border-button-default bg-background-primary-default">
           <iframe ref={setFrame} title={t('workbench.webPreview')} srcDoc={srcDoc} className="size-full border-0" sandbox="allow-same-origin" />
         </div>
       ) : (
-        <div className="bg-surface-secondary flex min-h-0 flex-1 flex-col items-center justify-center gap-2 rounded-xl px-6 text-center">
-          <RiGlobalLine className="text-muted size-6" />
-          <p className="text-sm font-medium">{t('workbench.browserPreview')}</p>
-          <p className="text-muted max-w-xs text-xs">{t('workbench.browserPreviewHint', { workspace: workspacePath || t('workbench.noWorkspace') })}</p>
-        </div>
+        <EmptyState
+          size="sm"
+          icon={RiGlobalLine}
+          title={t('workbench.browserPreview')}
+          description={t('workbench.browserPreviewHint', { workspace: workspacePath || t('workbench.noWorkspace') })}
+          className="min-h-0 flex-1 rounded-2xl bg-background-secondary-default px-6"
+        >
+          <Button size="small" variant="secondary" onClick={() => void loadSnapshot(draft.trim() || 'http://127.0.0.1:7345')}>
+            {t('workbench.openDefault')}
+          </Button>
+        </EmptyState>
       )}
     </div>
   );
 }
-
 function GitDiffPane({ session }: { session: TodeXSession }) {
   const t = useT();
   const conversation = session.activeConversation;
@@ -1121,33 +1180,57 @@ function GitDiffPane({ session }: { session: TodeXSession }) {
           }}
           className="min-w-0 flex-1"
         >
-          <TextField aria-label={t('workbench.gitPath')} className="w-full" value={pathDraft} onChange={setPathDraft}>
-            <Input placeholder="/path/to/workspace..." className="text-xs" />
-          </TextField>
+          <Input
+            aria-label={t('workbench.gitPath')}
+            size="small"
+            value={pathDraft}
+            onChange={setPathDraft}
+            placeholder="/path/to/workspace..."
+            inputClassName="text-caption-1-regular"
+          />
         </form>
         <div className="flex shrink-0 items-center gap-2">
-          <Button
-            size="sm"
-            variant="tertiary"
-            isDisabled={!conversation || state?.status === 'loading'}
-            onPress={handleRefresh}
+          <ExpandableAction
+            icon={RiRefreshLine}
+            iconClassName={cx(state?.status === 'loading' && 'animate-spin motion-reduce:animate-none')}
+            label={t('workbench.refresh')}
+            disabled={!conversation || state?.status === 'loading'}
+            onClick={handleRefresh}
             aria-label={t('workbench.refreshGitDiff')}
-            className="expandable-action-btn"
-          >
-            <span className="expandable-action-btn__icon">
-              <RiRefreshLine className={`size-4 ${state?.status === 'loading' ? 'animate-spin' : ''}`} />
-            </span>
-            <span className="expandable-action-btn__label">{t('workbench.refresh')}</span>
-          </Button>
+          />
         </div>
       </div>
-      <ScrollShadow className="bg-surface-secondary min-h-0 flex-1 rounded-xl p-3">
-        <pre className={`font-mono text-xs whitespace-pre-wrap ${state?.error && !state?.diff ? 'text-danger' : ''}`}>
+      <ScrollArea
+        surface="secondary"
+        className="min-h-0 flex-1 overflow-hidden rounded-2xl bg-background-secondary-default"
+        contentClassName="p-3"
+      >
+        <pre className={cx('whitespace-pre-wrap font-mono text-caption-1-regular', state?.error && !state?.diff ? 'text-text-error-primary' : 'text-text-primary')}>
           {state?.diff || state?.error || t('aside.noDiff')}
         </pre>
-      </ScrollShadow>
+      </ScrollArea>
     </div>
   );
+}
+
+const FILE_ICONS: Array<[RegExp, IconComponent]> = [
+  [/\.(tsx?|jsx?|mjs|cjs|rs|go|py|rb|java|kt|swift|c|cc|cpp|h|hpp|cs|php|vue|svelte|css|scss|less|html?|sql|lua|dart|zig)$/i, RiFileCodeLine],
+  [/\.(json|jsonc|json5)$/i, RiBracesLine],
+  [/(\.(ya?ml|toml|ini|conf|cfg|properties)|^\.env.*|^\.(git|npm|prettier|eslint|editor)[a-z]*rc?$|^\.gitignore$)$/i, RiFileSettingsLine],
+  [/\.(lock|lockb)$|^pnpm-lock\.yaml$/i, RiLockLine],
+  [/\.mdx?$/i, RiMarkdownLine],
+  [/\.(png|jpe?g|gif|svg|webp|ico|avif|bmp|tiff?)$/i, RiImageLine],
+  [/\.(sh|bash|zsh|fish|ps1|bat|cmd)$/i, RiTerminalBoxLine],
+  [/\.(zip|tar|gz|tgz|bz2|xz|7z|rar)$/i, RiFileZipLine],
+  [/\.pdf$/i, RiFilePdf2Line],
+  [/\.(txt|log|csv|tsv|rst)$/i, RiFileTextLine],
+];
+
+/** The tree icon for a file, by its name. */
+function fileIcon(name: string): IconComponent {
+  // Lock files first: `pnpm-lock.yaml` would otherwise read as config.
+  if (/\.(lock|lockb)$|^pnpm-lock\.yaml$/i.test(name)) return RiLockLine;
+  return FILE_ICONS.find(([pattern]) => pattern.test(name))?.[1] ?? RiFileLine;
 }
 
 type FileTreeEntry = FileSourceEntry & {
@@ -1189,6 +1272,8 @@ function FilesPane({ session, target, onTargetChange, remote, onRemoteRebind }: 
   const { serverUrl, deviceSecret, encryptionProtocol, encryptionPublicKey, transportVerified } = session.settings;
   const api = useCallback(() => backendApi({ serverUrl, deviceSecret, encryptionProtocol, encryptionPublicKey, transportVerified }), [deviceSecret, encryptionProtocol, encryptionPublicKey, serverUrl, transportVerified]);
   const workspacePath = session.activeWorkspace?.path || '';
+  // shell.openPath/showItemInFolder act on the desktop's own filesystem, so
+  // the menu only makes sense when the backend runs on this machine.
   const source: FileSource = useMemo(
     () => (remote ? remoteFileSource(api, remote) : workspaceFileSource(api, workspacePath)),
     [api, remote, workspacePath],
@@ -1197,7 +1282,20 @@ function FilesPane({ session, target, onTargetChange, remote, onRemoteRebind }: 
   const [entries, setEntries] = useState<FileTreeEntry[]>([]);
   const [selected, setSelected] = useState('');
   const [focused, setFocused] = useState('');
-  const [expandedKeys, setExpandedKeys] = useState<Selection>(new Set());
+  const [expandedKeys, setExpandedKeys] = useState<Set<Key>>(new Set());
+  // Directories whose listing is in flight (their placeholder row spins).
+  const [loadingDirs, setLoadingDirs] = useState<Set<string>>(new Set());
+  // A narrow pane stacks the tree over the preview: side by side, the tree
+  // column shrank to icons only.
+  const splitRef = useRef<HTMLDivElement>(null);
+  const [stacked, setStacked] = useState(false);
+  useEffect(() => {
+    const node = splitRef.current;
+    if (!node) return;
+    const observer = new ResizeObserver(([entry]) => setStacked(entry.contentRect.width < 560));
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
   const [file, setFile] = useState<PreviewFile | null>(null);
   const [fileLoading, setFileLoading] = useState(false);
   const fileRequestRef = useRef(0);
@@ -1297,9 +1395,10 @@ function FilesPane({ session, target, onTargetChange, remote, onRemoteRebind }: 
 
   const loadDirectory = useCallback(async (directory: string, quiet = false): Promise<boolean> => {
     setLoading(true);
+    setLoadingDirs((current) => new Set(current).add(directory));
     if (!quiet) setError('');
     try {
-      const children = await source.list(directory);
+      const children = sortFileEntries(await source.list(directory));
       setEntries((current) => directory === currentPath ? children : replaceFileTreeChildren(current, directory, children));
       setExpandedKeys((current) => new Set([...current, directory]));
       return true;
@@ -1308,6 +1407,11 @@ function FilesPane({ session, target, onTargetChange, remote, onRemoteRebind }: 
       return false;
     } finally {
       setLoading(false);
+      setLoadingDirs((current) => {
+        const next = new Set(current);
+        next.delete(directory);
+        return next;
+      });
     }
   }, [currentPath, source]);
 
@@ -1439,28 +1543,61 @@ function FilesPane({ session, target, onTargetChange, remote, onRemoteRebind }: 
     onRemoteRebind?.(remoteFilesBinding(connection));
   };
 
-  const renderEntry = (entry: FileTreeEntry): ReactNode => (
-    <FileTree.Item
-      key={entry.path}
-      icon={entry.kind === 'directory' || entry.children ? <RiFolder3Line /> : entry.kind === 'symlink' ? <RiLinksLine /> : <RiFileTextLine />}
-      id={entry.path}
-      textValue={entry.name}
-      title={entry.name}
-    >
-      {entry.children?.map(renderEntry)}
-    </FileTree.Item>
+  // A row under a branch that is loading, empty or cut off. Disabled, so it
+  // never takes selection or focus.
+  const noteRow = (id: string, label: string, busy = false) => (
+    <TreeViewItem
+      key={id}
+      id={id}
+      label={label}
+      icon={null}
+      isDisabled
+      className="cursor-default text-text-tertiary"
+      trailingContent={busy ? <Spinner size="sm" aria-hidden /> : undefined}
+    />
   );
+
+  // Children of a directory row. One not listed yet gets a loading row, so
+  // it shows a disclosure chevron and lists itself when expanded.
+  const directoryChildren = (path: string, children: FileTreeEntry[] | undefined): ReactNode => {
+    if (!children) return noteRow(`${path}\u0000loading`, t('workbench.treeLoading'), true);
+    if (children.length === 0) {
+      return loadingDirs.has(path)
+        ? noteRow(`${path}\u0000loading`, t('workbench.treeLoading'), true)
+        : noteRow(`${path}\u0000empty`, t('workbench.treeEmpty'));
+    }
+    return [
+      ...children.map(renderEntry),
+      ...(source.listLimit && children.length >= source.listLimit
+        ? [noteRow(`${path}\u0000more`, t('workbench.treeTruncated', { count: source.listLimit }))]
+        : []),
+    ];
+  };
+
+  const renderEntry = (entry: FileTreeEntry): ReactNode => {
+    const directory = entry.kind === 'directory' || Boolean(entry.children);
+    return (
+      <TreeViewItem
+        key={entry.path}
+        icon={directory ? RiFolder3Line : entry.kind === 'symlink' ? RiLinksLine : fileIcon(entry.name)}
+        expandedIcon={directory ? RiFolderOpenLine : undefined}
+        id={entry.path}
+        label={entry.name}
+        // Dotfiles recede, as in most file managers.
+        className={entry.name.startsWith('.') ? 'text-text-secondary' : undefined}
+      >
+        {directory ? directoryChildren(entry.path, entry.children) : null}
+      </TreeViewItem>
+    );
+  };
 
   const toggleTree = () => {
     if (treePanelRef.current?.isCollapsed()) treePanelRef.current.expand();
     else treePanelRef.current?.collapse();
   };
 
-  const toolbarButton = (label: string, icon: ReactNode, onPress: () => void, isDisabled = false) => (
-    <Tooltip delay={200}>
-      <Button isIconOnly size="sm" variant="tertiary" aria-label={label} isDisabled={busy || isDisabled} onPress={onPress}>{icon}</Button>
-      <Tooltip.Content className="text-xs">{label}</Tooltip.Content>
-    </Tooltip>
+  const toolbarButton = (label: string, icon: IconComponent, onPress: () => void, isDisabled = false) => (
+    <IconAction icon={icon} size="sm" aria-label={label} tooltip disabled={busy || isDisabled} onClick={onPress} />
   );
   const selectedRemovable = Boolean(selectedEntry);
   // Sources with file operations highlight the operation target, others the previewed file.
@@ -1476,62 +1613,55 @@ function FilesPane({ session, target, onTargetChange, remote, onRemoteRebind }: 
           }}
           className="min-w-0 flex-1"
         >
-          <TextField aria-label={t('workbench.pathLabel')} className="w-full" value={pathDraft} onChange={setPathDraft}>
-            <Input placeholder="/path/to/directory..." className="text-xs" />
-          </TextField>
+          <Input
+            aria-label={t('workbench.pathLabel')}
+            size="small"
+            value={pathDraft}
+            onChange={setPathDraft}
+            placeholder="/path/to/directory..."
+            inputClassName="text-caption-1-regular"
+          />
         </form>
         <div className="flex shrink-0 items-center gap-2">
-          {remote ? toolbarButton(t('ssh.files.reconnect'), <RiLink className="size-4" />, () => void reconnectRemote()) : null}
-          <Button
-            size="sm"
-            variant="tertiary"
-            isDisabled={!currentPath || loading}
-            onPress={() => currentPath && void loadDirectory(currentPath)}
+          {remote ? toolbarButton(t('ssh.files.reconnect'), RiLink, () => void reconnectRemote()) : null}
+          <ExpandableAction
+            icon={RiRefreshLine}
+            label={t('workbench.refresh')}
+            disabled={!currentPath || loading}
+            onClick={() => currentPath && void loadDirectory(currentPath)}
             aria-label={t('workbench.refreshDir')}
-            className="expandable-action-btn"
-          >
-            <span className="expandable-action-btn__icon">
-              <RiRefreshLine className="size-4" />
-            </span>
-            <span className="expandable-action-btn__label">{t('workbench.refresh')}</span>
-          </Button>
-          <Button
-            size="sm"
-            variant="tertiary"
-            onPress={toggleTree}
+          />
+          <ExpandableAction
+            icon={treeCollapsed ? RiArrowRightDoubleLine : RiArrowLeftDoubleLine}
+            label={treeCollapsed ? t('workbench.expandTree') : t('workbench.collapseTree')}
+            onClick={toggleTree}
             aria-label={treeCollapsed ? t('workbench.showTree') : t('workbench.collapseTree')}
-            className="expandable-action-btn"
-          >
-            <span className="expandable-action-btn__icon">
-              {treeCollapsed ? <RiArrowRightDoubleLine className="size-4" /> : <RiArrowLeftDoubleLine className="size-4" />}
-            </span>
-            <span className="expandable-action-btn__label">{treeCollapsed ? t('workbench.expandTree') : t('workbench.collapseTree')}</span>
-          </Button>
+          />
         </div>
       </div>
       {hasFileOperations ? (
-        <div className="mb-3 flex items-center gap-1.5">
+        <div className="mb-3 flex items-center gap-1">
           {busy ? <Spinner size="sm" aria-label={t('ssh.files.working')} /> : null}
-          {source.upload ? toolbarButton(t('ssh.files.upload'), <RiUpload2Line className="size-4" />, () => uploadInputRef.current?.click(), !currentPath) : null}
-          {source.download ? toolbarButton(t('ssh.files.download'), <RiDownload2Line className="size-4" />, () => {
+          {source.upload ? toolbarButton(t('ssh.files.upload'), RiUpload2Line, () => uploadInputRef.current?.click(), !currentPath) : null}
+          {source.download ? toolbarButton(t('ssh.files.download'), RiDownload2Line, () => {
             const download = source.download;
             if (!download || !selectedEntry) return;
             void runOperation(t('ssh.files.download'), () => download(selectedEntry.path));
           }, !selectedEntry || selectedIsDirectory) : null}
-          {source.mkdir ? toolbarButton(t('ssh.files.newFolder'), <RiFolderAddLine className="size-4" />, () => {
+          {source.mkdir ? toolbarButton(t('ssh.files.newFolder'), RiFolderAddLine, () => {
             setOperationName('');
             setOperation({ kind: 'mkdir', directory: targetDirectory });
           }, !currentPath) : null}
-          {source.rename ? toolbarButton(t('ssh.files.rename'), <RiEdit2Line className="size-4" />, () => {
+          {source.rename ? toolbarButton(t('ssh.files.rename'), RiEdit2Line, () => {
             if (!selectedEntry) return;
             setOperationName(selectedEntry.name);
             setOperation({ kind: 'rename', path: selectedEntry.path });
           }, !selectedRemovable) : null}
-          {source.remove ? toolbarButton(t('ssh.files.delete'), <RiDeleteBinLine className="size-4" />, () => {
+          {source.remove ? toolbarButton(t('ssh.files.delete'), RiDeleteBinLine, () => {
             if (!selectedEntry) return;
             setOperation({ kind: 'delete', path: selectedEntry.path, isDirectory: selectedIsDirectory });
           }, !selectedRemovable) : null}
-          <span className="text-muted ml-1 min-w-0 truncate text-xs">{t('ssh.files.target', { path: targetDirectory || '/' })}</span>
+          <span className="ms-1.5 min-w-0 truncate text-caption-1-regular text-text-tertiary">{t('ssh.files.target', { path: targetDirectory || '/' })}</span>
           <input
             ref={uploadInputRef}
             className="hidden"
@@ -1546,92 +1676,110 @@ function FilesPane({ session, target, onTargetChange, remote, onRemoteRebind }: 
           />
         </div>
       ) : null}
-      <Resizable autoSaveId="todex.files-pane" className="min-h-0 flex-1 gap-3" onLayoutChange={() => setTreeCollapsed(Boolean(treePanelRef.current?.isCollapsed()))}>
+      <div ref={splitRef} className="flex min-h-0 flex-1">
+      <Resizable
+        key={stacked ? 'stacked' : 'side'}
+        autoSaveId={stacked ? 'todex.files-pane.stacked' : 'todex.files-pane.v2'}
+        orientation={stacked ? 'vertical' : 'horizontal'}
+        className="min-h-0 flex-1"
+        onLayoutChange={() => setTreeCollapsed(Boolean(treePanelRef.current?.isCollapsed()))}
+      >
         <Resizable.Panel
           id="file-tree"
           handleRef={treePanelRef}
-          defaultSize="30%"
-          minSize="18%"
-          maxSize="50%"
+          defaultSize={stacked ? '45%' : '260px'}
+          minSize={stacked ? '120px' : '200px'}
+          maxSize={stacked ? '80%' : '60%'}
           collapsedSize="0px"
           collapsible
           onCollapse={() => setTreeCollapsed(true)}
           onExpand={() => setTreeCollapsed(false)}
           className="min-h-0"
         >
-          <ScrollShadow className="bg-surface-secondary h-full min-h-0 rounded-xl p-2">
-          <FileTree
-            key={source.key}
-            aria-label={remote ? t('ssh.files.treeLabel', { label: remote.label }) : t('workbench.workspaceFiles')}
-            className="w-full"
-            selectedKeys={treeSelection ? new Set([treeSelection]) : new Set()}
-            expandedKeys={expandedKeys}
-            selectionMode="single"
-            selectionBehavior="replace"
-            onSelectionChange={(keys: Selection) => {
-              const key = keys === 'all' ? '' : String([...keys][0] ?? '');
-              if (!key) return;
-              if (hasFileOperations) setFocused(key);
-              void handleAction(key);
-            }}
-            onExpandedChange={setExpandedKeys}
+          <ScrollArea
+            className="h-full overflow-hidden rounded-2xl border border-border-button-default bg-background-primary-default"
+            contentClassName="p-1.5"
           >
-            <FileTree.Item icon={<RiFolder3Line />} id={currentPath || 'root'} textValue={rootName} title={rootName}>
-              {entries.map(renderEntry)}
-            </FileTree.Item>
-          </FileTree>
-          </ScrollShadow>
+            <TreeView
+              key={`${source.key}:${currentPath || 'empty'}`}
+              aria-label={remote ? t('ssh.files.treeLabel', { label: remote.label }) : t('workbench.workspaceFiles')}
+              size="sm"
+              className="rounded-none border-0 bg-transparent p-0"
+              selectedKeys={treeSelection ? new Set([treeSelection]) : new Set()}
+              expandedKeys={expandedKeys}
+              selectionMode="single"
+              selectionBehavior="replace"
+              onSelectionChange={(keys: Selection) => {
+                const key = keys === 'all' ? '' : String([...keys][0] ?? '');
+                if (!key) return;
+                if (hasFileOperations) setFocused(key);
+                void handleAction(key);
+              }}
+              onExpandedChange={(keys) => {
+                // Expanding a directory that was never listed lists it.
+                for (const key of keys) {
+                  if (expandedKeys.has(key)) continue;
+                  const entry = findFileTreeEntry(entries, String(key));
+                  if (entry?.kind === 'directory' && !entry.children) void loadDirectory(entry.path);
+                }
+                setExpandedKeys(keys);
+              }}
+            >
+              <TreeViewItem
+                key={currentPath || 'root'}
+                icon={RiFolder3Line}
+                expandedIcon={RiFolderOpenLine}
+                id={currentPath || 'root'}
+                label={rootName}
+              >
+                {currentPath ? directoryChildren(currentPath, loadingDirs.has(currentPath) && entries.length === 0 ? undefined : entries) : null}
+              </TreeViewItem>
+            </TreeView>
+          </ScrollArea>
         </Resizable.Panel>
-        <Resizable.Handle type="pill" withIndicator aria-label={t('workbench.resizeTree')} />
-        <Resizable.Panel defaultSize="70%" minSize="50%" className="min-h-0">
-          <ScrollShadow className="bg-surface-secondary h-full min-h-0 rounded-xl p-3">
-            <p className="text-muted mb-2 truncate text-xs">{selected || t('workbench.selectFile')}</p>
+        <Resizable.Handle aria-label={t('workbench.resizeTree')} />
+        <Resizable.Panel defaultSize={stacked ? '55%' : '70%'} minSize={stacked ? '120px' : '240px'} className="min-h-0">
+          <ScrollArea
+            surface="secondary"
+            className="h-full overflow-hidden rounded-2xl bg-background-secondary-default"
+            contentClassName="p-3"
+          >
+            <p className="mb-2 truncate text-caption-1-regular text-text-tertiary">{selected || t('workbench.selectFile')}</p>
             {fileLoading ? <Spinner size="sm" aria-label={t('workbench.readingFile')} /> : error ? null : <WorkspaceFilePreview file={file} onAddReference={source.canAddReference ? addReferenceToChat : undefined} onSaveFile={saveFile} onReloadFile={reloadFile} onDirtyChange={(dirty) => { fileDirtyRef.current = dirty; }} />}
-          </ScrollShadow>
+          </ScrollArea>
         </Resizable.Panel>
       </Resizable>
-      <Modal.Backdrop isOpen={operation?.kind === 'mkdir' || operation?.kind === 'rename'} onOpenChange={(open) => { if (!open) setOperation(null); }}>
-        <Modal.Container>
-          <Modal.Dialog className="sm:max-w-sm">
-            <Modal.CloseTrigger />
-            <Modal.Header>
-              <Modal.Heading>{operation?.kind === 'rename' ? t('ssh.files.rename') : t('ssh.files.newFolder')}</Modal.Heading>
-            </Modal.Header>
-            <Modal.Body>
-              <form id="file-operation-form" onSubmit={(event) => { event.preventDefault(); void submitOperation(); }}>
-                <TextField className="w-full" value={operationName} onChange={setOperationName} autoFocus>
-                  <Label>{t('ssh.files.name')}</Label>
-                  <Input className="w-full" />
-                </TextField>
-              </form>
-            </Modal.Body>
-            <Modal.Footer>
-              <Button slot="close" variant="tertiary">{t('common.cancel')}</Button>
-              <Button type="submit" form="file-operation-form">{t('common.save')}</Button>
-            </Modal.Footer>
-          </Modal.Dialog>
-        </Modal.Container>
-      </Modal.Backdrop>
-      <AlertDialog isOpen={operation?.kind === 'delete'} onOpenChange={(open) => { if (!open) setOperation(null); }}>
-        <AlertDialog.Backdrop>
-          <AlertDialog.Container>
-            <AlertDialog.Dialog className="sm:max-w-md">
-              <AlertDialog.Header>
-                <AlertDialog.Heading>{t('ssh.files.deleteTitle')}</AlertDialog.Heading>
-              </AlertDialog.Header>
-              <AlertDialog.Body>
-                <p className="text-muted break-all text-sm">
-                  {operation?.kind === 'delete' ? t(operation.isDirectory ? 'ssh.files.deleteDirectoryBody' : 'ssh.files.deleteFileBody', { path: operation.path }) : null}
-                </p>
-              </AlertDialog.Body>
-              <AlertDialog.Footer>
-                <Button slot="close" variant="tertiary">{t('common.cancel')}</Button>
-                <Button variant="danger" onPress={() => void submitOperation()}>{t('common.delete')}</Button>
-              </AlertDialog.Footer>
-            </AlertDialog.Dialog>
-          </AlertDialog.Container>
-        </AlertDialog.Backdrop>
-      </AlertDialog>
+      </div>
+      <Modal
+        isOpen={operation?.kind === 'mkdir' || operation?.kind === 'rename'}
+        onOpenChange={(open) => { if (!open) setOperation(null); }}
+        title={operation?.kind === 'rename' ? t('ssh.files.rename') : t('ssh.files.newFolder')}
+        size="sm"
+        footer={(
+          <>
+            <Button variant="secondary" onClick={() => setOperation(null)}>{t('common.cancel')}</Button>
+            <Button type="submit" form="file-operation-form">{t('common.save')}</Button>
+          </>
+        )}
+      >
+        <form id="file-operation-form" onSubmit={(event) => { event.preventDefault(); void submitOperation(); }}>
+          <Input label={t('ssh.files.name')} value={operationName} onChange={setOperationName} autoFocus />
+        </form>
+      </Modal>
+      <ConfirmDialog
+        isOpen={operation?.kind === 'delete'}
+        onOpenChange={(open) => { if (!open) setOperation(null); }}
+        title={t('ssh.files.deleteTitle')}
+        description={(
+          <span className="break-all">
+            {operation?.kind === 'delete' ? t(operation.isDirectory ? 'ssh.files.deleteDirectoryBody' : 'ssh.files.deleteFileBody', { path: operation.path }) : null}
+          </span>
+        )}
+        confirmLabel={t('common.delete')}
+        cancelLabel={t('common.cancel')}
+        tone="danger"
+        onConfirm={() => void submitOperation()}
+      />
       {remoteConnector.dialog}
     </div>
   );

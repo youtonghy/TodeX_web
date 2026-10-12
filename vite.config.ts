@@ -25,6 +25,8 @@ export default defineConfig({
   resolve: {
     dedupe: ['react', 'react-dom', '@heroui/react', 'react-aria-components'],
     alias: {
+      // BoardUI components import through '@/…'.
+      '@': resolve(webRoot, 'src/renderer'),
       '@renderer': resolve(webRoot, 'src/renderer'),
       '@todex/protocol': resolve(webRoot, '../TodeX_protocol/src'),
       '@react-native-community/netinfo': resolve(webRoot, 'src/renderer/stubs/netinfo.ts'),

@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Chip, Tabs, toast } from '@heroui/react';
+import { Chip } from '@/components/base/badges/chip';
+import { Tab, TabList, TabPanel, Tabs } from '@/components/base/tabs/tabs';
+import { toast } from '@/components/ui/toast';
 import type { ConversationStorageEntry, HistoryCleanupPolicyResponse, NativeHistoryProvider } from '@todex/protocol/v2';
 import {
   CleanupPolicyCard,
@@ -78,8 +80,8 @@ function TodexHistoryTab({ session }: { session: TodeXSession }) {
       bytes: entry.bytes,
       locked: active,
       badge: active
-        ? <Chip size="sm" variant="soft" color="warning">{t('cleanup.active')}</Chip>
-        : entry.archivedAt ? <Chip size="sm" variant="soft">{t('cleanup.archived')}</Chip> : undefined,
+        ? <Chip color="yellow">{t('cleanup.active')}</Chip>
+        : entry.archivedAt ? <Chip color="neutral">{t('cleanup.archived')}</Chip> : undefined,
     };
   });
 
@@ -128,20 +130,18 @@ export function CleanupPanel({ session }: { session: TodeXSession }) {
   const t = useT();
   const [tab, setTab] = useState<TabKey>('todex');
   return (
-    <Tabs selectedKey={tab} onSelectionChange={(key) => setTab(NATIVE_IDS.has(String(key)) ? String(key) as NativeHistoryProvider : 'todex')} className="flex flex-col gap-4 py-1">
-      <Tabs.ListContainer>
-        <Tabs.List aria-label={t('app.cleanup')}>
-          <Tabs.Tab id="todex">{t('cleanup.tabTodex')}<Tabs.Indicator /></Tabs.Tab>
-          {NATIVE_TABS.map((item) => (
-            <Tabs.Tab key={item.id} id={item.id} className="gap-1.5">
-              <ProviderIcon provider={item.id} className="size-4" />{item.label}<Tabs.Indicator />
-            </Tabs.Tab>
-          ))}
-        </Tabs.List>
-      </Tabs.ListContainer>
-      <Tabs.Panel id="todex"><TodexHistoryTab session={session} /></Tabs.Panel>
+    <Tabs selectedKey={tab} onSelectionChange={(key) => setTab(NATIVE_IDS.has(String(key)) ? String(key) as NativeHistoryProvider : 'todex')} className="gap-4 py-1">
+      <TabList aria-label={t('app.cleanup')}>
+        <Tab id="todex">{t('cleanup.tabTodex')}</Tab>
+        {NATIVE_TABS.map((item) => (
+          <Tab key={item.id} id={item.id}>
+            <span className="flex items-center gap-1.5"><ProviderIcon provider={item.id} className="size-4" />{item.label}</span>
+          </Tab>
+        ))}
+      </TabList>
+      <TabPanel id="todex"><TodexHistoryTab session={session} /></TabPanel>
       {NATIVE_TABS.map((item) => (
-        <Tabs.Panel key={item.id} id={item.id}><NativeHistoryTab session={session} provider={item.id} label={item.label} /></Tabs.Panel>
+        <TabPanel key={item.id} id={item.id}><NativeHistoryTab session={session} provider={item.id} label={item.label} /></TabPanel>
       ))}
     </Tabs>
   );

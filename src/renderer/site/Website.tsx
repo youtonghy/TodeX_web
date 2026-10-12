@@ -5,7 +5,7 @@ import { RiArrowDownLine, RiArrowRightLine, RiArrowRightUpLine, RiCloseLine, RiC
 import { ProviderIcon } from '../components/ProviderIcon';
 import { useLocale, useT } from '../i18n';
 import brand from '../assets/brand/t-icon-light.png';
-import { DEMO_PATH, type DemoPlaybackMessage } from '../demo/playback';
+import { DEMO_PATH } from '../demo/playback';
 import { CopyCommand } from './CopyCommand';
 import { Downloads } from './Downloads';
 import { LanguageSwitcher } from './LanguageSwitcher';
@@ -35,7 +35,7 @@ function Navigation() {
   </header>;
 }
 
-// The preview is the real workbench (/demo) replaying a scripted session.
+// The preview is the real workbench (/demo) on the desktop's demo fixtures.
 // Wide pages get the desktop layout scaled down so the three panes keep their
 // real proportions; phones get the workbench's own phone layout at close to
 // 1:1, which stays readable instead of shrinking a desktop to ~6px text.
@@ -45,21 +45,10 @@ function demoFrameSize(containerWidth: number) {
 
 function DemoFrame({ width }: { width: number }) {
   const locale = useLocale();
-  const frameRef = useRef<HTMLIFrameElement>(null);
   const [loaded, setLoaded] = useState(false);
-  useEffect(() => {
-    const frame = frameRef.current;
-    if (!frame || !loaded) return;
-    const observer = new IntersectionObserver(([entry]) => {
-      const message: DemoPlaybackMessage = { type: 'todex-demo-playback', playing: entry.isIntersecting };
-      frame.contentWindow?.postMessage(message, window.location.origin);
-    });
-    observer.observe(frame);
-    return () => observer.disconnect();
-  }, [loaded]);
   const size = demoFrameSize(width);
   const scale = width / size.width;
-  return <iframe ref={frameRef} src={`${DEMO_PATH}?lang=${locale}`} title="TodeX" loading="lazy" inert className={loaded ? 'is-loaded' : undefined} onLoad={() => setLoaded(true)} style={{ width: size.width, height: size.height, transform: `scale(${scale})` }} />;
+  return <iframe src={`${DEMO_PATH}?lang=${locale}`} title="TodeX" loading="lazy" inert className={loaded ? 'is-loaded' : undefined} onLoad={() => setLoaded(true)} style={{ width: size.width, height: size.height, transform: `scale(${scale})` }} />;
 }
 
 function WorkbenchPreview() {

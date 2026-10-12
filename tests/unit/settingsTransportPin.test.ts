@@ -2,7 +2,6 @@ import { afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest';
 import * as React from 'react';
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { toast } from '@heroui/react';
 import { SettingsPanel } from '../../src/renderer/screens/SettingsPanel';
 import { beginDevicePairing } from '../../src/renderer/session/devicePairing';
 import type { TodeXSession } from '../../src/renderer/session/useTodeXSession';
@@ -19,7 +18,7 @@ beforeAll(() => {
 });
 beforeEach(() => { vi.mocked(beginDevicePairing).mockReset().mockReturnValue(new Promise(() => {})); });
 afterEach(() => {
-  act(() => { toast.clear(); root?.unmount(); });
+  act(() => { root?.unmount(); });
   container?.remove();
 });
 const KEY = Buffer.from(new Uint8Array(32).fill(5)).toString('base64url');
@@ -39,9 +38,10 @@ function render(props: { repairPairing?: boolean } = {}) {
   act(() => root.render(createElement(SettingsPanel, { session, ...props })));
   return { session, updateBackendConnection, setSettings };
 }
+// Text fields by accessible name: an aria-label (BoardUI Input) or an associated <label>.
 function input(label: string) {
-  const element = [...container.querySelectorAll('label')].find(item => item.textContent === label);
-  return element ? document.getElementById(element.htmlFor) as HTMLInputElement | null : null;
+  const fields = [...container.querySelectorAll<HTMLInputElement>('input')];
+  return fields.find(field => field.getAttribute('aria-label') === label || [...field.labels ?? []].some(item => item.textContent === label)) ?? null;
 }
 async function type(field: HTMLInputElement, value: string) {
   await act(async () => {

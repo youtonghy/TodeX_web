@@ -1,26 +1,15 @@
-/** One-time migration of the candidate messages older builds kept in the
- * browser (`todex.queued-follow-ups.v1`). The backend queue is the only store
- * now; this file only reads the legacy data and hands it over. */
-
-/** Storage key of the legacy candidate queue. */
-export const LEGACY_QUEUED_FOLLOW_UPS_KEY = 'todex.queued-follow-ups.v1';
-
+/** One-time migration of the candidate queue older builds kept in the client
+ * (`todex.queued-follow-ups.v1`). The backend now holds queued messages, so
+ * the stored candidates are handed to it once and the local copy is deleted. */
 type LegacyItem = { id: string; text: string; attachments: unknown[]; skills: unknown[] };
 
 /** Storage shape of `todex.queued-follow-ups.v1`. Version 1 stored the
  * conversation → candidates map alone and is still read (as unpaused). */
 type StoredQueuedFollowUps<T> = { version: 2; queues: Record<string, T[]>; paused: string[] };
 
-/** What is left of the legacy data, in the version 2 shape. */
-export function serializeQueuedFollowUps<T>(queues: Record<string, T[]>, paused: Iterable<string>): StoredQueuedFollowUps<T> {
-  // A pause only matters while candidates wait behind it.
-  return { version: 2, queues, paused: [...new Set(paused)].filter((id) => (queues[id]?.length ?? 0) > 0) };
-}
+export type LegacyFollowUps<T> = { queues: Record<string, T[]>; paused: string[] };
 
-export function restoreQueuedFollowUps<T extends LegacyItem>(value: unknown): {
-  queues: Record<string, T[]>;
-  paused: string[];
-} {
+export function restoreQueuedFollowUps<T extends LegacyItem>(value: unknown): LegacyFollowUps<T> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return { queues: {}, paused: [] };
   const stored = value as Partial<StoredQueuedFollowUps<unknown>>;
   const versioned = stored.version === 2;
@@ -41,55 +30,47 @@ function restoreQueues<T extends LegacyItem>(value: unknown): Record<string, T[]
   }));
 }
 
-/** Where a conversation with legacy candidates stands right now:
- * - `wait`: not decidable yet (other backend, providers not loaded, no v2 id,
- *   or the backend lacks the queue) — keep the local copy;
- * - `gone` / `readOnly`: the candidates can never be sent — discard them;
- * - `ready`: the backend takes them; `control` says whether it can also take
- *   the first one paused (`backendQueueControl`). */
-export type LegacyConversationState = 'wait' | 'gone' | 'readOnly' | { control: boolean };
-/** `added` and `discard` finish an item; `transient` keeps it for the next connection. */
-export type LegacyAddResult = 'added' | 'transient' | 'discard';
+/** Where a stored conversation's candidates can go right now:
+ * - `wait`: not decidable yet (other backend, providers not loaded, the
+ *   backend has no queue); the local copy stays for the next connection;
+ * - `gone`: the conversation no longer exists or is read-only;
+ * - `ready`: its provider has a backend queue; `control` is whether that
+ *   queue can take an item in the paused state. */
+export type LegacyQueueTarget = { kind: 'wait' } | { kind: 'gone' } | { kind: 'ready'; control: boolean };
 
-export type LegacyMigrationHost<T> = {
-  state: (conversationId: string) => LegacyConversationState;
-  /** Adds the item to the backend queue under its original id (idempotent). */
+/** `added` also covers an item the backend already holds (the original id is
+ * the idempotency key); `gone` is a read-only refusal; `failed` is transient. */
+export type LegacyAddResult = 'added' | 'gone' | 'failed';
+
+export type LegacyQueueHooks<T> = {
+  resolve: (conversationId: string) => LegacyQueueTarget;
+  /** Adds one candidate under its original id; `paused` enqueues it paused. */
   add: (conversationId: string, item: T, paused: boolean) => Promise<LegacyAddResult>;
-  /** Finished items leave the local copy right away. */
-  settle: (conversationId: string, remaining: T[]) => void;
-  /** Items dropped for good, to tell the user what was discarded. */
-  discarded: (conversationId: string, items: T[]) => void;
+  /** The conversation's local copy is settled and must be deleted. `discarded`
+   * holds what could not be delivered (the user is told); empty when all moved. */
+  settle: (conversationId: string, discarded: T[]) => void;
 };
 
-/** Hands each conversation's legacy candidates to the backend queue in order.
- * A paused conversation keeps its pause: its items go in paused (so a retry
- * after a partial run cannot start one); without `backendQueueControl` it
- * stays local, since an unpaused add could start it. Returns the data still to migrate. */
+/** Moves every stored conversation's candidates to the backend, in order. A
+ * conversation that was paused stays paused (its first item is added paused);
+ * when the backend cannot hold a pause the conversation waits instead of
+ * being resumed. A local copy is only settled after every add succeeded. */
 export async function migrateLegacyFollowUps<T extends LegacyItem>(
-  legacy: { queues: Record<string, T[]>; paused: string[] },
-  host: LegacyMigrationHost<T>,
-): Promise<{ queues: Record<string, T[]>; paused: string[] }> {
-  const queues = { ...legacy.queues };
-  for (const [id, items] of Object.entries(legacy.queues)) {
-    const state = host.state(id);
-    if (state === 'wait') continue;
-    if (state === 'gone' || state === 'readOnly') {
-      host.discarded(id, items);
-      delete queues[id];
-      host.settle(id, []);
-      continue;
+  legacy: LegacyFollowUps<T>,
+  hooks: LegacyQueueHooks<T>,
+): Promise<void> {
+  for (const [conversationId, items] of Object.entries(legacy.queues)) {
+    const target = hooks.resolve(conversationId);
+    if (target.kind === 'wait') continue;
+    if (target.kind === 'gone') { hooks.settle(conversationId, items); continue; }
+    const paused = legacy.paused.includes(conversationId);
+    if (paused && !target.control) continue;
+    let outcome: LegacyAddResult = 'added';
+    for (const [index, item] of items.entries()) {
+      outcome = await hooks.add(conversationId, item, paused && index === 0);
+      if (outcome !== 'added') break;
     }
-    const wasPaused = legacy.paused.includes(id);
-    if (wasPaused && !state.control) continue;
-    let remaining = items;
-    while (remaining.length) {
-      const result = await host.add(id, remaining[0], wasPaused);
-      if (result === 'transient') break;
-      if (result === 'discard') { host.discarded(id, remaining); remaining = []; host.settle(id, remaining); break; }
-      remaining = remaining.slice(1);
-      host.settle(id, remaining);
-    }
-    if (remaining.length) queues[id] = remaining; else delete queues[id];
+    if (outcome === 'added') hooks.settle(conversationId, []);
+    else if (outcome === 'gone') hooks.settle(conversationId, items);
   }
-  return { queues, paused: legacy.paused.filter((id) => id in queues) };
 }

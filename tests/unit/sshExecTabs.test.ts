@@ -139,6 +139,9 @@ describe('Agent SSH log tab', () => {
     await act(async () => { (element as HTMLElement).click(); });
   };
   const buttonWithText = (text: string) => Array.from(container.querySelectorAll('button')).find(button => button.textContent?.trim() === text);
+  /** The switch input whose visible label reads `text`. */
+  const switchWithLabel = (text: string) => Array.from(container.querySelectorAll('label'))
+    .find(label => label.textContent?.trim() === text)?.querySelector('input[role="switch"]');
 
   beforeAll(() => { Object.assign(globalThis, { React, IS_REACT_ACT_ENVIRONMENT: true }); });
   beforeEach(() => {
@@ -210,7 +213,8 @@ describe('Agent SSH log tab', () => {
     expect(cardIds()).toEqual(['b', 'd']);
     await press(buttonWithText('全部主机'));
     expect(cardIds()).toEqual(['a', 'b', 'c', 'd']);
-    await press(buttonWithText('只看失败'));
+    await press(switchWithLabel('只看失败'));
+    expect((switchWithLabel('只看失败') as HTMLInputElement).checked).toBe(true);
     expect(cardIds()).toEqual(['b', 'd']);
     await press(buttonWithText('prod'));
     expect(cardIds()).toEqual([]);
@@ -243,17 +247,17 @@ describe('Agent SSH log tab', () => {
     expect(pre.className).not.toMatch(/whitespace-pre-wrap|break-all|break-words/);
     expect(pre.className).toContain('overflow-x-auto');
     expect(pre.querySelector('[data-stream="stdout"]')?.textContent).toBe(`${table}\n`);
-    expect(pre.querySelector('[data-stream="stderr"]')?.className).toContain('text-danger');
+    expect(pre.querySelector('[data-stream="stderr"]')?.className).toContain('text-text-error-primary');
     expect(wide.textContent).toContain('目录');
     expect(wide.querySelector('code')?.textContent).toBe('/srv');
 
     const longPre = longCard.querySelector('pre')!;
-    expect(longPre.style.maxHeight).toContain('18.6em'); // 12 lines × 1.55
+    expect(longPre.style.maxHeight).toBe('calc(12lh + 1rem)'); // 12 lines plus padding
     expect(longCard.textContent).toContain('64 KiB');
     await press(buttonWithText('展开全部 · 20 行'));
     expect(longPre.style.maxHeight).toBe('');
     await press(buttonWithText('收起'));
-    expect(longPre.style.maxHeight).toContain('18.6em'); // 12 lines × 1.55
+    expect(longPre.style.maxHeight).toBe('calc(12lh + 1rem)'); // 12 lines plus padding
 
     expect(empty.querySelector('pre')).toBeNull();
     expect(empty.textContent).toContain('无输出');

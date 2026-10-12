@@ -62,17 +62,22 @@ function renderCard({ items = models }: { items?: ProviderModelDescriptor[] } = 
   return { onSelectModel };
 }
 
-const trigger = () => document.querySelector<HTMLElement>('.composer-model-card__trigger')!;
+const ITEM = '[role="menuitemradio"], [role="menuitem"]';
+const pickerDialog = () => document.querySelector<HTMLElement>('[role="dialog"][aria-label="选择模型"]');
+const trigger = () => document.querySelector<HTMLElement>('button[aria-label="选择模型"]')!;
 const searchInput = () => document.querySelector<HTMLInputElement>('input[aria-label="搜索模型"]');
-const options = () => [...document.querySelectorAll<HTMLElement>('.composer-model-card__listbox .composer-model-card__list-item')];
-const familyItems = () =>
-  [...document.querySelectorAll<HTMLElement>('.composer-model-card__families .composer-model-card__list-item')];
-const versionItems = () =>
-  [...document.querySelectorAll<HTMLElement>('.composer-model-card__versions .composer-model-card__list-item')];
-const dropdownOpen = () => document.querySelector('.composer-model-card__listbox') !== null;
+const menuItems = (menuLabel: string) =>
+  [...(document.querySelector(`[role="menu"][aria-label="${menuLabel}"]`)?.querySelectorAll<HTMLElement>(ITEM) ?? [])];
+const options = () => menuItems('选择模型');
+const familyItems = () => menuItems('模型系列');
+const versionItems = () => [...document.querySelectorAll<HTMLElement>(`[data-model-pane="versions"] :is(${ITEM})`)];
+const emptyStateText = () => (pickerDialog()?.querySelector('[role="menu"]') ? null : pickerDialog()?.textContent ?? null);
+const dropdownOpen = () => pickerDialog() !== null;
 
 async function openPicker() {
   await act(async () => { trigger().click(); });
+  // The picker focuses its search field on the next animation frame.
+  await act(async () => { await new Promise(resolve => requestAnimationFrame(() => resolve(undefined))); });
   expect(searchInput(), 'search input').toBeTruthy();
 }
 
@@ -109,7 +114,7 @@ it('shows an empty state, supports clearing, selects by click, and resets on reo
   await openPicker();
   await search('no-such-model');
   expect(options()).toHaveLength(0);
-  expect(document.querySelector('.composer-model-card__empty')?.textContent).toContain('未找到匹配的模型');
+  expect(emptyStateText()).toContain('未找到匹配的模型');
   const clear = document.querySelector<HTMLButtonElement>('button[aria-label="清除搜索"]')!;
   expect(clear).toBeTruthy();
   await act(async () => { clear.click(); });
@@ -158,7 +163,7 @@ it('renders the empty state for an empty catalog and keeps search usable', async
   const { onSelectModel } = renderCard({ items: [] });
   await openPicker();
   expect(options()).toHaveLength(0);
-  expect(document.querySelector('.composer-model-card__empty')?.textContent).toContain('未找到匹配的模型');
+  expect(emptyStateText()).toContain('未找到匹配的模型');
   await search('claude');
   expect(searchInput()!.value).toBe('claude');
   expect(options()).toHaveLength(0);
@@ -192,7 +197,7 @@ it('groups family-tagged models into a two-pane family/version picker', async ()
   // Searching flattens the hierarchy into a single filtered list.
   await openPicker();
   await search('opus');
-  expect(document.querySelector('.composer-model-card__versions')).toBeNull();
+  expect(document.querySelector('[data-model-pane="versions"]')).toBeNull();
   const flat = options();
   expect(flat.map(option => option.textContent)).toEqual(['opus', 'Opus 5.5', 'Opus 4.6']);
 });

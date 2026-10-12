@@ -2,7 +2,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import * as React from 'react';
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { toast } from '@heroui/react';
+import { toast } from '../../src/renderer/components/ui/toast';
 import { useTodeXSession, type TodeXSession } from '../../src/renderer/session/useTodeXSession';
 import { loadJson, saveJson } from '../../src/renderer/lib/storage';
 import { ConversationControls } from '../../src/renderer/components/ConversationControls';
@@ -68,7 +68,7 @@ beforeEach(() => {
   manifestStatus = 'idle';
   manifestSequence = 0;
   journal = [];
-  storedQueue = {};
+  storedQueue = undefined;
   storedConversations = [];
   extraManifests = [];
   TestSocket.instances = [];
@@ -203,6 +203,14 @@ it('keeps legacy candidates untouched on a backend without a queue', async () =>
   }
 });
 
+it('drops an empty or corrupt legacy key without sending anything', async () => {
+  storedQueue = {};
+  const socket = await mount();
+  await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+  expect(framesOf(socket, 'conversation.queue.add')).toHaveLength(0);
+  expect(vi.mocked(saveJson).mock.calls.filter(([key]) => key === LEGACY_KEY)).toEqual([[LEGACY_KEY, undefined]]);
+});
+
 it('rejects a busy send on a backend without a queue and keeps the composer', async () => {
   provider.capabilities.backendQueue = false;
   try {
@@ -216,7 +224,7 @@ it('rejects a busy send on a backend without a queue and keeps the composer', as
     expect(framesOf(socket, 'conversation.queue.add')).toHaveLength(0);
     expect(framesOf(socket, 'conversation.prompt')).toHaveLength(0);
     expect(session.chatDrafts.c).toBe('next step');
-    expect(session.lastError).toBe(t('sess.backendQueueRequired'));
+    expect(session.lastError).toBe(t('sess.queueNeedsUpgrade'));
     expect(vi.mocked(saveJson).mock.calls.filter(([key]) => String(key).includes('follow-ups'))).toEqual([]);
   } finally {
     provider.capabilities.backendQueue = true;
@@ -250,16 +258,17 @@ describe('legacy candidate migration', () => {
     });
   };
 
-  it('adds the items in order and removes the local copy only after the backend took them', async () => {
+  it('adds the items in order and removes the local copy only after the backend took them all', async () => {
     storedQueue = { c: [legacyItem('q1', 'first'), legacyItem('q2', 'second')] };
     const socket = await mount();
     await act(async () => { await vi.advanceTimersByTimeAsync(50); });
     expect(framesOf(socket, 'conversation.queue.add').map(frame => frame.payload.itemId)).toEqual(['q1']);
     await acknowledge(socket, framesOf(socket, 'conversation.queue.add')[0]);
     expect(framesOf(socket, 'conversation.queue.add').map(frame => frame.payload.itemId)).toEqual(['q1', 'q2']);
-    expect(vi.mocked(saveJson).mock.calls.filter(([key]) => key === LEGACY_KEY).at(-1)![1]).toMatchObject({ queues: { c: [{ id: 'q2' }] } });
+    // The conversation's local copy stays whole until every item was taken.
+    expect(vi.mocked(saveJson).mock.calls.filter(([key]) => key === LEGACY_KEY)).toEqual([]);
     await acknowledge(socket, framesOf(socket, 'conversation.queue.add')[1]);
-    expect(vi.mocked(saveJson).mock.calls.filter(([key]) => key === LEGACY_KEY).at(-1)).toEqual([LEGACY_KEY, undefined]);
+    expect(vi.mocked(saveJson).mock.calls.filter(([key]) => key === LEGACY_KEY)).toEqual([[LEGACY_KEY, undefined]]);
   });
 
   it('keeps a paused conversation paused when the backend can pause on add', async () => {
@@ -295,7 +304,7 @@ describe('legacy candidate migration', () => {
     const socket = await mount();
     await act(async () => { await vi.advanceTimersByTimeAsync(100); });
     expect(framesOf(socket, 'conversation.queue.add')).toHaveLength(0);
-    const notice = session.timeline.find(entry => entry.title === t('sess.legacyCandidatesDiscarded'));
+    const notice = session.timeline.find(entry => entry.title === t('sess.queueDiscarded'));
     expect(notice?.conversationId).toBe('ro');
     expect(notice?.subtitle).toContain('read only text');
     expect(session.lastError).toContain('lost text');
@@ -312,7 +321,7 @@ describe('legacy candidate migration', () => {
       await vi.advanceTimersByTimeAsync(10);
     });
     expect(vi.mocked(saveJson).mock.calls.filter(([key]) => key === LEGACY_KEY)).toEqual([]);
-    expect(session.timeline.some(entry => entry.title === t('sess.legacyCandidatesDiscarded'))).toBe(false);
+    expect(session.timeline.some(entry => entry.title === t('sess.queueDiscarded'))).toBe(false);
   });
 });
 
@@ -372,7 +381,10 @@ it('returns a held send to the composer when the backend conversation cannot be 
   expect(session.chatDrafts[id]).toBe('');
   await act(async () => { fail(); await vi.advanceTimersByTimeAsync(100); });
   expect(framesOf(socket, 'conversation.queue.add')).toHaveLength(0);
-  expect(session.chatDrafts[id]).toBe('first\n\nsecond');
+  // Desktop returns the held message in front of what the composer holds
+  // (here the failed first prompt) and reports why.
+  expect(session.chatDrafts[id]).toBe('second\n\nfirst');
+  expect(session.lastError).toBe(t('sess.queueHeldRestored'));
 });
 
 it('pauses the queue through the backend', async () => {

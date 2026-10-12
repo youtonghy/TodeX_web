@@ -65,7 +65,7 @@ test('renders Pi plugin state, protects drafts, routes commands and stops the ru
     localStorage.setItem('todex.web.activeSelection.v1', JSON.stringify({ workspaceId: 'workspace-pi', conversationId: manifest.id }));
   }, { backend, manifest });
   await page.goto('/app');
-  const composer = page.getByPlaceholder('发送消息，或粘贴 / 拖入文本文件');
+  const composer = page.getByRole('textbox', { name: '消息输入' });
   await expect(composer).toBeVisible();
   await expect.poll(() => requests.some(item => item.type === 'session.resume')).toBe(true);
   publish('provider.runtime', { provider: 'pi', runtimeId: 'runtime-browser', status: 'ready' });
@@ -75,15 +75,15 @@ test('renders Pi plugin state, protects drafts, routes commands and stops the ru
   ui('setWidget', { widgetKey: 'summary', widgetLines: ['任务准备完成', '等待下一步'], widgetPlacement: 'aboveEditor' });
   ui('setWidget', { widgetKey: 'footer', widgetLines: ['插件补充说明'], widgetPlacement: 'belowEditor' });
   ui('set_editor_text', { text: '历史建议' }, 'replay');
-  await expect(composer).toHaveValue('');
+  await expect(composer).toHaveText('');
   ui('set_editor_text', { text: '新建议' });
-  await expect(composer).toHaveValue('新建议');
+  await expect(composer).toHaveText('新建议');
   await composer.fill('用户未发送的草稿');
   ui('set_editor_text', { text: '替换后的草稿' });
   await expect(page.getByRole('button', { name: '替换草稿', exact: true })).toBeVisible();
-  await expect(composer).toHaveValue('用户未发送的草稿');
+  await expect(composer).toHaveText('用户未发送的草稿');
   await page.getByRole('button', { name: '替换草稿', exact: true }).click();
-  await expect(composer).toHaveValue('替换后的草稿');
+  await expect(composer).toHaveText('替换后的草稿');
   publish('extension.message', { provider: 'pi', runtimeId: 'runtime-browser', scope: 'session', messageId: 'custom-visible',
     message: { role: 'custom', customType: 'smoke', content: '插件的 **自定义消息**', display: true } });
   ui('notify', { message: '后台任务完成', notifyType: 'info' });
@@ -92,17 +92,17 @@ test('renders Pi plugin state, protects drafts, routes commands and stops the ru
   await expect(page.getByText('Pi 插件 · smoke')).toBeVisible();
   await composer.fill('/usage ');
   await composer.press('Enter');
-  await expect(composer).toHaveValue('/usage ');
+  await expect(composer).toHaveText('/usage ');
   await expect(page.getByText('此入口依赖 Pi 终端界面，当前 RPC 无法显示。请在 Pi 终端使用此功能。', { exact: true })).toBeVisible();
   expect(requests.some(item => item.type === 'conversation.prompt')).toBe(false);
   await composer.fill('/compact');
   await expect(page.getByRole('option', { name: /原生插件压缩入口/ })).toBeVisible();
   await composer.press('Enter');
-  await expect(composer).toHaveValue('/compact ');
+  await expect(composer).toHaveText('/compact ');
   expect(requests.some(item => item.type === 'conversation.compact')).toBe(false);
   await composer.press('Enter');
   await expect.poll(() => requests.some(item => item.type === 'conversation.prompt' && item.payload.text === '/compact')).toBe(true);
-  await expect(composer).toHaveValue('');
+  await expect(composer).toHaveText('');
   for (const method of ['select', 'confirm', 'input', 'editor']) {
     const permissionId = `permission-${method}`;
     publish('permission.requested', { permissionId, kind: 'extension_ui', title: `后台 ${method}`, scope: 'session', runtimeId: 'runtime-browser',
@@ -110,7 +110,11 @@ test('renders Pi plugin state, protects drafts, routes commands and stops the ru
       options: [{ optionId: 'answer', name: 'Respond', kind: 'answer' }, { optionId: 'reject_once', name: 'Cancel', kind: 'reject_once' }] });
     const field = page.getByLabel(`后台 ${method}`, { exact: false });
     await expect(field).toBeVisible();
-    if (method === 'select' || method === 'confirm') await field.selectOption(method === 'select' ? '1' : 'false');
+    if (method === 'select' || method === 'confirm') {
+      // A listbox select: open it, then pick the option by its label.
+      await field.click();
+      await page.getByRole('option', { name: method === 'select' ? 'B' : '否', exact: true }).click();
+    }
     else {
       if (method === 'editor') await expect(field).toHaveValue('预填第一行\n预填第二行');
       await field.fill(method === 'editor' ? '回答第一行\n回答第二行' : '后台输入');

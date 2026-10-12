@@ -1,10 +1,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Button, Description, FieldError, Input, Label, ListBox, Modal, Select, Spinner, Surface, Tabs, TextArea, TextField, toast } from '@heroui/react';
 import { RiAddLine, RiDeleteBin6Line, RiEyeLine, RiEyeOffLine } from '@remixicon/react';
 import type { CliSettingsDocument, CliSettingsProvider, V2ApiClient } from '@todex/protocol/v2';
 import { isConflictError } from '@todex/protocol/connectionError';
-import { SelectOption } from '../cleanup/CleanupParts';
-import { useT, type MessageKey } from '../../i18n';
+import { Button } from '@/components/base/buttons/button';
+import { Input } from '@/components/base/input/input';
+import { Select, SelectItem } from '@/components/base/select/select';
+import { Tab, TabList, TabPanel, Tabs } from '@/components/base/tabs/tabs';
+import { Textarea } from '@/components/base/textarea/textarea';
+import { Alert } from '@/components/ui/alert';
+import { IconAction } from '@/components/ui/icon-action';
+import { Modal } from '@/components/ui/modal';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Spinner } from '@/components/ui/spinner';
+import { toast } from '@/components/ui/toast';
+import { SettingsCard, SettingsGroup, SettingsRow, SETTINGS_ROW } from '@/components/settings/SettingsRows';
+import { useT, type MessageKey } from '@/i18n';
+import { cx } from '@/utils/cx';
 import {
   CLI_SETTINGS,
   ENV_NAME,
@@ -21,7 +32,7 @@ import {
   type FieldSpec,
   type OptionValue,
   type SettingsObject,
-} from '../../lib/cliSettings';
+} from '@/lib/cliSettings';
 import { CliInstructionsPanel, useCliInstructions } from './CliInstructionsTab';
 
 type TabId = 'form' | 'env' | 'raw' | 'agents';
@@ -36,20 +47,29 @@ export function CliSettingsModal({ provider, onClose, api }: {
   onClose: () => void;
   api: () => V2ApiClient;
 }) {
+  const t = useT();
+  // Keeps the last schema while the modal animates out.
+  const lastProvider = useRef<CliSettingsProvider>('claude-code');
+  if (provider) lastProvider.current = provider;
+  const schema = CLI_SETTINGS[lastProvider.current];
   return (
-    <Modal.Backdrop isOpen={provider !== null} onOpenChange={(open) => { if (!open) onClose(); }} isDismissable={false}>
-      <Modal.Container>
-        <Modal.Dialog className="flex h-[min(760px,90vh)] flex-col sm:max-w-2xl">
-          {provider ? <CliSettingsEditor key={provider} schema={CLI_SETTINGS[provider]} api={api} onClose={onClose} /> : null}
-        </Modal.Dialog>
-      </Modal.Container>
-    </Modal.Backdrop>
+    <Modal
+      isOpen={provider !== null}
+      onOpenChange={(open) => { if (!open) onClose(); }}
+      title={t('cliSettings.title', { name: schema.name })}
+      size="2xl"
+      className="h-[min(760px,calc(100dvh-32px))]"
+      isDismissable={false}
+      bodyClassName="flex flex-col overflow-hidden pb-0"
+    >
+      {provider ? <CliSettingsEditor key={provider} schema={schema} api={api} onClose={onClose} /> : null}
+    </Modal>
   );
 }
 
 function CliSettingsEditor({ schema, api, onClose }: { schema: CliSettingsSchema; api: () => V2ApiClient; onClose: () => void }) {
-  const t = useT();
   const { provider, envPath } = schema;
+  const t = useT();
   const [doc, setDoc] = useState<CliSettingsDocument>();
   const [loadError, setLoadError] = useState<string>();
   const [draft, setDraft] = useState<SettingsObject>({});
@@ -142,116 +162,95 @@ function CliSettingsEditor({ schema, api, onClose }: { schema: CliSettingsSchema
     }
   };
 
-  const header = (
-    <Modal.Header className="flex flex-col items-start gap-1">
-      <Modal.Heading>{t('cliSettings.title', { name: schema.name })}</Modal.Heading>
-      {/* The AGENTS.md tab names its own file. */}
-      {doc ? <p className={`text-muted w-full truncate text-xs${editingAgents ? ' invisible' : ''}`} dir="ltr" title={doc.path}>{doc.path}</p> : null}
-    </Modal.Header>
-  );
-
-  if (loadError || !doc) {
+  if (loadError) {
     return (
-      <>
-        {header}
-        <Modal.Body className="flex flex-col gap-3">
-          {loadError ? (
-            <Surface variant="secondary" className="flex flex-col items-start gap-2 rounded-2xl p-4">
-              <p className="text-danger text-sm font-medium">{t('cliSettings.readFailed')}</p>
-              <p className="text-muted text-sm">{loadError}</p>
-              <Button size="sm" variant="secondary" onPress={() => void load()}>{t('cliSettings.retry')}</Button>
-            </Surface>
-          ) : (
-            <div className="flex min-h-48 items-center justify-center"><Spinner aria-label={t('cliSettings.reading')} /></div>
-          )}
-        </Modal.Body>
-        <Modal.Footer><Button variant="tertiary" onPress={onClose}>{t('controls.close')}</Button></Modal.Footer>
-      </>
+      <Alert
+        status="danger"
+        title={t('cliSettings.readFailed')}
+        description={loadError}
+        actions={<Button size="small" variant="secondary" onClick={() => void load()}>{t('cliSettings.retry')}</Button>}
+      />
     );
+  }
+  if (!doc) {
+    return <div className="flex min-h-48 items-center justify-center"><Spinner size="md" aria-label={t('cliSettings.reading')} /></div>;
   }
 
   return (
-    <>
-      {header}
-      <Modal.Body className="flex min-h-0 flex-1 flex-col">
-        <Tabs selectedKey={tab} onSelectionChange={(next) => setTab(TAB_IDS.find((id) => id === next) ?? 'form')} className="flex min-h-0 flex-1 flex-col gap-4">
-          <Tabs.ListContainer>
-            <Tabs.List aria-label={t('cliSettings.tabsLabel')}>
-              <Tabs.Tab id="form" isDisabled={!saved}>{t('cliSettings.tabForm')}<Tabs.Indicator /></Tabs.Tab>
-              {envPath ? (
-                <Tabs.Tab id="env" isDisabled={!saved} className="gap-1.5">
-                  {t('cliSettings.tabEnv')}{env.length ? <span className="text-muted text-xs tabular-nums">{env.length}</span> : null}<Tabs.Indicator />
-                </Tabs.Tab>
-              ) : null}
-              <Tabs.Tab id="raw">{t('cliSettings.tabRaw')}<Tabs.Indicator /></Tabs.Tab>
-              <Tabs.Tab id="agents">AGENTS.md<Tabs.Indicator /></Tabs.Tab>
-            </Tabs.List>
-          </Tabs.ListContainer>
-          <div className="min-h-0 flex-1 overflow-y-auto">
-            <Tabs.Panel id="form" className="flex flex-col gap-5">
-              <p className="text-muted text-sm">{doc.exists ? t(schema.hints.scope) : t('cliSettings.missingHint')}</p>
-              {schema.groups.map((group) => (
-                <section key={group.id} className="flex flex-col gap-2">
-                  <h3 className="text-muted px-1 text-xs font-medium">{t(key(`${schema.keyPrefix}.group.${group.id}`))}</h3>
-                  <Surface variant="secondary" className="divide-separator flex flex-col divide-y rounded-2xl px-4">
-                    {group.fields.map((field) => (
-                      <SettingsField
-                        key={fieldId(field.path)}
-                        field={field}
-                        keyPrefix={schema.keyPrefix}
-                        value={getAt(draft, field.path)}
-                        onChange={(value) => setDraft((current) => setAt(current, field.path, value))}
-                      />
-                    ))}
-                  </Surface>
-                </section>
-              ))}
-              <p className="text-muted text-sm">{t(schema.hints.moreInRaw)}</p>
-            </Tabs.Panel>
-            {envPath ? (
-              <Tabs.Panel id="env" className="flex flex-col gap-3">
-                {schema.hints.env ? <p className="text-muted text-sm">{t(schema.hints.env)}</p> : null}
-                <EnvEditor rows={env} onChange={setEnv} nextKey={() => nextEnvKey.current++} />
-              </Tabs.Panel>
-            ) : null}
-            <Tabs.Panel id="raw" className="flex flex-col gap-3">
-              {doc.parseError ? (
-                <Surface variant="secondary" className="flex flex-col gap-1 rounded-2xl p-4">
-                  <p className="text-warning text-sm font-medium">{t('cliSettings.parseError', { file: fileName })}</p>
-                  <p className="text-muted font-mono text-xs">{doc.parseError}</p>
-                </Surface>
-              ) : null}
-              {rawRevealed || !doc.exists ? (
-                <TextField className="w-full" value={rawText} onChange={setRawText} isInvalid={Boolean(rawError)} aria-label={fileName}>
-                  <TextArea className="w-full font-mono text-xs" rows={22} spellCheck="false" />
-                  {rawError ? <FieldError>{rawError}</FieldError> : <Description>{t(doc.format === 'toml' ? 'cliSettings.rawHintToml' : 'cliSettings.rawHintJson')}</Description>}
-                </TextField>
-              ) : (
-                <Surface variant="secondary" className="flex items-center gap-3 rounded-2xl p-4">
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium">{t('cliSettings.rawHiddenTitle')}</p>
-                    <p className="text-muted text-sm">{t(schema.hints.rawHidden)}</p>
-                  </div>
-                  <Button size="sm" variant="secondary" onPress={() => setRawRevealed(true)}>
-                    <RiEyeLine className="size-4" />{t('cliSettings.reveal')}
-                  </Button>
-                </Surface>
-              )}
-            </Tabs.Panel>
-            <Tabs.Panel id="agents">
-              <CliInstructionsPanel state={instructions} />
-            </Tabs.Panel>
-          </div>
-        </Tabs>
-      </Modal.Body>
-      <Modal.Footer className="flex-wrap">
+    <div className="flex min-h-0 flex-1 flex-col gap-3">
+      {/* The AGENTS.md tab names its own file. */}
+      <p className={cx('truncate text-body-2-regular text-text-secondary', editingAgents && 'invisible')} dir="ltr" title={doc.path}>{doc.path}</p>
+      <Tabs selectedKey={tab} onSelectionChange={(next) => setTab(TAB_IDS.find((id) => id === next) ?? 'form')} className="min-h-0 flex-1 gap-0">
+        <TabList aria-label={t('cliSettings.tabsLabel')}>
+          <Tab id="form" isDisabled={!saved}>{t('cliSettings.tabForm')}</Tab>
+          {envPath ? <Tab id="env" isDisabled={!saved} count={env.length || undefined}>{t('cliSettings.tabEnv')}</Tab> : null}
+          <Tab id="raw">{t('cliSettings.tabRaw')}</Tab>
+          <Tab id="agents">AGENTS.md</Tab>
+        </TabList>
+        <ScrollArea surface="full" className="-mx-6 flex-1" contentClassName="px-6 pt-4 pb-4">
+          <TabPanel id="form" className="flex flex-col gap-5">
+            <p className="px-3 text-body-2-regular text-text-secondary">
+              {doc.exists ? t(schema.hints.scope) : t('cliSettings.missingHint')}
+            </p>
+            {schema.groups.map((group) => (
+              <SettingsGroup key={group.id} label={t(key(`${schema.keyPrefix}.group.${group.id}`))}>
+                <SettingsCard>
+                  {group.fields.map((field) => (
+                    <SettingsField
+                      key={fieldId(field.path)}
+                      field={field}
+                      keyPrefix={schema.keyPrefix}
+                      value={getAt(draft, field.path)}
+                      onChange={(value) => setDraft((current) => setAt(current, field.path, value))}
+                    />
+                  ))}
+                </SettingsCard>
+              </SettingsGroup>
+            ))}
+            <p className="px-3 text-body-2-regular text-text-secondary">{t(schema.hints.moreInRaw)}</p>
+          </TabPanel>
+          {envPath ? (
+            <TabPanel id="env" className="flex flex-col gap-3">
+              {schema.hints.env ? <p className="px-3 text-body-2-regular text-text-secondary">{t(schema.hints.env)}</p> : null}
+              <EnvEditor rows={env} onChange={setEnv} nextKey={() => nextEnvKey.current++} />
+            </TabPanel>
+          ) : null}
+          <TabPanel id="raw" className="flex flex-col gap-3">
+            {doc.parseError ? <Alert status="warning" title={t('cliSettings.parseError', { file: fileName })} description={doc.parseError} /> : null}
+            {rawRevealed || !doc.exists ? (
+              <Textarea
+                className="w-full"
+                aria-label={fileName}
+                value={rawText}
+                onChange={setRawText}
+                rows={22}
+                spellCheck="false"
+                isInvalid={Boolean(rawError)}
+                hint={rawError ?? t(doc.format === 'toml' ? 'cliSettings.rawHintToml' : 'cliSettings.rawHintJson')}
+                inputClassName="font-mono text-caption-1-regular"
+              />
+            ) : (
+              <Alert
+                status="neutral"
+                title={t('cliSettings.rawHiddenTitle')}
+                description={t(schema.hints.rawHidden)}
+                actions={<Button size="small" variant="secondary" leadingIcon={RiEyeLine} onClick={() => setRawRevealed(true)}>{t('cliSettings.reveal')}</Button>}
+              />
+            )}
+          </TabPanel>
+          <TabPanel id="agents">
+            <CliInstructionsPanel state={instructions} />
+          </TabPanel>
+        </ScrollArea>
+      </Tabs>
+      <div className="flex shrink-0 flex-wrap items-center justify-end gap-2.5 border-t border-separator-border pt-4 pb-6">
         {unsavedElsewhere ? (
-          <span className="text-muted me-auto text-sm">{t(unsavedElsewhere)}</span>
+          <span className="me-auto text-body-2-regular text-text-secondary">{t(unsavedElsewhere)}</span>
         ) : null}
-        <Button variant="tertiary" isDisabled={saving || instructions.busy} onPress={onClose}>{t('controls.close')}</Button>
-        <Button isDisabled={!canSave} onPress={() => void save()}>{(editingAgents ? instructions.busy : saving) ? <Spinner size="sm" /> : null}{t('common.save')}</Button>
-      </Modal.Footer>
-    </>
+        <Button variant="secondary" onClick={onClose} disabled={saving || instructions.busy}>{t('common.close')}</Button>
+        <Button onClick={() => void save()} disabled={!canSave} aria-busy={(editingAgents ? instructions.busy : saving) || undefined}>{t('common.save')}</Button>
+      </div>
+    </div>
   );
 }
 
@@ -264,33 +263,7 @@ function rawObjectError(text: string): string | null {
   }
 }
 
-/** Label + description on the left, the control on the right. */
-function FieldRow({ label, description, children }: { label: string; description: ReactNode; children: ReactNode }) {
-  return (
-    <div className="flex min-h-14 items-center justify-between gap-4 py-2.5">
-      <div className="min-w-0 flex-1">
-        <p className="text-sm">{label}</p>
-        <p className="text-muted text-xs">{description}</p>
-      </div>
-      <div className="flex shrink-0 items-center gap-2">{children}</div>
-    </div>
-  );
-}
-
-function CompactSelect({ label, selectedKey, onChange, options }: {
-  label: string; selectedKey: string; onChange: (key: string) => void; options: { id: string; label: string }[];
-}) {
-  return (
-    <Select aria-label={label} className="w-44" selectedKey={selectedKey} onSelectionChange={(next) => { if (next != null) onChange(String(next)); }}>
-      <Select.Trigger className="w-full"><Select.Value /><Select.Indicator /></Select.Trigger>
-      <Select.Popover>
-        <ListBox>
-          {options.map((option) => <SelectOption key={option.id} id={option.id} label={option.label} />)}
-        </ListBox>
-      </Select.Popover>
-    </Select>
-  );
-}
+const COMPACT_SELECT = { className: 'w-44', triggerClassName: 'h-8 rounded-lg px-2 py-1.5', popoverClassName: 'w-(--trigger-width)' } as const;
 
 function SettingsField({ field, keyPrefix, value, onChange }: {
   field: FieldSpec; keyPrefix: string; value: unknown; onChange: (value: unknown) => void;
@@ -301,18 +274,17 @@ function SettingsField({ field, keyPrefix, value, onChange }: {
   const description = (
     <>
       {t(key(`${keyPrefix}.hint.${id}`))}
-      <span className="ms-1.5 font-mono opacity-70" dir="ltr">{id}</span>
+      <span className="ms-1.5 font-mono text-caption-1-regular text-text-tertiary" dir="ltr">{id}</span>
     </>
   );
-  const unset = { id: UNSET, label: t('cliSettings.unset') };
+  const unsetLabel = t('cliSettings.unset');
 
+  if (field.kind === 'lines') {
+    return <LinesField label={label} description={description} placeholder={field.placeholder} value={value} onChange={onChange} />;
+  }
+
+  let control;
   switch (field.kind) {
-    case 'lines':
-      return <LinesField label={label} description={description} placeholder={field.placeholder} value={value} onChange={onChange} />;
-    case 'integer':
-      return <IntegerField label={label} description={description} placeholder={unset.label} min={field.min} max={field.max} value={value} onChange={onChange} />;
-    case 'attribution':
-      return <AttributionField label={label} description={description} value={value} onChange={onChange} />;
     case 'bool':
     case 'enum': {
       const options: OptionValue[] = field.kind === 'bool' ? [true, false] : field.options;
@@ -324,56 +296,68 @@ function SettingsField({ field, keyPrefix, value, onChange }: {
       // selectable so it is shown and kept as is.
       const known = value === undefined || options.some((option) => option === value);
       const custom = known ? null : optionId(value);
-      return (
-        <FieldRow label={label} description={description}>
-          <CompactSelect
-            label={label}
-            selectedKey={value === undefined ? UNSET : optionId(value)}
-            onChange={(next) => {
-              if (next === UNSET) onChange(undefined);
-              else if (next !== custom) onChange(options.find((option) => optionId(option) === next));
-            }}
-            options={[
-              unset,
-              ...options.map((option) => ({ id: optionId(option), label: optionLabel(option) })),
-              ...(custom ? [{ id: custom, label: typeof value === 'string' ? value : custom }] : []),
-            ]}
-          />
-        </FieldRow>
+      control = (
+        <Select
+          aria-label={label}
+          {...COMPACT_SELECT}
+          selectedKey={value === undefined ? UNSET : optionId(value)}
+          onSelectionChange={(next) => {
+            if (next === UNSET || next == null) onChange(undefined);
+            else if (next !== custom) onChange(options.find((option) => optionId(option) === next));
+          }}
+        >
+          <SelectItem id={UNSET} textValue={unsetLabel}>{unsetLabel}</SelectItem>
+          {options.map((option) => (
+            <SelectItem key={optionId(option)} id={optionId(option)} textValue={optionLabel(option)}>{optionLabel(option)}</SelectItem>
+          ))}
+          {custom ? (
+            <SelectItem id={custom} textValue={typeof value === 'string' ? value : custom}>
+              <span className="truncate" dir="ltr">{typeof value === 'string' ? value : custom}</span>
+            </SelectItem>
+          ) : null}
+        </Select>
       );
+      break;
     }
     case 'disable':
-      return (
-        <FieldRow label={label} description={description}>
-          <CompactSelect
-            label={label}
-            selectedKey={value === 'disable' ? 'disable' : UNSET}
-            onChange={(next) => onChange(next === 'disable' ? 'disable' : undefined)}
-            options={[{ id: UNSET, label: t('cliSettings.allowed') }, { id: 'disable', label: t('cliSettings.disabled') }]}
-          />
-        </FieldRow>
+      control = (
+        <Select aria-label={label} {...COMPACT_SELECT} selectedKey={value === 'disable' ? 'disable' : UNSET} onSelectionChange={(next) => onChange(next === 'disable' ? 'disable' : undefined)}>
+          <SelectItem id={UNSET} textValue={t('cliSettings.allowed')}>{t('cliSettings.allowed')}</SelectItem>
+          <SelectItem id="disable" textValue={t('cliSettings.disabled')}>{t('cliSettings.disabled')}</SelectItem>
+        </Select>
       );
+      break;
+    case 'text':
+      control = (
+        <Input aria-label={label} size="small" className="w-44" inputDir="ltr" placeholder={field.placeholder}
+          value={typeof value === 'string' ? value : ''} onChange={(next) => onChange(next.trim() ? next : undefined)} />
+      );
+      break;
     case 'longtext':
       return (
-        <div className="flex flex-col gap-2 py-2.5">
-          <div className="min-w-0">
-            <p className="text-sm">{label}</p>
-            <p className="text-muted text-xs">{description}</p>
+        <div className={cx(SETTINGS_ROW, 'flex flex-col gap-2')}>
+          <div className="flex min-w-0 flex-col">
+            <div className="text-body-regular text-text-primary">{label}</div>
+            <div className="text-body-2-regular text-text-secondary">{description}</div>
           </div>
-          <TextField aria-label={label} className="w-full" value={typeof value === 'string' ? value : ''} onChange={(next) => onChange(next.trim() ? next : undefined)}>
-            <TextArea className="w-full text-sm" rows={3} placeholder={field.placeholder} />
-          </TextField>
+          <Textarea
+            className="w-full"
+            aria-label={label}
+            value={typeof value === 'string' ? value : ''}
+            rows={3}
+            autoResize
+            maxRows={12}
+            placeholder={field.placeholder}
+            onChange={(next) => onChange(next.trim() ? next : undefined)}
+          />
         </div>
       );
-    case 'text':
-      return (
-        <FieldRow label={label} description={description}>
-          <TextField aria-label={label} className="w-44" value={typeof value === 'string' ? value : ''} onChange={(next) => onChange(next.trim() ? next : undefined)}>
-            <Input className="w-full" dir="ltr" placeholder={field.placeholder} />
-          </TextField>
-        </FieldRow>
-      );
+    case 'integer':
+      return <IntegerField label={label} description={description} placeholder={unsetLabel} min={field.min} max={field.max} value={value} onChange={onChange} />;
+    case 'attribution':
+      return <AttributionField label={label} description={description} value={value} onChange={onChange} />;
   }
+  return <SettingsRow label={label} description={description}>{control}</SettingsRow>;
 }
 
 function IntegerField({ label, description, placeholder, min, max, value, onChange }: {
@@ -388,23 +372,25 @@ function IntegerField({ label, description, placeholder, min, max, value, onChan
     if (value !== (text.trim() === '' ? undefined : parsed)) setText(typeof value === 'number' ? String(value) : '');
   }, [value]);
   return (
-    <FieldRow label={label} description={description}>
-      <TextField
+    <SettingsRow label={label} description={description}>
+      <Input
         aria-label={label}
+        size="small"
         className="w-44"
+        inputMode="numeric"
+        inputDir="ltr"
+        placeholder={placeholder}
         value={text}
         isInvalid={invalid}
+        hint={invalid ? t('cliSettings.integerRange', { min, max }) : undefined}
         onChange={(next) => {
           setText(next);
           const number = Number(next);
           if (next.trim() === '') onChange(undefined);
           else if (Number.isInteger(number) && number >= min && number <= max) onChange(number);
         }}
-      >
-        <Input className="w-full" dir="ltr" inputMode="numeric" placeholder={placeholder} />
-        <FieldError>{t('cliSettings.integerRange', { min, max })}</FieldError>
-      </TextField>
-    </FieldRow>
+      />
+    </SettingsRow>
   );
 }
 
@@ -428,23 +414,24 @@ function AttributionField({ label, description, value, onChange }: {
     onChange(next === 'default' ? undefined : next === 'hidden' ? '' : text);
   };
   return (
-    <div className="flex flex-col pb-2.5">
-      <FieldRow label={label} description={description}>
-        <CompactSelect
-          label={label}
-          selectedKey={mode}
-          onChange={(next) => choose(next === 'hidden' || next === 'custom' ? next : 'default')}
-          options={[
-            { id: 'default', label: t('cliSettings.attributionDefault') },
-            { id: 'hidden', label: t('cliSettings.attributionHidden') },
-            { id: 'custom', label: t('cliSettings.attributionCustom') },
-          ]}
-        />
-      </FieldRow>
+    <div className={SETTINGS_ROW}>
+      <SettingsRow label={label} description={description} className="border-b-0 py-0 pe-0">
+        <Select aria-label={label} {...COMPACT_SELECT} selectedKey={mode} onSelectionChange={(next) => choose(next === 'hidden' || next === 'custom' ? next : 'default')}>
+          <SelectItem id="default" textValue={t('cliSettings.attributionDefault')}>{t('cliSettings.attributionDefault')}</SelectItem>
+          <SelectItem id="hidden" textValue={t('cliSettings.attributionHidden')}>{t('cliSettings.attributionHidden')}</SelectItem>
+          <SelectItem id="custom" textValue={t('cliSettings.attributionCustom')}>{t('cliSettings.attributionCustom')}</SelectItem>
+        </Select>
+      </SettingsRow>
       {mode === 'custom' ? (
-        <TextField aria-label={label} className="w-full" value={text} onChange={onChange}>
-          <TextArea className="w-full font-mono text-xs" rows={3} spellCheck="false" />
-        </TextField>
+        <Textarea
+          className="mt-2 w-full"
+          aria-label={label}
+          value={text}
+          rows={3}
+          spellCheck="false"
+          onChange={onChange}
+          inputClassName="font-mono text-caption-1-regular"
+        />
       ) : null}
     </div>
   );
@@ -460,23 +447,27 @@ function LinesField({ label, description, placeholder, value, onChange }: {
     if (JSON.stringify(lines(text)) !== JSON.stringify(Array.isArray(value) ? value : [])) setText(toText(value));
   }, [value]);
   return (
-    <div className="flex flex-col gap-2 py-2.5">
-      <div className="min-w-0">
-        <p className="text-sm">{label}</p>
-        <p className="text-muted text-xs">{description}</p>
+    <div className={cx(SETTINGS_ROW, 'flex flex-col gap-2')}>
+      <div className="flex min-w-0 flex-col">
+        <div className="text-body-regular text-text-primary">{label}</div>
+        <div className="text-body-2-regular text-text-secondary">{description}</div>
       </div>
-      <TextField
-        aria-label={label}
+      <Textarea
         className="w-full"
+        aria-label={label}
         value={text}
+        rows={3}
+        autoResize
+        maxRows={10}
+        spellCheck="false"
+        placeholder={placeholder}
         onChange={(next) => {
           setText(next);
           const items = lines(next);
           onChange(items.length > 0 ? items : undefined);
         }}
-      >
-        <TextArea className="w-full font-mono text-xs" rows={3} spellCheck="false" placeholder={placeholder} />
-      </TextField>
+        inputClassName="font-mono text-caption-1-regular"
+      />
     </div>
   );
 }
@@ -485,32 +476,54 @@ function EnvEditor({ rows, onChange, nextKey }: { rows: EnvRow[]; onChange: (row
   const t = useT();
   const update = (rowKey: number, changes: Partial<EnvRow>) => onChange(rows.map((row) => (row.key === rowKey ? { ...row, ...changes } : row)));
   return (
-    <Surface variant="secondary" className="divide-separator flex flex-col divide-y rounded-2xl px-4">
+    <SettingsCard>
       {rows.map((row) => {
         const invalid = row.name.trim() !== '' && !ENV_NAME.test(row.name.trim());
         return (
-          <div key={row.key} className="flex items-start gap-2 py-2.5">
-            <TextField aria-label={t('cliSettings.envName')} className="w-56 shrink-0" value={row.name} isInvalid={invalid} onChange={(name) => update(row.key, { name })}>
-              <Input className="w-full font-mono" dir="ltr" placeholder="NAME" />
-              <FieldError>{t('cliSettings.envNameInvalid')}</FieldError>
-            </TextField>
-            <TextField aria-label={t('cliSettings.envValue', { name: row.name })} className="min-w-0 flex-1" value={row.value} onChange={(value) => update(row.key, { value })}>
-              <Input className="w-full font-mono" dir="ltr" type={row.revealed ? 'text' : 'password'} autoComplete="off" />
-            </TextField>
-            <Button isIconOnly size="sm" variant="ghost" aria-label={t(row.revealed ? 'cliSettings.hideValue' : 'cliSettings.showValue')} onPress={() => update(row.key, { revealed: !row.revealed })}>
-              {row.revealed ? <RiEyeOffLine className="size-4" /> : <RiEyeLine className="size-4" />}
-            </Button>
-            <Button isIconOnly size="sm" variant="ghost" aria-label={t('cliSettings.removeEnv', { name: row.name })} onPress={() => onChange(rows.filter((item) => item.key !== row.key))}>
-              <RiDeleteBin6Line className="size-4" />
-            </Button>
+          <div key={row.key} className={cx(SETTINGS_ROW, 'flex items-start gap-2')}>
+            <Input
+              aria-label={t('cliSettings.envName')}
+              size="small"
+              className="w-56 shrink-0"
+              inputDir="ltr"
+              placeholder="NAME"
+              value={row.name}
+              isInvalid={invalid}
+              hint={invalid ? t('cliSettings.envNameInvalid') : undefined}
+              onChange={(name) => update(row.key, { name })}
+              inputClassName="font-mono"
+            />
+            <Input
+              aria-label={t('cliSettings.envValue', { name: row.name })}
+              size="small"
+              className="min-w-0 flex-1"
+              inputDir="ltr"
+              type={row.revealed ? 'text' : 'password'}
+              autoComplete="off"
+              value={row.value}
+              onChange={(value) => update(row.key, { value })}
+              inputClassName="font-mono"
+            />
+            <IconAction
+              icon={row.revealed ? RiEyeOffLine : RiEyeLine}
+              size="md"
+              aria-label={t(row.revealed ? 'cliSettings.hideValue' : 'cliSettings.showValue')}
+              onClick={() => update(row.key, { revealed: !row.revealed })}
+            />
+            <IconAction
+              icon={RiDeleteBin6Line}
+              size="md"
+              aria-label={t('cliSettings.removeEnv', { name: row.name })}
+              onClick={() => onChange(rows.filter((item) => item.key !== row.key))}
+            />
           </div>
         );
       })}
-      <div className="py-2.5">
-        <Button size="sm" variant="ghost" onPress={() => onChange([...rows, { key: nextKey(), name: '', value: '', revealed: true }])}>
-          <RiAddLine className="size-4" />{t('cliSettings.addEnv')}
+      <div className={SETTINGS_ROW}>
+        <Button size="small" variant="ghost" leadingIcon={RiAddLine} onClick={() => onChange([...rows, { key: nextKey(), name: '', value: '', revealed: true }])}>
+          {t('cliSettings.addEnv')}
         </Button>
       </div>
-    </Surface>
+    </SettingsCard>
   );
 }

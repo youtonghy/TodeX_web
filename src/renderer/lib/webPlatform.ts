@@ -69,16 +69,36 @@ export function installWebPlatformBridge(): void {
       focus: () => window.focus(),
       windowChrome: 'native' as const,
     },
-    theme: {
-      shouldUseDark: async () => window.matchMedia('(prefers-color-scheme: dark)').matches,
-      onUpdated: (listener) => {
-        const media = window.matchMedia('(prefers-color-scheme: dark)');
-        const handler = () => listener(media.matches);
-        media.addEventListener('change', handler);
-        return () => media.removeEventListener('change', handler);
-      },
-    },
+    theme: browserTheme(),
   };
 
   window.todexWeb = api;
+}
+
+/** The system scheme from the media query, unless the user picked light or dark. */
+function browserTheme(): TodeXWebApi['theme'] {
+  const listeners = new Set<(dark: boolean) => void>();
+  let source: 'system' | 'light' | 'dark' = 'system';
+  // Looked up on first use, so installing the bridge needs no media queries.
+  let media: MediaQueryList | null = null;
+  const systemMedia = () => {
+    if (!media) {
+      media = window.matchMedia('(prefers-color-scheme: dark)');
+      media.addEventListener('change', () => listeners.forEach((listener) => listener(dark())));
+    }
+    return media;
+  };
+  const dark = () => (source === 'system' ? systemMedia().matches : source === 'dark');
+  return {
+    shouldUseDark: async () => dark(),
+    setSource: (next) => {
+      source = next;
+      listeners.forEach((listener) => listener(dark()));
+    },
+    onUpdated: (listener) => {
+      systemMedia();
+      listeners.add(listener);
+      return () => { listeners.delete(listener); };
+    },
+  };
 }

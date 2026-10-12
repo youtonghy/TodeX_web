@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Chip, Description, Label, ListBox, Modal, Select, Spinner, toast } from '@heroui/react';
+import { Chip } from '@/components/base/badges/chip';
+import { Select, SelectItem } from '@/components/base/select/select';
+import { Modal } from '@/components/ui/modal';
+import { SpinnerIcon } from '@/components/ui/spinner';
+import { toast } from '@/components/ui/toast';
+import { cx } from '@/utils/cx';
 import type {
   HistoryCleanupPolicyResponse,
   NativeHistoryProvider,
@@ -16,7 +21,6 @@ import {
   pathName,
   reportCleanupResult,
   SelectableHistoryList,
-  SelectOption,
   StorageSummaryCard,
   withCurrent,
   type HistoryListItem,
@@ -32,42 +36,42 @@ function TranscriptModal({ transcript, loading, onClose }: {
   onClose: () => void;
 }) {
   const t = useT();
-  const roleLabel: Record<string, string> = { user: t('cleanup.roleUser'), assistant: t('cleanup.roleAssistant'), tool: t('cleanup.roleTool'), system: t('cleanup.roleSystem') };
+  const roleLabel = { user: t('cleanup.roleUser'), assistant: t('cleanup.roleAssistant'), tool: t('cleanup.roleTool'), system: t('cleanup.roleSystem') };
   return (
-    <Modal.Backdrop isOpen={loading || transcript !== null} onOpenChange={(open) => { if (!open) onClose(); }}>
-      <Modal.Container>
-        <Modal.Dialog className="max-h-[88vh] sm:max-w-3xl">
-          <Modal.CloseTrigger />
-          <Modal.Header className="min-w-0">
-            <Modal.Heading className="truncate">{transcript?.title || t('cleanup.untitledSession')}</Modal.Heading>
-            {transcript?.cwd ? <p className="text-muted truncate text-xs" title={transcript.cwd}>{transcript.cwd}</p> : null}
-          </Modal.Header>
-          <Modal.Body className="overflow-y-auto">
-            {loading && !transcript ? (
-              <div className="flex justify-center py-10"><Spinner size="sm" aria-label={t('app.loading')} /></div>
-            ) : transcript ? (
-              <div className="flex flex-col gap-3 pb-2">
-                {transcript.truncated ? (
-                  <p className="text-muted text-xs">{t('cleanup.transcriptTruncated', { shown: transcript.messages.length, total: transcript.totalMessages })}</p>
-                ) : null}
-                {transcript.messages.length === 0 ? <p className="text-muted text-sm">{t('cleanup.transcriptEmpty')}</p> : null}
-                {transcript.messages.map((message, index) => (
-                  <div
-                    key={index}
-                    className={`flex flex-col gap-1 rounded-2xl px-3 py-2${message.role === 'user' ? ' bg-surface-secondary' : message.role === 'tool' ? ' border-separator border' : ''}`}
-                  >
-                    <span className="text-muted text-xs font-semibold">
-                      {roleLabel[message.role] ?? message.role}{message.at ? ` · ${formatDateTime(message.at)}` : ''}
-                    </span>
-                    <p className={`break-words whitespace-pre-wrap${message.role === 'tool' ? ' font-mono text-xs' : ' text-sm'}`}>{message.text}</p>
-                  </div>
-                ))}
-              </div>
-            ) : null}
-          </Modal.Body>
-        </Modal.Dialog>
-      </Modal.Container>
-    </Modal.Backdrop>
+    <Modal
+      isOpen={loading || transcript !== null}
+      onOpenChange={(open) => { if (!open) onClose(); }}
+      title={transcript?.title || t('cleanup.untitledSession')}
+      description={transcript?.cwd ?? undefined}
+      size="3xl"
+      className="max-h-[88vh]"
+      bodyClassName="overflow-y-auto"
+    >
+      {loading && !transcript ? (
+        <div className="flex justify-center py-10"><SpinnerIcon className="size-5 text-foreground-icon-tertiary" /></div>
+      ) : transcript ? (
+        <div className="flex flex-col gap-3 pb-2">
+          {transcript.truncated ? (
+            <p className="text-caption-1-regular text-text-tertiary">{t('cleanup.transcriptTruncated', { shown: transcript.messages.length, total: transcript.totalMessages })}</p>
+          ) : null}
+          {transcript.messages.length === 0 ? <p className="text-body-regular text-text-secondary">{t('cleanup.transcriptEmpty')}</p> : null}
+          {transcript.messages.map((message, index) => (
+            <div
+              key={index}
+              className={cx(
+                'flex flex-col gap-1 rounded-2xl px-3 py-2',
+                message.role === 'user' ? 'bg-background-secondary-default' : message.role === 'tool' ? 'border border-separator-border' : '',
+              )}
+            >
+              <span className="text-caption-1-semibold text-text-tertiary">
+                {roleLabel[message.role] ?? message.role}{message.at ? ` · ${formatDateTime(message.at)}` : ''}
+              </span>
+              <p className={cx('break-words whitespace-pre-wrap text-text-primary', message.role === 'tool' ? 'font-mono text-caption-1-regular' : 'text-body-regular')}>{message.text}</p>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </Modal>
   );
 }
 
@@ -156,9 +160,9 @@ export function NativeHistoryTab({ session, provider, label }: { session: TodeXS
       bytes: entry.bytes,
       locked: entry.running || entry.referencedBy.length > 0,
       badge: entry.running
-        ? <Chip size="sm" variant="soft" color="warning">{t('cleanup.active')}</Chip>
+        ? <Chip color="yellow">{t('cleanup.active')}</Chip>
         : entry.referencedBy.length > 0
-          ? <Chip size="sm" variant="soft" color="accent">{t('cleanup.inUseByTodex')}</Chip>
+          ? <Chip color="blue">{t('cleanup.inUseByTodex')}</Chip>
           : undefined,
       onView: info?.capabilities.view ? () => void openTranscript(entry.id) : undefined,
     };
@@ -195,9 +199,9 @@ export function NativeHistoryTab({ session, provider, label }: { session: TodeXS
         loading={loading}
         onRefresh={() => void refresh()}
       >
-        {info?.root ? <p className="text-muted truncate font-mono text-xs" title={info.root}>{info.root}</p> : null}
-        {provider === 'grok-build' ? <p className="text-xs">{t('cleanup.grokNote')}</p> : null}
-        {provider === 'devin' ? <p className="text-xs">{t('cleanup.devinNote')}</p> : null}
+        {info?.root ? <p className="truncate font-mono text-caption-1-regular text-text-tertiary" title={info.root}>{info.root}</p> : null}
+        {provider === 'grok-build' ? <p className="text-caption-1-regular text-text-secondary">{t('cleanup.grokNote')}</p> : null}
+        {provider === 'devin' ? <p className="text-caption-1-regular text-text-secondary">{t('cleanup.devinNote')}</p> : null}
       </StorageSummaryCard>
       <CleanupPolicyCard
         hint={t('cleanup.agentAutoHint')}
@@ -210,24 +214,20 @@ export function NativeHistoryTab({ session, provider, label }: { session: TodeXS
         }}
       >
         {info?.native ? (
-          <div className="border-separator flex flex-col gap-1 border-t pt-3">
+          <div className="flex flex-col gap-1 border-t border-separator-border pt-3">
             <Select
+              label={t('cleanup.claudeRetention')}
+              hint={t('cleanup.claudeRetentionHint')}
               className="w-full sm:w-1/2"
+              popoverClassName="w-(--trigger-width)"
               isDisabled={savingNative}
               selectedKey={nativeDays != null ? String(nativeDays) : NATIVE_DEFAULT}
               onSelectionChange={(key) => void saveNativeRetention(key === NATIVE_DEFAULT || key == null ? null : Number(key))}
             >
-              <Label>{t('cleanup.claudeRetention')}</Label>
-              <Select.Trigger className="w-full"><Select.Value /><Select.Indicator /></Select.Trigger>
-              <Description>{t('cleanup.claudeRetentionHint')}</Description>
-              <Select.Popover>
-                <ListBox>
-                  <SelectOption id={NATIVE_DEFAULT} label={t('cleanup.claudeRetentionDefault')} />
-                  {withCurrent(NATIVE_RETENTION_OPTIONS, nativeDays).map((days) => (
-                    <SelectOption key={days} id={String(days)} label={t('cleanup.days', { count: days })} />
-                  ))}
-                </ListBox>
-              </Select.Popover>
+              <SelectItem id={NATIVE_DEFAULT} textValue={t('cleanup.claudeRetentionDefault')}>{t('cleanup.claudeRetentionDefault')}</SelectItem>
+              {withCurrent(NATIVE_RETENTION_OPTIONS, nativeDays).map((days) => (
+                <SelectItem key={days} id={String(days)} textValue={t('cleanup.days', { count: days })}>{t('cleanup.days', { count: days })}</SelectItem>
+              ))}
             </Select>
           </div>
         ) : null}

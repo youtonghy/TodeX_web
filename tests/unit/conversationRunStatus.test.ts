@@ -2,10 +2,11 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { classifyPendingRequest } from '@todex/protocol/todex';
-import { toast } from '@heroui/react';
+import { toast } from '../../src/renderer/components/ui/toast';
 import { createConversationRuntime } from '@todex/protocol/conversationRuntime';
-import { PromptInput } from '@heroui-pro/react/prompt-input';
-import { ConversationPermissionActions, ConversationPromptInput, ConversationRunStatus, PermissionRequestCard, TurnUsageSummary } from '../../src/renderer/components/ConversationRunStatus';
+import { ComposerSendButton } from '../../src/renderer/components/chat/ComposerControls';
+import { ConversationPermissionActions, ConversationPromptInput, ConversationRunStatus, PermissionRequestCard, TurnUsageSummary,
+  useConversationPromptInput } from '../../src/renderer/components/ConversationRunStatus';
 
 let root: Root | undefined;
 let container: HTMLDivElement | undefined;
@@ -56,10 +57,17 @@ describe('conversation run status rendering', () => {
 
   it('blocks clicking send and Enter at the real composer boundary while unknown', () => {
     const submit = vi.fn();
+    // A minimal composer wired through the ConversationPromptInput context, like the send / field controls.
+    function Composer() {
+      const composer = useConversationPromptInput()!;
+      return createElement('div', {},
+        createElement('textarea', { 'aria-label': '消息', value: composer.value, disabled: composer.isDisabled, readOnly: true,
+          onKeyDown: (event: { key: string }) => { if (event.key === 'Enter') composer.submit(); } }),
+        createElement(ComposerSendButton, { 'aria-label': '发送', disabled: composer.isDisabled, onClick: composer.submit }));
+    }
     const dom = render(createElement(ConversationPromptInput, { submissionStatus: 'unknown', value: 'Do work', onSubmit: submit, status: 'ready' },
-      createElement(PromptInput.Shell, {},
-        createElement(PromptInput.TextArea, { 'aria-label': '消息' }),
-        createElement(PromptInput.Send, { 'aria-label': '发送' }))));
+      createElement(Composer)));
+    expect(dom.firstElementChild!.hasAttribute('data-disabled')).toBe(true);
     const button = dom.querySelector('button')!;
     expect(button.disabled).toBe(true);
     act(() => {
@@ -67,6 +75,13 @@ describe('conversation run status rendering', () => {
       dom.querySelector('textarea')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     });
     expect(submit).not.toHaveBeenCalled();
+    // Once the state is known again the same boundary submits.
+    render(createElement(ConversationPromptInput, { submissionStatus: 'running', value: 'Do work', onSubmit: submit, status: 'ready' },
+      createElement(Composer)));
+    act(() => {
+      dom.querySelector('textarea')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    });
+    expect(submit).toHaveBeenCalledOnce();
   });
 
   it('keeps compaction running visible when capacity also recommends compaction', () => {
@@ -179,7 +194,8 @@ describe('permission decision rendering', () => {
     expect(select).toHaveBeenCalledWith(abort);
   });
 
-  it('shows the full command, the safety-check reason and green/red actions', async () => {
+  // Desktop styles allow as the primary (accent) action and reject as danger; both carry a glyph.
+  it('shows the full command, the safety-check reason and primary/danger actions', async () => {
     const command = `cd /repo && L=/tmp/checks && rm -f $L/*; ${'run step; '.repeat(40)}cat $L/summary`;
     const allow = { optionId: 'allow_once', name: 'Allow once', kind: 'allow_once' };
     const reject = { optionId: 'reject_once', name: 'Reject', kind: 'reject_once' };
@@ -197,9 +213,11 @@ describe('permission decision rendering', () => {
     expect(dom.textContent).toContain('Dangerous rm operation');
     const buttons = [...dom.querySelectorAll('button')];
     const allowButton = buttons.find(item => item.textContent === '允许本次')!;
-    expect(allowButton.className).toContain('bg-success');
+    expect(allowButton.className).toContain('bg-button-primary');
     expect(allowButton.querySelector('svg')).not.toBeNull();
-    expect(buttons.find(item => item.textContent === '拒绝')?.querySelector('svg')).not.toBeNull();
+    const rejectButton = buttons.find(item => item.textContent === '拒绝')!;
+    expect(rejectButton.className).toContain('bg-button-danger');
+    expect(rejectButton.querySelector('svg')).not.toBeNull();
     await act(async () => allowButton.click());
     expect(select).toHaveBeenCalledWith(allow);
   });

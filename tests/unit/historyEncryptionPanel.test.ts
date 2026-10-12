@@ -1,8 +1,8 @@
-import { afterEach, beforeAll, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest';
 import * as React from 'react';
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { Toast, toast } from '@heroui/react';
+import { ToastViewport, toast } from '../../src/renderer/components/ui/toast';
 import type { HistoryEncryptionState } from '@todex/protocol/historyEncryption';
 import { HistoryEncryptionPanel } from '../../src/renderer/components/HistoryEncryptionPanel';
 import { HistoryRecoveryNotice } from '../../src/renderer/components/HistoryRecoveryNotice';
@@ -18,10 +18,20 @@ beforeAll(() => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true, React });
   globalThis.ResizeObserver ??= class { observe() {} unobserve() {} disconnect() {} };
 });
-afterEach(() => {
-  act(() => { toast.clear(); root?.unmount(); });
+const TOAST_VARIANTS = ['info', 'success', 'warning', 'danger'] as const;
+// Pass-through spies: they record each toast key so afterEach can clear the stack.
+beforeEach(() => { for (const variant of TOAST_VARIANTS) vi.spyOn(toast, variant); });
+afterEach(async () => {
+  // The toast store is module-global: close everything this test showed and let
+  // the exit animations finish so nothing leaks into the next test.
+  for (const variant of TOAST_VARIANTS) {
+    for (const result of vi.mocked(toast[variant]).mock.results) if (result.type === 'return') act(() => toast.close(result.value));
+  }
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 300)); });
+  act(() => { root?.unmount(); });
   container?.remove();
   root = undefined;
+  vi.restoreAllMocks();
 });
 
 const WORDS = 'abandon ability able about above absent absorb abstract absurd abuse access accident account accuse achieve acid acoustic acquire across act action actor actress actual'.split(' ');
@@ -55,7 +65,7 @@ async function render(history: HistoryEncryptionSession, autoStartRecovery = fal
   container = document.createElement('div');
   document.body.append(container);
   root = createRoot(container);
-  await act(async () => { root!.render(createElement(React.Fragment, null, createElement(HistoryEncryptionPanel, { history, autoStartRecovery }), createElement(Toast.Provider))); });
+  await act(async () => { root!.render(createElement(React.Fragment, null, createElement(HistoryEncryptionPanel, { history, autoStartRecovery }), createElement(ToastViewport))); });
 }
 
 function button(label: string): HTMLButtonElement {

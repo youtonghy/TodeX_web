@@ -1,5 +1,6 @@
-import { Kbd } from '@heroui/react';
 import { useEffect, useRef } from 'react';
+import { Kbd } from '@/components/base/kbd/kbd';
+import { cx } from '@/utils/cx';
 
 export const isMacLike = navigator.userAgent.includes('Mac');
 
@@ -10,7 +11,8 @@ export type ShortcutId =
   | 'sshTerminal'
   | 'gitActions'
   | 'toggleSidebar'
-  | 'toggleAside';
+  | 'toggleAside'
+  | 'quickSearch';
 
 type ShortcutCombo = {
   /** Physical key, compared against KeyboardEvent.code (e.g. 'KeyN'). */
@@ -21,6 +23,9 @@ type ShortcutCombo = {
   mod?: boolean;
   shift?: boolean;
   alt?: boolean;
+  /** Left alone while typing in a field or the terminal, which own the key
+   * (Ctrl+L clears an xterm screen). */
+  outsideEditors?: boolean;
 };
 
 // Browsers reserve ⌘N / ⇧⌘N (new window / incognito), so "new" actions use the
@@ -35,6 +40,7 @@ const COMBOS: Record<ShortcutId, ShortcutCombo> = {
   newWorkspace: { code: 'KeyN', label: 'N', alt: true, shift: true },
   kanban: { code: 'KeyK', label: 'K', mod: true, shift: true },
   sshTerminal: { code: 'KeyT', label: 'T', alt: true, shift: true },
+  quickSearch: { code: 'KeyL', label: 'L', mod: true, outsideEditors: true },
 };
 
 const MODIFIER_KEY = isMacLike ? 'Meta' : 'Control';
@@ -43,6 +49,10 @@ const HINT_DELAY_MS = 250;
 function isEditableTarget(target: EventTarget | null): boolean {
   return target instanceof HTMLElement
     && Boolean(target.closest('input, textarea, [contenteditable="true"], [contenteditable=""]'));
+}
+
+function isTerminalTarget(target: EventTarget | null): boolean {
+  return target instanceof Element && Boolean(target.closest('.xterm'));
 }
 
 function matchesCombo(event: KeyboardEvent, combo: ShortcutCombo): boolean {
@@ -109,6 +119,7 @@ export function useAppShortcuts(handlers: Partial<Record<ShortcutId, () => void>
         if (!matchesCombo(event, combo)) continue;
         // Option is a dead-key modifier on macOS (⌥N → ˜); never steal it while typing.
         if (combo.alt && isEditableTarget(event.target)) return;
+        if (combo.outsideEditors && (isEditableTarget(event.target) || isTerminalTarget(event.target))) return;
         const handler = handlersRef.current[id];
         if (!handler) return;
         event.preventDefault();
@@ -121,25 +132,19 @@ export function useAppShortcuts(handlers: Partial<Record<ShortcutId, () => void>
   }, []);
 }
 
-export function ShortcutHint({ id, className }: { id: ShortcutId; className?: string }) {
+/** The key combination as shown to the user: ⌥ ⇧ ⌘ glyphs on macOS (the
+ * platform's own modifier order), spelled-out modifiers elsewhere. */
+export function shortcutKeys(id: ShortcutId): string {
   const combo = COMBOS[id];
+  return isMacLike
+    ? `${combo.alt ? '⌥' : ''}${combo.shift ? '⇧' : ''}${combo.mod ? '⌘' : ''}${combo.label}`
+    : [combo.alt && 'Alt', combo.shift && 'Shift', combo.mod && 'Ctrl', combo.label].filter(Boolean).join('+');
+}
+
+export function ShortcutHint({ id, className }: { id: ShortcutId; className?: string }) {
   return (
-    <span aria-hidden="true" className={`shortcut-hint ${className ?? ''}`}>
-      <Kbd className="shortcut-hint__kbd">
-        {isMacLike ? (
-          <>
-            {combo.alt ? <Kbd.Abbr keyValue="option" /> : null}
-            {combo.shift ? <Kbd.Abbr keyValue="shift" /> : null}
-            {combo.mod ? <Kbd.Abbr keyValue="command" /> : null}
-            <Kbd.Content>{combo.label}</Kbd.Content>
-          </>
-        ) : (
-          <Kbd.Content>
-            {[combo.alt && 'Alt', combo.shift && 'Shift', combo.mod && 'Ctrl', combo.label]
-              .filter(Boolean).join('+')}
-          </Kbd.Content>
-        )}
-      </Kbd>
+    <span aria-hidden="true" className={cx('shortcut-hint', className)}>
+      <Kbd className="shortcut-hint__kbd">{shortcutKeys(id)}</Kbd>
     </span>
   );
 }

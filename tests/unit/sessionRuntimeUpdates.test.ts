@@ -2,7 +2,7 @@ import { afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest';
 import * as React from 'react';
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { toast } from '@heroui/react';
+import { toast } from '../../src/renderer/components/ui/toast';
 import { useTodeXSession, type TodeXSession } from '../../src/renderer/session/useTodeXSession';
 import { loadJson } from '../../src/renderer/lib/storage';
 import { applyConversationRuntimeEvents } from '@todex/protocol/conversationRuntime';

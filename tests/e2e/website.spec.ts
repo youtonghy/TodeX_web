@@ -16,9 +16,9 @@ test('keeps the public website independent of the workbench and opens /app', asy
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await page.getByRole('link', { name: '打开网页版', exact: true }).click();
   await expect(page).toHaveURL(/\/app$/);
-  await expect(page.getByText('选择一个对话', { exact: true })).toBeVisible();
+  await expect(page.getByRole('textbox', { name: '消息输入' })).toBeVisible();
   await page.reload();
-  await expect(page.getByText('选择一个对话', { exact: true })).toBeVisible();
+  await expect(page.getByRole('textbox', { name: '消息输入' })).toBeVisible();
 });
 
 test.describe('live workbench demo', () => {
@@ -28,27 +28,21 @@ test.describe('live workbench demo', () => {
     await page.goto('/');
     await page.getByRole('img', { name: /TodeX 工作台实时演示/ }).scrollIntoViewIfNeeded();
     const demo = page.frameLocator('.preview-stage iframe');
-    // Reduced motion skips the animation and settles on the answered conversation.
-    await expect(demo.getByText('天气仪表盘已经就绪', { exact: false })).toBeVisible();
-    await expect(demo.getByText('做一个天气仪表盘：顶部显示当前天气，下面是未来 7 天的预报。')).toBeVisible();
+    // The desktop's demo fixtures: the Lumen team's checkout conversation.
+    await expect(demo.getByText('顺便把错误提示文案改成中文，并保持和设计规范一致的颜色。')).toBeVisible({ timeout: 15_000 });
+    await expect(demo.getByText('错误提示已统一为中文', { exact: false })).toBeVisible();
     expect(await page.evaluate(() => Object.keys(localStorage).filter((key) => key.startsWith('todex.web.')))).toEqual([]);
     expect(await page.evaluate(() => document.activeElement === document.body)).toBe(true);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   });
 });
 
-test('plays the workspace → conversation → message → answer walkthrough', async ({ page }, testInfo) => {
-  // Desktop and phone layouts take different paths (inline sidebar vs. sheet); tablet adds nothing new.
-  test.skip(testInfo.project.name === 'tablet', 'Covered by the desktop and mobile layouts.');
-  test.setTimeout(90_000);
-  await page.goto('/demo?lang=en');
-  if (testInfo.project.name === 'mobile') {
-    await expect(page.getByRole('dialog').getByRole('button', { name: 'New workspace' })).toBeVisible({ timeout: 15_000 });
-  }
-  await expect(page.getByRole('heading', { name: 'New workspace' })).toBeVisible({ timeout: 15_000 });
-  await expect(page.getByRole('textbox', { name: 'Name' })).toHaveValue('weather-app');
-  await expect(page.getByText('Build a weather dashboard: current conditions on top, a 7-day forecast below.').last()).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByText('Your weather dashboard is ready:')).toBeVisible({ timeout: 45_000 });
+test('keeps the demo in memory, away from the workbench storage on the same origin', async ({ page }) => {
+  await page.goto('/demo');
+  await expect(page.getByText('顺便把错误提示文案改成中文，并保持和设计规范一致的颜色。')).toBeVisible({ timeout: 15_000 });
+  await page.goto('/demo-isolation-check');
+  expect(await page.evaluate(() => Object.keys(localStorage).filter((key) => key.startsWith('todex.')))).toEqual([]);
+  expect(await page.evaluate(async () => (await indexedDB.databases()).map((db) => db.name))).not.toContain('todex.web.keys');
 });
 
 test('offers Desktop packages per platform and a one-line Backend installer', async ({ page }) => {
@@ -112,7 +106,7 @@ test('supports navigation at every viewport', async ({ page }) => {
 test('loads the workbench at nested /app URLs without treating similarly named pages as app routes', async ({ page }) => {
   await stubReleaseCatalog(page);
   await page.goto('/app/conversation/example');
-  await expect(page.getByText('选择一个对话', { exact: true })).toBeVisible();
+  await expect(page.getByRole('textbox', { name: '消息输入' })).toBeVisible();
   await page.goto('/application');
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('让创造，在任何地方发生。');
 });
