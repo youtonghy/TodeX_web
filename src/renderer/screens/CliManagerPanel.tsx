@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button, Card, Chip, Spinner, toast } from '@heroui/react';
-import { RiDeleteBin6Line, RiDownload2Line, RiDownloadCloud2Line, RiRefreshLine, RiServerLine, RiSettings3Line } from '@remixicon/react';
+import { RiDeleteBin6Line, RiDownload2Line, RiDownloadCloud2Line, RiFileList3Line, RiRefreshLine, RiServerLine, RiSettings3Line } from '@remixicon/react';
 import {
   type CliOperationAction,
   type CliUpgradeOperation,
@@ -10,6 +10,7 @@ import {
   type ManagedCliProvider,
 } from '@todex/protocol/v2';
 import { CliSettingsModal } from '../components/cli/CliSettingsModal';
+import { InstructionPresetsModal } from '../components/cli/InstructionPresetsModal';
 import { hasCliSettings } from '../lib/cliSettings';
 import { ProviderIcon } from '../components/ProviderIcon';
 import { NoticeToast } from '../components/NoticeToast';
@@ -113,6 +114,7 @@ export function CliManagerPanel({ session }: { session: TodeXSession }) {
   };
 
   const [settingsProvider, setSettingsProvider] = useState<CliSettingsProvider | null>(null);
+  const [presetsOpen, setPresetsOpen] = useState(false);
   const [removingIntegration, setRemovingIntegration] = useState(false);
   // TodeX keeps a PreToolUse hook and its MCP servers in Antigravity's global
   // config (shared with the Antigravity app); this takes them out again.
@@ -140,6 +142,9 @@ export function CliManagerPanel({ session }: { session: TodeXSession }) {
           <h2 className="truncate text-base font-semibold">{activeBackend?.name || t('cli.currentBackend')}</h2>
           <p className="text-muted truncate text-xs" title={session.settings.serverUrl}>{session.settings.serverUrl}</p>
         </div>
+        <Button size="sm" variant="secondary" onPress={() => setPresetsOpen(true)}>
+          <RiFileList3Line className="size-4" />{t('instructionPresets.open')}
+        </Button>
         <Button isIconOnly size="sm" variant="ghost" aria-label={t('cli.refreshAria')} isDisabled={loading} onPress={() => void refresh()}>
           <RiRefreshLine className="size-4" />
         </Button>
@@ -223,6 +228,7 @@ export function CliManagerPanel({ session }: { session: TodeXSession }) {
         </div>
       )}
       <CliSettingsModal provider={settingsProvider} onClose={() => setSettingsProvider(null)} api={api} />
+      <InstructionPresetsModal isOpen={presetsOpen} onClose={() => setPresetsOpen(false)} api={api} />
     </div>
   );
 }

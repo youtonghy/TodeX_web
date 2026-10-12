@@ -22,8 +22,10 @@ import {
   type OptionValue,
   type SettingsObject,
 } from '../../lib/cliSettings';
+import { CliInstructionsPanel, useCliInstructions } from './CliInstructionsTab';
 
-type TabId = 'form' | 'env' | 'raw';
+type TabId = 'form' | 'env' | 'raw' | 'agents';
+const TAB_IDS: TabId[] = ['form', 'env', 'raw', 'agents'];
 type EnvRow = { key: number; name: string; value: string; revealed: boolean };
 
 const key = (value: string) => value as MessageKey;
@@ -57,6 +59,7 @@ function CliSettingsEditor({ schema, api, onClose }: { schema: CliSettingsSchema
   const [tab, setTab] = useState<TabId>('form');
   const [saving, setSaving] = useState(false);
   const nextEnvKey = useRef(0);
+  const instructions = useCliInstructions(provider, api);
 
   const toEnvRows = (settings: SettingsObject) => (envPath ? envRows(settings, envPath) : []).map((row) => ({ ...row, key: nextEnvKey.current++, revealed: false }));
 
@@ -92,9 +95,21 @@ function CliSettingsEditor({ schema, api, onClose }: { schema: CliSettingsSchema
   const fileName = doc?.path.split(/[\\/]/).pop() || doc?.path || '';
   const envInvalid = env.some((row) => row.name.trim() !== '' && !ENV_NAME.test(row.name.trim()));
   const editingRaw = tab === 'raw';
-  const canSave = Boolean(doc) && !saving && (editingRaw ? rawDirty && !rawError : formDirty && !envInvalid);
+  const editingAgents = tab === 'agents';
+  const canSave = editingAgents
+    ? instructions.canSave
+    : Boolean(doc) && !saving && (editingRaw ? rawDirty && !rawError : formDirty && !envInvalid);
+  // Edits left unsaved on a tab other than the one shown.
+  const unsavedElsewhere = editingAgents
+    ? (formDirty || rawDirty) && 'cliSettings.settingsUnsaved'
+    : (editingRaw ? formDirty : rawDirty) ? (editingRaw ? 'cliSettings.formUnsaved' : 'cliSettings.rawUnsaved')
+      : instructions.dirty && 'cliSettings.agentsUnsaved';
 
   const save = async () => {
+    if (editingAgents) {
+      await instructions.save();
+      return;
+    }
     if (!doc) return;
     setSaving(true);
     try {
@@ -130,7 +145,8 @@ function CliSettingsEditor({ schema, api, onClose }: { schema: CliSettingsSchema
   const header = (
     <Modal.Header className="flex flex-col items-start gap-1">
       <Modal.Heading>{t('cliSettings.title', { name: schema.name })}</Modal.Heading>
-      {doc ? <p className="text-muted w-full truncate text-xs" dir="ltr" title={doc.path}>{doc.path}</p> : null}
+      {/* The AGENTS.md tab names its own file. */}
+      {doc ? <p className={`text-muted w-full truncate text-xs${editingAgents ? ' invisible' : ''}`} dir="ltr" title={doc.path}>{doc.path}</p> : null}
     </Modal.Header>
   );
 
@@ -158,7 +174,7 @@ function CliSettingsEditor({ schema, api, onClose }: { schema: CliSettingsSchema
     <>
       {header}
       <Modal.Body className="flex min-h-0 flex-1 flex-col">
-        <Tabs selectedKey={tab} onSelectionChange={(next) => setTab(next === 'env' || next === 'raw' ? next : 'form')} className="flex min-h-0 flex-1 flex-col gap-4">
+        <Tabs selectedKey={tab} onSelectionChange={(next) => setTab(TAB_IDS.find((id) => id === next) ?? 'form')} className="flex min-h-0 flex-1 flex-col gap-4">
           <Tabs.ListContainer>
             <Tabs.List aria-label={t('cliSettings.tabsLabel')}>
               <Tabs.Tab id="form" isDisabled={!saved}>{t('cliSettings.tabForm')}<Tabs.Indicator /></Tabs.Tab>
@@ -168,6 +184,7 @@ function CliSettingsEditor({ schema, api, onClose }: { schema: CliSettingsSchema
                 </Tabs.Tab>
               ) : null}
               <Tabs.Tab id="raw">{t('cliSettings.tabRaw')}<Tabs.Indicator /></Tabs.Tab>
+              <Tabs.Tab id="agents">AGENTS.md<Tabs.Indicator /></Tabs.Tab>
             </Tabs.List>
           </Tabs.ListContainer>
           <div className="min-h-0 flex-1 overflow-y-auto">
@@ -221,15 +238,18 @@ function CliSettingsEditor({ schema, api, onClose }: { schema: CliSettingsSchema
                 </Surface>
               )}
             </Tabs.Panel>
+            <Tabs.Panel id="agents">
+              <CliInstructionsPanel state={instructions} />
+            </Tabs.Panel>
           </div>
         </Tabs>
       </Modal.Body>
       <Modal.Footer className="flex-wrap">
-        {(editingRaw ? formDirty : rawDirty) ? (
-          <span className="text-muted me-auto text-sm">{t(editingRaw ? 'cliSettings.formUnsaved' : 'cliSettings.rawUnsaved')}</span>
+        {unsavedElsewhere ? (
+          <span className="text-muted me-auto text-sm">{t(unsavedElsewhere)}</span>
         ) : null}
-        <Button variant="tertiary" isDisabled={saving} onPress={onClose}>{t('controls.close')}</Button>
-        <Button isDisabled={!canSave} onPress={() => void save()}>{saving ? <Spinner size="sm" /> : null}{t('common.save')}</Button>
+        <Button variant="tertiary" isDisabled={saving || instructions.busy} onPress={onClose}>{t('controls.close')}</Button>
+        <Button isDisabled={!canSave} onPress={() => void save()}>{(editingAgents ? instructions.busy : saving) ? <Spinner size="sm" /> : null}{t('common.save')}</Button>
       </Modal.Footer>
     </>
   );
