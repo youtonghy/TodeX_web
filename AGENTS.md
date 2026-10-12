@@ -13,6 +13,10 @@
 
 - In `Dockerfile`, `hpsetup` (deps stage) installs `@heroui-pro/react@latest` and its peer deps, rewriting `package.json`, `pnpm-lock.yaml`, and `pnpm-workspace.yaml` in the image. The `build` stage's `COPY . .` restores the repo copies, so the deps-stage copies are copied back right after to keep manifests in sync with `node_modules`. Without this, pnpm 11's `verifyDepsBeforeRun` (default `install`) detects drift on `pnpm run` and reinstalls the unlicensed npm stub over the licensed package contents, breaking typecheck with `TS2307`.
 
+## Planning gate
+
+- Before starting a task that spans modules or repositories, changes product behavior, public interfaces/APIs, or data schemas/migrations, touches security or permissions, or carries compatibility or deployment risk, invoke the `plan-gate` skill: investigate read-only, present its full plan, and wait for the user to approve or amend it before implementing. For these gated tasks, the approved plan is the reviewable result and authorization covers investigation and planning until approval. Simple, localized, low-risk changes proceed directly without the gate.
+
 ## Sibling repositories (cross-repo access)
 
 TodeX lives in sibling checkouts under the same parent directory:
