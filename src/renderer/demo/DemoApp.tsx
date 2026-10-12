@@ -2,9 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Dispatch, RefObject, SetStateAction } from 'react';
 import { Button, Chip, Label, ListBox, Modal, Select } from '@heroui/react';
 import { AppLayout, Navbar, useSidebar } from '@heroui-pro/react';
-import { RiAddLine, RiGithubLine, RiLayoutLeftLine, RiLayoutRightLine, RiShieldLine } from '@remixicon/react';
+import { RiAddLine, RiExpandLeftLine, RiExpandRightLine, RiGithubLine, RiLayoutLeftLine, RiLayoutRightLine, RiShieldLine } from '@remixicon/react';
 import { providerDisplayName } from '@todex/protocol/v2';
 import { AppSidebar } from '../components/AppSidebar';
+import { ConversationSplit, useMediaQuery } from '../components/ConversationSplit';
 import { Field } from '../components/Field';
 import { GitStatusDisplay } from '../components/GitStatusIndicator';
 import { ProviderIcon } from '../components/ProviderIcon';
@@ -22,6 +23,7 @@ import { isDemoPlaybackMessage } from './playback';
 
 const noop = () => {};
 const LOOP_PAUSE_MS = 7000;
+const LAYOUT_AUTO_SAVE_ID = 'todex.web.demoLayout.v1';
 
 type CursorState = { x: number; y: number; visible: boolean; pressed: boolean };
 
@@ -161,7 +163,7 @@ function DemoHeaderDetails({ session }: { session: TodeXSession }) {
   };
   return (
     <div className="relative flex min-w-0 flex-1 items-center gap-3 overflow-hidden">
-      <span className="min-w-0 max-w-64 truncate text-sm font-medium sm:shrink-0">{conversation?.title ?? t('app.conversation')}</span>
+      <span className="min-w-0 max-w-64 truncate text-sm font-medium">{conversation?.title ?? t('app.conversation')}</span>
       {conversation ? (
         <Chip size="sm" variant="soft" className="shrink-0 whitespace-nowrap">
           <ProviderIcon provider={conversation.provider} />
@@ -169,7 +171,7 @@ function DemoHeaderDetails({ session }: { session: TodeXSession }) {
         </Chip>
       ) : null}
       {/* Phones leave no room for the Git summary; the real header folds it into a popover there. */}
-      <div className="hidden min-w-0 sm:block"><GitStatusDisplay state={git} onOpenGit={noop} wrap={false} /></div>
+      <div className="hidden shrink-0 sm:block"><GitStatusDisplay state={git} onOpenGit={noop} wrap={false} /></div>
     </div>
   );
 }
@@ -234,8 +236,59 @@ export function DemoApp() {
   const changeWorkbenchTab = useCallback((tab: WorkbenchTab) => setState((current) => current.workbenchTab === tab ? current : { ...current, workbenchTab: tab }), []);
   const scopeKey = state.activeConversationId || state.activeWorkspaceId;
 
+  // Mirrors App: compact widths keep AppLayout's navbar and aside, wide ones
+  // split the conversation (with its navbar) from a full-height right panel.
+  const compactLayout = useMediaQuery('(max-width: 1024px)');
+  const [chatCollapsed, setChatCollapsed] = useState(false);
+  const aside = <WorkbenchPanel key={scopeKey} scopeKey={scopeKey} session={session} tab={state.workbenchTab} onTabChange={changeWorkbenchTab} />;
+  const main = <ChatPanel session={session} />;
+  const navbar = (
+    <Navbar maxWidth="full">
+      <Navbar.Header className="flex-nowrap gap-2 px-3 sm:px-6 [&>button]:shrink-0">
+        <SidebarBridge controlRef={sidebarRef} />
+        <AppLayout.MenuToggle className="inline-flex min-[769px]:hidden" aria-label={t('app.openSidebar')}>
+          <RiLayoutLeftLine className="size-4" />
+        </AppLayout.MenuToggle>
+        <Button className="hidden min-[769px]:inline-flex" isIconOnly size="sm" variant="ghost" aria-label={t('app.collapseSidebar')} onPress={() => setSidebarOpen(!sidebarOpen)}>
+          <RiLayoutLeftLine className="size-4" />
+        </Button>
+        <DemoHeaderDetails session={session} />
+        <Navbar.Content className="shrink-0 gap-2">
+          {session.activeWorkspace ? (
+            <Button size="sm" variant="tertiary" aria-label={t('app.trustRevoke')}>
+              <RiShieldLine className="size-4" />
+              <span className="hidden sm:inline">{t('app.trustTrusted')}</span>
+            </Button>
+          ) : null}
+          <Button isIconOnly size="sm" variant="ghost" aria-label={t('app.githubActions')}>
+            <RiGithubLine className="size-4" />
+          </Button>
+          {compactLayout ? null : (
+            <Button isIconOnly size="sm" variant="ghost" aria-label={t('app.collapseChat')} onPress={() => setChatCollapsed(true)}>
+              <RiExpandLeftLine className="size-4" />
+            </Button>
+          )}
+          <Button isIconOnly size="sm" variant="ghost" aria-label={t('app.closeAside')} aria-expanded>
+            <RiLayoutRightLine className="size-4" />
+          </Button>
+        </Navbar.Content>
+      </Navbar.Header>
+    </Navbar>
+  );
+  const chatRail = (
+    <div className="flex h-full flex-col items-center gap-1 pt-2 pb-2">
+      <Button isIconOnly size="sm" variant="ghost" aria-label={t('app.collapseSidebar')} onPress={() => setSidebarOpen(!sidebarOpen)}>
+        <RiLayoutLeftLine className="size-4" />
+      </Button>
+      <Button isIconOnly size="sm" variant="ghost" aria-label={t('app.expandChat')} onPress={() => setChatCollapsed(false)}>
+        <RiExpandRightLine className="size-4" />
+      </Button>
+    </div>
+  );
+
   return (
     <div className="bg-background text-foreground h-full">
+      {kanbanPreview ? <KanbanPanel session={session} onOpenConversation={noop} /> : (
       <AppLayout
         className="h-full min-h-0"
         scrollMode="content"
@@ -243,14 +296,9 @@ export function DemoApp() {
         asideMobile="hidden"
         sidebarOpen={sidebarOpen}
         onSidebarOpenChange={setSidebarOpen}
-        asideResizable
-        asideDefaultSize="420px"
-        asideMinSize="320px"
-        asideMaxSize="640px"
-        asideResizeBehavior="preserve-pixel-size"
         asideOpen
         onAsideOpenChange={noop}
-        aside={<WorkbenchPanel key={scopeKey} scopeKey={scopeKey} session={session} tab={state.workbenchTab} onTabChange={changeWorkbenchTab} />}
+        aside={compactLayout ? aside : null}
         sidebar={
           <AppSidebar
             session={session}
@@ -269,37 +317,27 @@ export function DemoApp() {
             onOpenTerminal={noop}
           />
         }
-        navbar={
-          <Navbar maxWidth="full">
-            <Navbar.Header className="flex-nowrap gap-2 px-3 sm:px-6 [&>button]:shrink-0">
-              <SidebarBridge controlRef={sidebarRef} />
-              <AppLayout.MenuToggle className="inline-flex min-[769px]:hidden" aria-label={t('app.openSidebar')}>
-                <RiLayoutLeftLine className="size-4" />
-              </AppLayout.MenuToggle>
-              <Button className="hidden min-[769px]:inline-flex" isIconOnly size="sm" variant="ghost" aria-label={t('app.collapseSidebar')}>
-                <RiLayoutLeftLine className="size-4" />
-              </Button>
-              <DemoHeaderDetails session={session} />
-              <Navbar.Content className="shrink-0 gap-2">
-                {session.activeWorkspace ? (
-                  <Button size="sm" variant="tertiary" aria-label={t('app.trustRevoke')}>
-                    <RiShieldLine className="size-4" />
-                    <span className="hidden sm:inline">{t('app.trustTrusted')}</span>
-                  </Button>
-                ) : null}
-                <Button isIconOnly size="sm" variant="ghost" aria-label={t('app.githubActions')}>
-                  <RiGithubLine className="size-4" />
-                </Button>
-                <Button isIconOnly size="sm" variant="ghost" aria-label={t('app.closeAside')} aria-expanded>
-                  <RiLayoutRightLine className="size-4" />
-                </Button>
-              </Navbar.Content>
-            </Navbar.Header>
-          </Navbar>
-        }
+        navbar={compactLayout ? navbar : undefined}
       >
-        {kanbanPreview ? <KanbanPanel session={session} onOpenConversation={noop} /> : <ChatPanel session={session} />}
+        {compactLayout ? main : (
+          <ConversationSplit
+            autoSaveId={LAYOUT_AUTO_SAVE_ID}
+            aside={aside}
+            asideOpen
+            onAsideOpenChange={noop}
+            chatCollapsed={chatCollapsed}
+            onChatCollapsedChange={setChatCollapsed}
+            rail={chatRail}
+            chat={
+              <div className="flex h-full min-h-0 flex-col">
+                <header className="shrink-0">{navbar}</header>
+                <div className="min-h-0 flex-1">{main}</div>
+              </div>
+            }
+          />
+        )}
       </AppLayout>
+      )}
       <DemoWorkspaceModal modal={state.modal} backend={backend} />
       {kanbanPreview ? null : <DemoCursor {...cursor} />}
     </div>
