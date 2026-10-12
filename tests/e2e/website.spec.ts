@@ -37,6 +37,17 @@ test.describe('live workbench demo', () => {
   });
 });
 
+test('autoplays a new conversation from prompt to streamed answer on the landing demo', async ({ page }, testInfo) => {
+  // Desktop and phone take different paths (inline sidebar vs. drawer); tablet adds nothing new.
+  test.skip(testInfo.project.name === 'tablet', 'Covered by the desktop and mobile layouts.');
+  test.setTimeout(60_000);
+  await page.goto('/demo?autoplay&lang=en');
+  const prompt = 'Add an order summary card to the checkout page: items, discounts, and the total due.';
+  await expect(page.getByRole('textbox', { name: 'Message input' })).toHaveText(prompt, { timeout: 20_000 });
+  await expect(page.getByText('Bash · pnpm test checkout')).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText('The order summary card is in place:')).toBeVisible({ timeout: 20_000 });
+});
+
 test('keeps the demo in memory, away from the workbench storage on the same origin', async ({ page }) => {
   await page.goto('/demo');
   await expect(page.getByText('顺便把错误提示文案改成中文，并保持和设计规范一致的颜色。')).toBeVisible({ timeout: 15_000 });

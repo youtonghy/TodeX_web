@@ -665,11 +665,22 @@ function broadcast(event: ConversationEvent) {
   for (const socket of sockets) socket.emit({ type: 'conversation.event', payload: event });
 }
 
+/** One streamed event: delay from the prompt (ms), event type, payload. */
+export type DemoTurnStep = [number, string, Record<string, unknown>];
+
+// Web only: the landing page's autoplay answers its own prompt with a richer
+// scripted turn; anything else typed in the preview gets the canned one below.
+let turnScript: ((text: string, turnId: string) => DemoTurnStep[] | null) | null = null;
+
+export function setDemoTurnScript(script: typeof turnScript): void {
+  turnScript = script;
+}
+
 /** Streams a short scripted turn so prompts typed in the preview get an answer. */
 function playCannedTurn(journal: Journal, text: string): string {
   const turnId = `${journal.manifest.id}-live-${Date.now()}`;
   const toolCallId = `${turnId}-call`;
-  const steps: Array<[number, string, Record<string, unknown>]> = [
+  const steps: DemoTurnStep[] = turnScript?.(text, turnId) ?? [
     [0, 'message.created', { role: 'user', content: text }],
     [150, 'turn.started', { status: 'running' }],
     [700, 'thought.delta', { thinking: '这是演示预览：后端是内存中的模拟数据，下面的步骤和回复都是预设的。' }],
@@ -683,11 +694,11 @@ function playCannedTurn(journal: Journal, text: string): string {
     [3900, 'usage.updated', { model: 'opus', contextWindow: 200_000, usage: { last: { input: 9_800, output: 640, cacheRead: 52_000, cacheWrite: 1_200, total: 10_440 } } }],
     [4000, 'turn.completed', { status: 'completed' }],
   ];
-  for (const [delay, type, payload] of steps) {
+  for (const [index, [delay, type, payload]] of steps.entries()) {
     setTimeout(() => {
       const event: ConversationEvent = {
         schemaVersion: 2,
-        eventId: `${turnId}-${type}`,
+        eventId: `${turnId}-${index}-${type}`,
         conversationId: journal.manifest.id,
         sequence: journal.events.length + 1,
         time: new Date().toISOString(),
