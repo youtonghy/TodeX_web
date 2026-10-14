@@ -797,6 +797,22 @@ agent badge and run state; right-click actions cover New, Rename, Fork, and
 Delete. Workspaces can be added from any directory under a configured
 workspace root and are trusted explicitly.
 
+## Scheduled conversations and optional features
+
+- **Scheduled conversations** — create one from the sidebar (or from a Kanban
+  task) and pick a time. The conversation is created right away; everything
+  you send there is held in the backend queue and sent in order at that time.
+  Sidebar rows show a countdown icon, and a bar above the prompt box offers
+  Send now, Change time, and Cancel.
+- **Features** (Settings → Features) — Scheduled conversations, Terminal, and
+  the Kanban task board can each be shown in the sidebar, folded under a
+  \"More\" row, or turned off (which also removes their shortcuts and menu
+  entries). Saved per device.
+- **Connection** — while the backend is still loading, the sidebar shows
+  \"waiting for the backend to finish loading\" and the client keeps trying for
+  up to 2 minutes instead of failing. The active conversation's agent is
+  pre-warmed so the first message starts faster.
+
 ## Center — chat
 
 - Streaming Markdown with Shiki code highlighting and KaTeX math.
