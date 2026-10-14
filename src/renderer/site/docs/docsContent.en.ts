@@ -806,10 +806,10 @@ workspace root and are trusted explicitly.
   Send now, Change time, and Cancel.
 - **Features** (Settings → Features) — Scheduled conversations, Terminal, and
   the Kanban task board can each be shown in the sidebar, folded under a
-  \"More\" row, or turned off (which also removes their shortcuts and menu
+  "More" row, or turned off (which also removes their shortcuts and menu
   entries). Saved per device.
 - **Connection** — while the backend is still loading, the sidebar shows
-  \"waiting for the backend to finish loading\" and the client keeps trying for
+  "waiting for the backend to finish loading" and the client keeps trying for
   up to 2 minutes instead of failing. The active conversation's agent is
   pre-warmed so the first message starts faster.
 
