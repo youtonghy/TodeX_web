@@ -15,6 +15,8 @@ let container: HTMLDivElement;
 beforeAll(() => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true, React });
   globalThis.ResizeObserver ??= class { observe() {} unobserve() {} disconnect() {} };
+  // jsdom has no element scrolling; settings pages scroll to their top.
+  Element.prototype.scrollTo ??= () => {};
 });
 beforeEach(() => { vi.mocked(beginDevicePairing).mockReset().mockReturnValue(new Promise(() => {})); });
 afterEach(() => {
@@ -26,17 +28,25 @@ function render(props: { repairPairing?: boolean } = {}) {
   const updateBackendConnection = vi.fn();
   const setSettings = vi.fn();
   const credentials = { deviceSecret: 'device-secret', encryptionProtocol: 'x25519', encryptionPublicKey: KEY, transportVerified: true };
+  const history = { view: { backendId: 'a', status: 'idle' }, grantRuns: {}, refresh: vi.fn(async () => {}) };
   const session = {
     activeBackendConnectionId: 'a', backendConnections: [{ id: 'a', name: 'Backend A', serverUrl: 'https://a.test', tenantId: '', ...credentials }],
     settings: { serverUrl: 'https://a.test', tenantId: '', ...credentials },
+    backendLinkStatus: {}, noWorkspaceBackendId: 'a', setNoWorkspaceBackendId: vi.fn(),
     connectionState: 'idle', connectionHealth: { state: 'idle' }, updateBackendConnection, setSettings,
-    historyEncryption: { view: { backendId: 'a', status: 'idle' }, grantRuns: {}, refresh: vi.fn(async () => {}) },
+    historyEncryption: { ...history, forBackend: () => history },
   } as unknown as TodeXSession;
   container = document.createElement('div');
   document.body.append(container);
   root = createRoot(container);
   act(() => root.render(createElement(SettingsPanel, { session, ...props })));
   return { session, updateBackendConnection, setSettings };
+}
+// Opens a backend's own page from the backend list.
+async function openBackend(id = 'a') {
+  const entry = container.querySelector<HTMLButtonElement>(`[data-backend-id="${id}"]`);
+  expect(entry).toBeTruthy();
+  await act(async () => { entry!.click(); });
 }
 // Text fields by accessible name: an aria-label (BoardUI Input) or an associated <label>.
 function input(label: string) {
@@ -50,8 +60,9 @@ async function type(field: HTMLInputElement, value: string) {
   });
 }
 
-it('offers no way to type, paste or import a transport protocol or key', () => {
+it('offers no way to type, paste or import a transport protocol or key', async () => {
   render();
+  await openBackend();
   expect(input('加密公钥')).toBeNull();
   expect(input('加密')).toBeNull();
   expect(container.querySelector('textarea, input[type="file"]')).toBeNull();
@@ -61,16 +72,19 @@ it('offers no way to type, paste or import a transport protocol or key', () => {
   expect([...container.querySelectorAll('button')].some(button => button.textContent === '重新配对')).toBe(true);
 });
 
-it('changing the server URL drops the device key and the transport pin in both destinations', async () => {
+it('changing the server URL drops the device key and the transport pin', async () => {
   const state = render();
+  await openBackend();
   await type(input('后端地址')!, 'https://b.test');
   const cleared = { deviceSecret: '', encryptionProtocol: 'none', encryptionPublicKey: '', transportVerified: false };
   expect(state.updateBackendConnection).toHaveBeenCalledExactlyOnceWith('a', { serverUrl: 'https://b.test', ...cleared });
-  expect(state.setSettings.mock.calls[0][0](state.session.settings)).toEqual({ ...state.session.settings, serverUrl: 'https://b.test', ...cleared });
+  // The backend profile is the only place the transport lives.
+  expect(state.setSettings).not.toHaveBeenCalled();
 });
 
 it('keeps the pin when only the spelling of the same origin changes', async () => {
   const state = render();
+  await openBackend();
   await type(input('后端地址')!, 'https://a.test/');
   expect(state.updateBackendConnection).toHaveBeenCalledExactlyOnceWith('a', { serverUrl: 'https://a.test/' });
 });

@@ -103,25 +103,27 @@ it('reads a conversation history from the backend that owns it', async () => {
   expect(historyRequests('127.0.0.1', 'v2-cb')).toHaveLength(0);
 });
 
-it('closes the connection when leaving a backend and continues its history when returning', async () => {
+it('keeps every backend connected and reads each history from the backend that owns it', async () => {
   await mount();
-  await act(async () => { session.connect(); });
-  await act(async () => { TestSocket.instances.at(-1)!.open(); });
-  expect(TestSocket.instances.at(-1)!.url).toContain('127.0.0.1');
+  // Both profiles connect at startup, each on its own socket.
+  const sockets = [...TestSocket.instances];
+  expect(sockets.map((socket) => new URL(socket.url).host).sort()).toEqual(['127.0.0.1', '127.0.0.2']);
+  await act(async () => { for (const socket of sockets) socket.open(); });
+  expect(session.backendLinkStatus.a?.state).toBe('open');
+  expect(session.backendLinkStatus.b?.state).toBe('open');
 
+  // Switching to the other backend's workspace only moves the focus.
   await act(async () => { session.selectWorkspace('wb'); });
-  const [left, away] = TestSocket.instances.slice(-2);
-  expect(left.close).toHaveBeenCalled();
-  expect(away.url).toContain('127.0.0.2');
-  await act(async () => { away.open(); });
+  expect(session.activeBackendConnectionId).toBe('b');
+  expect(session.connectionState).toBe('open');
+  expect(TestSocket.instances).toHaveLength(2);
+  for (const socket of sockets) expect(socket.close).not.toHaveBeenCalled();
+  expect(historyRequests('127.0.0.2', 'v2-cb').length).toBeGreaterThan(0);
+  expect(historyRequests('127.0.0.1', 'v2-cb')).toHaveLength(0);
 
-  requests.length = 0;
   await act(async () => { session.selectWorkspace('wa'); });
-  const back = TestSocket.instances.at(-1)!;
-  expect(away.close).toHaveBeenCalled();
-  expect(back.url).toContain('127.0.0.1');
-  await act(async () => { back.open(); });
   expect(session.activeConversation?.id).toBe('ca');
+  expect(TestSocket.instances).toHaveLength(2);
   expect(historyRequests('127.0.0.1', 'v2-ca').length).toBeGreaterThan(0);
   expect(historyRequests('127.0.0.2', 'v2-ca')).toHaveLength(0);
 });

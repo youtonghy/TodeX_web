@@ -1,6 +1,8 @@
-import { beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import {
   addKanbanTask,
+  configureKanbanRouting,
+  configureKanbanSync,
   attachKanbanTask,
   kanbanBackendLocalTime,
   kanbanTimeZoneLabel,
@@ -170,4 +172,38 @@ it('formats wall-clock time and labels in the backend time zone', () => {
   expect(kanbanBackendLocalTime({ offsetMinutes: -330 }, now)).toBe('2026-10-09T18:00');
   expect(kanbanTimeZoneLabel({ name: 'Asia/Shanghai', offsetMinutes: 480 })).toBe('Asia/Shanghai (UTC+08:00)');
   expect(kanbanTimeZoneLabel({ offsetMinutes: -330 })).toBe('UTC-05:30');
+});
+
+it('syncs every connected backend with only the tasks of its own workspaces', async () => {
+  vi.useFakeTimers();
+  const pushed = new Map<string, string[]>();
+  vi.stubGlobal('fetch', vi.fn(async (input: string | URL, init?: RequestInit) => {
+    const url = new URL(String(input));
+    if (init?.method === 'PUT') {
+      const raw = init.body;
+      const text = typeof raw === 'string' ? raw : new TextDecoder().decode(raw as Uint8Array);
+      const body = JSON.parse(text) as { tasks: Array<{ title: string }> };
+      pushed.set(url.host, body.tasks.map((task) => task.title));
+    }
+    return new Response(JSON.stringify({ tasks: [] }), { status: 200 });
+  }));
+  const loopback = (host: string) => ({ serverUrl: `http://${host}`, deviceSecret: '', encryptionProtocol: 'none' as const, encryptionPublicKey: '', transportVerified: false });
+  configureKanbanRouting('a', (workspaceId) => ({ wa: 'a', wb: 'b' })[workspaceId] ?? null);
+  configureKanbanSync('a', loopback('127.0.0.1'));
+  configureKanbanSync('b', loopback('127.0.0.2'));
+  const onA = addKanbanTask('wa', 'Task on A');
+  const onB = addKanbanTask('wb', 'Task on B');
+  // A new task belongs to its workspace's backend, not the focused one.
+  expect(onA?.backendConnectionId).toBe('a');
+  expect(onB?.backendConnectionId).toBe('b');
+  await vi.advanceTimersByTimeAsync(2_000);
+  expect(pushed.get('127.0.0.1')).toEqual(['Task on A']);
+  expect(pushed.get('127.0.0.2')).toEqual(['Task on B']);
+  configureKanbanSync('a', null);
+  configureKanbanSync('b', null);
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
 });

@@ -97,8 +97,12 @@ function fakeBackend() {
 
 async function mount(backend: ReturnType<typeof fakeBackend>, { supported = true, status = 'ready', onUnlocked = vi.fn() }: { supported?: boolean; status?: string; onUnlocked?: (ids?: readonly string[]) => void } = {}) {
   let api!: HistoryEncryptionSession;
+  // One connected backend, b1, which is also the focused one.
+  const backends = { b1: { connected: true, supported } };
+  const sendCommand = (_backendId: string, message: { id: string; type: string; payload: Record<string, unknown> }, timeoutMs?: number) =>
+    backend.sendCommand(message, timeoutMs);
   function Harness() {
-    api = useHistoryEncryption({ activeBackendId: 'b1', connected: true, supported, sendCommand: backend.sendCommand, onUnlocked });
+    api = useHistoryEncryption({ backends, focusBackendId: 'b1', sendCommand, onUnlocked });
     return null;
   }
   container = document.createElement('div');
@@ -106,7 +110,8 @@ async function mount(backend: ReturnType<typeof fakeBackend>, { supported = true
   root = createRoot(container);
   await act(async () => { root!.render(createElement(Harness)); });
   await act(async () => { await vi.waitFor(() => expect(api.view.status).toBe(status)); });
-  return () => api;
+  // The session-wide API plus b1's settings actions.
+  return () => ({ ...api, ...api.forBackend('b1'), keyRequired: () => api.keyRequired('b1') });
 }
 
 function encryptedEvent(key: HistorySegmentKey, sequence: number, envelope: Record<string, unknown>, content: Record<string, unknown>) {

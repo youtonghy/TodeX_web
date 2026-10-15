@@ -120,7 +120,10 @@ function render(input: Profile = { serverUrl: 'https://backend.test', encryption
   function Harness() { session = useTodeXSession(() => {}); return null; }
   container = document.createElement('div'); document.body.append(container); root = createRoot(container);
   act(() => root.render(createElement(Harness)));
-  act(() => session.setSettings(value => ({ ...value, deviceSecret: 'test-secret', ...profile })));
+  // Hydration may still be pending: then there is no backend profile yet and
+  // the test adds the one it connects (the focused one, being the only one).
+  if (session.backendConnections.length) act(() => session.setSettings(value => ({ ...value, deviceSecret: 'test-secret', ...profile })));
+  else act(() => { session.addBackendConnection({ deviceSecret: 'test-secret', ...profile }); });
 }
 async function connect() { await act(async () => { session.connect(); }); }
 const requestedPaths = () => fetchMock.mock.calls.map(([url]) => new URL(String(url)).pathname);
@@ -281,7 +284,7 @@ it('a loopback backend without a key stays plaintext and skips the encrypted cha
   expect(socket.texts.some((text) => text.includes('session.resume'))).toBe(true);
 });
 
-it('moves the socket to the newly active backend profile', async () => {
+it('keeps every backend connected in parallel', async () => {
   policy = { requiredProtocol: 'none', transportVersion: 2, sealedRevision: 2 };
   vi.mocked(loadJson).mockImplementation((_key, fallback) => Promise.resolve(fallback));
   vi.mocked(loadSecret).mockResolvedValue('');
@@ -289,10 +292,18 @@ it('moves the socket to the newly active backend profile', async () => {
   await act(async () => {});
   await connect();
   expect(TestSocket.instances).toHaveLength(1);
-  await act(async () => { session.addBackendConnection({ serverUrl: 'http://127.0.0.2:7346', deviceSecret: 'other-secret' }); });
+  const focused = session.activeBackendConnectionId;
+  let added = '';
+  // A new backend waits for Connect (or pairing) instead of connecting while
+  // its address is still being typed.
+  await act(async () => { added = session.addBackendConnection({ serverUrl: 'http://127.0.0.2:7346', deviceSecret: 'other-secret' }).id; });
+  expect(TestSocket.instances).toHaveLength(1);
+  await act(async () => { session.connect(added); });
   expect(TestSocket.instances).toHaveLength(2);
-  expect(TestSocket.instances[0].close).toHaveBeenCalled();
+  expect(TestSocket.instances[0].close).not.toHaveBeenCalled();
   expect(TestSocket.instances[1].url.host).toBe('127.0.0.2:7346');
+  // Adding a backend does not move the focus away from the current one.
+  expect(session.activeBackendConnectionId).toBe(focused);
 });
 
 it('an approved pairing pins the transport in one profile update and connects encrypted; a new backend inherits nothing', async () => {
@@ -315,8 +326,7 @@ it('an approved pairing pins the transport in one profile update and connects en
   });
   await act(async () => { session.onDevicePairingApproved(id, pin); });
   await act(async () => { session.addBackendConnection({ serverUrl: 'http://127.0.0.2:7345' }); });
-  expect(session.settings).toMatchObject({ serverUrl: 'http://127.0.0.2:7345', deviceSecret: '', encryptionProtocol: 'none', encryptionPublicKey: '', transportVerified: false });
-  expect(session.backendConnections.at(-1)).toMatchObject({ deviceSecret: '', encryptionProtocol: 'none', encryptionPublicKey: '', transportVerified: false });
+  expect(session.backendConnections.at(-1)).toMatchObject({ serverUrl: 'http://127.0.0.2:7345', deviceSecret: '', encryptionProtocol: 'none', encryptionPublicKey: '', transportVerified: false });
 });
 
 it('a failed agentBrowser.watch/unwatch stays out of lastError, other request failures do not', async () => {

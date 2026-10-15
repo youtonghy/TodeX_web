@@ -55,6 +55,10 @@ test('pairs with only the server URL, pins the verified key, chats and reads his
   await page.getByText('TodeX', { exact: true }).last().click();
   await page.getByRole('menuitem', { name: '设置' }).click();
   const settings = page.getByRole('dialog');
+  // Backend connections lists every backend; its page holds the address,
+  // the connection and the device pairing.
+  await settings.getByRole('tab', { name: '后端连接' }).click();
+  await settings.locator('[data-backend-id]').first().click();
   await expect(settings.getByRole('textbox', { name: '后端地址' })).toBeVisible();
   await expect(settings.getByRole('textbox', { name: '加密公钥' })).toHaveCount(0);
   await expect(settings.getByRole('textbox', { name: '配对内容' })).toHaveCount(0);

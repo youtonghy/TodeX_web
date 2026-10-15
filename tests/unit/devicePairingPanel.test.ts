@@ -72,8 +72,8 @@ function render(profile: ProfilePatch = {}) {
   container = document.createElement('div');
   document.body.append(container);
   root = createRoot(container);
-  const rerender = (next = session) => act(() => root.render(createElement(React.Fragment, null,
-    createElement(DevicePairingPanel, { session: next, deviceName: 'TodeX Web' }),
+  const rerender = (next = session, backendId = 'a') => act(() => root.render(createElement(React.Fragment, null,
+    createElement(DevicePairingPanel, { session: next, backendId, deviceName: 'TodeX Web' }),
     createElement(ToastViewport),
   )));
   rerender();
@@ -153,7 +153,7 @@ it('a mismatching approval pins nothing', async () => {
   expect(state.setSettings).not.toHaveBeenCalled();
 });
 
-it.each(['profile', 'address', 'settings address'] as const)('ignores a late approval after changing %s', async change => {
+it.each(['profile', 'address', 'removed backend'] as const)('ignores a late approval after changing %s', async change => {
   const req = request();
   const pending = deferred<Awaited<ReturnType<DevicePairingRequest['poll']>>>();
   req.poll.mockReturnValue(pending.promise);
@@ -162,10 +162,10 @@ it.each(['profile', 'address', 'settings address'] as const)('ignores a late app
   await press('设备验证');
   await tick();
   const next = { ...state.session };
-  if (change === 'profile') next.activeBackendConnectionId = 'b';
-  else if (change === 'address') next.backendConnections = state.session.backendConnections.map(p => ({ ...p, serverUrl: 'https://b.test' }));
-  else next.settings = { ...state.session.settings, serverUrl: 'https://b.test' };
-  state.rerender(next);
+  if (change === 'address') next.backendConnections = state.session.backendConnections.map(p => ({ ...p, serverUrl: 'https://b.test' }));
+  else if (change === 'removed backend') next.backendConnections = [];
+  // A different backend's page.
+  state.rerender(next, change === 'profile' ? 'b' : 'a');
   await act(async () => { pending.resolve({ status: 'approved', deviceId: 'dev_late1234567890', pin: PIN }); });
   expect(req.cancel).toHaveBeenCalledOnce();
   expect(req.poll.mock.calls[0][0]?.aborted).toBe(true);
