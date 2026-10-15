@@ -153,7 +153,7 @@ docker buildx build \
 
 ## Device verification
 
-Enter only the Backend address, request device verification, then compare the full code (and the transport key fingerprint) in the Backend TUI (`d`) and approve with `a` or reject with `r`. The code also authenticates the Backend's transport public key: approval enrolls this browser's signing key and pins that key, then connects. There is no manual key, paste or QR import; Settings shows the pinned protocol, fingerprint and verified state with a Re-pair action. Pairing uses v3 (commit, then reveal). See [device verification](docs/device-verification.md) for expiry and credential handling.
+Enter only the Backend address, request device verification, then compare the full code (and the transport key fingerprint) in the Backend TUI (`d`) and approve with `a` or reject with `r`. The code also authenticates the Backend's transport public key: approval enrolls this browser's signing key and pins that key, then connects. There is no manual key, paste or QR import; each backend's page under Settings › Backend connections shows the pinned protocol, fingerprint and verified state with a Re-pair action. Every backend is paired and stays connected on its own, serving its own workspaces; new conversations outside any workspace (None) start on the backend chosen there, by default the first one added. Pairing uses v3 (commit, then reveal). See [device verification](docs/device-verification.md) for expiry and credential handling.
 
 ## Transport encryption
 
