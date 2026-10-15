@@ -116,6 +116,7 @@ describe('Agent SSH log tab', () => {
       connectionState: 'closed', connectionHealth: { latencyMs: null }, requestTerminalStatus: vi.fn(),
       startTerminalSession: vi.fn(), stopTerminalSession: vi.fn(), resizeTerminalSession: vi.fn(), sendTerminalInput: vi.fn(),
       conversationRuntimeById: { [conversationId]: { sshExecs: runs } as unknown as ConversationRuntime },
+      settingsForBackend(this: { settings: unknown }) { return this.settings; }, backendConnections: [], backendLinkStatus: {}, v2ProvidersByBackend: {},
     } as unknown as TodeXSession;
     return createElement(WorkbenchPanel, { key: scopeKey, scopeKey, session, tab, onTabChange, requests, onRequestsHandled: onHandled });
   }

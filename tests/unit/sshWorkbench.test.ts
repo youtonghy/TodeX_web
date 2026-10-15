@@ -115,6 +115,8 @@ describe('SSH workbench', () => {
       settings: { serverUrl: 'https://backend.test', deviceSecret: 'test-secret', tenantId: 'local' }, terminalById: terminals,
       connectionState: 'open', connectionHealth: { latencyMs: null }, requestTerminalStatus: status,
       startTerminalSession: startTerminal, stopTerminalSession: vi.fn(), resizeTerminalSession: vi.fn(), sendTerminalInput: vi.fn(),
+      settingsForBackend(this: { settings: unknown }) { return this.settings; }, backendConnections: [], v2ProvidersByBackend: {},
+      activeBackendConnectionId: 'b', backendLinkStatus: { b: { state: 'open' } },
     } as unknown as TodeXSession;
     return createElement(WorkbenchPanel, {
       key: scopeKey, scopeKey, session, tab, onTabChange: setTab, sshMode: true,
@@ -140,7 +142,7 @@ describe('SSH workbench', () => {
     expect(container.querySelector('[aria-label="新建工作台标签"]')).toBeNull();
     await act(async () => { pushRequest({ id: 1, kind: 'ssh-terminal', host: 'prod' }); });
     expect(handled).toHaveBeenLastCalledWith(1);
-    expect(status).toHaveBeenLastCalledWith({ kind: 'ssh', host: 'prod' }, expect.any(String));
+    expect(status).toHaveBeenLastCalledWith({ kind: 'ssh', host: 'prod', backendConnectionId: 'b' }, expect.any(String));
     expect(container.querySelector('[aria-label="终端路径"]')).toBeNull();
     expect(container.textContent).toContain('prod');
     const items = itemsChanged.mock.calls.at(-1)?.[0] as WorkbenchItem[];
@@ -162,7 +164,7 @@ describe('SSH workbench', () => {
     const reconnect = container.querySelector<HTMLButtonElement>('[aria-label="重新连接"]');
     expect(reconnect).not.toBeNull();
     await act(async () => { reconnect!.click(); });
-    expect(startTerminal).toHaveBeenCalledWith({ kind: 'ssh', host: 'prod' }, expect.objectContaining({ terminalId, cwd: '', rows: 30, cols: 100, preserveOutput: true }));
+    expect(startTerminal).toHaveBeenCalledWith({ kind: 'ssh', host: 'prod', backendConnectionId: 'b' }, expect.objectContaining({ terminalId, cwd: '', rows: 30, cols: 100, preserveOutput: true }));
   });
 
   it('auto-connects new SSH tabs but waits for Connect on restored ones', async () => {
@@ -170,7 +172,7 @@ describe('SSH workbench', () => {
     await render();
     await act(async () => { pushRequest({ id: 1, kind: 'ssh-terminal', host: 'prod' }); });
     await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
-    expect(startTerminal).toHaveBeenCalledWith({ kind: 'ssh', host: 'prod' }, expect.objectContaining({ cwd: '' }));
+    expect(startTerminal).toHaveBeenCalledWith({ kind: 'ssh', host: 'prod', backendConnectionId: 'b' }, expect.objectContaining({ cwd: '' }));
 
     // A fresh mount (app restart) restores the tab from storage.
     act(() => root.unmount());
@@ -179,7 +181,7 @@ describe('SSH workbench', () => {
     status.mockClear();
     await render();
     await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
-    expect(status).toHaveBeenCalledWith({ kind: 'ssh', host: 'prod' }, expect.any(String));
+    expect(status).toHaveBeenCalledWith({ kind: 'ssh', host: 'prod', backendConnectionId: 'b' }, expect.any(String));
     expect(startTerminal).not.toHaveBeenCalled();
     const connect = container.querySelector<HTMLButtonElement>('[aria-label="重新连接"]');
     expect(connect).not.toBeNull();

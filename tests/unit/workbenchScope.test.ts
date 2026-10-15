@@ -40,6 +40,7 @@ function Harness({ conversation, workspace, mode }: { conversation: string; work
     settings: { serverUrl: 'https://backend.test', deviceSecret: 'test-secret' }, terminalById: terminals,
     connectionState: 'open', connectionHealth: { latencyMs: null }, requestTerminalStatus: status,
     startTerminalSession: startTerminal, stopTerminalSession: stopTerminal, resizeTerminalSession: vi.fn(),
+    settingsForBackend(this: { settings: unknown }) { return this.settings; }, backendConnections: [], backendLinkStatus: {}, v2ProvidersByBackend: {},
   } as unknown as TodeXSession;
   const scopeKey = scope(conversation, workspace, mode);
   return createElement(WorkbenchPanel, { key: scopeKey, scopeKey, session, tab, target, onTabChange: tabChanged, onTargetConsumed: consumed });

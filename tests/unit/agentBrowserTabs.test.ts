@@ -87,6 +87,7 @@ describe('WorkbenchPanel agent browser tab', () => {
       startTerminalSession: vi.fn(), stopTerminalSession: vi.fn(), resizeTerminalSession: vi.fn(), sendTerminalInput: vi.fn(),
       conversations: [{ id: conversationId, v2ConversationId: 'v2-browser' }], watchAgentBrowser,
       conversationRuntimeById: { [conversationId]: { desktopBrowser: runtime(1, 'a').desktopBrowser } as unknown as ConversationRuntime },
+      settingsForBackend(this: { settings: unknown }) { return this.settings; }, backendConnections: [], backendLinkStatus: {}, v2ProvidersByBackend: {},
     } as unknown as TodeXSession;
     return createElement(WorkbenchPanel, { key: scopeKey, scopeKey, session, tab, onTabChange: setTab, shown, requests, onRequestsHandled: onHandled });
   }

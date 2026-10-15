@@ -27,6 +27,7 @@ const session = {
   activeWorkspace: { id: 'workspace', path: '/workspace' },
   settings: { serverUrl: 'https://backend.test', deviceSecret: 'test-secret' },
   terminalById: {}, connectionState: 'closed', connectionHealth: { latencyMs: null },
+  settingsForBackend(this: { settings: unknown }) { return this.settings; }, backendConnections: [], backendLinkStatus: {}, v2ProvidersByBackend: {},
 } as unknown as TodeXSession;
 
 beforeAll(() => { Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true, React }); });

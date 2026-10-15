@@ -34,7 +34,7 @@ const host = (permissions: { screen: boolean; accessibility: boolean }) => ({
   supported: true, available: permissions.screen && permissions.accessibility, host: 'Studio Mac', platform: 'macos', permissions,
 });
 
-const session = { settings: { serverUrl: 'https://backend.test', deviceSecret: '' }, activeWorkspace: { id: 'ws_1', path: '/w/app', name: 'app' }, workspaces: [{ id: 'ws_1', path: '/w/app', name: 'app' }] } as unknown as TodeXSession;
+const session = { settings: { serverUrl: 'https://backend.test', deviceSecret: '' }, activeWorkspace: { id: 'ws_1', path: '/w/app', name: 'app' }, workspaces: [{ id: 'ws_1', path: '/w/app', name: 'app' }], settingsForBackend(this: { settings: unknown }) { return this.settings; }, backendConnections: [], backendLinkStatus: {}, v2ProvidersByBackend: {} } as unknown as TodeXSession;
 const browser = (installed: boolean, downloading = false) => ({
   available: installed, host: 'Studio Mac', chromium: { version: '154.0', installed, downloading, overridden: false, ...(downloading ? { progress: 0.42 } : {}) },
 });

@@ -35,6 +35,7 @@ function render(props: { repairPairing?: boolean } = {}) {
     backendLinkStatus: {}, noWorkspaceBackendId: 'a', setNoWorkspaceBackendId: vi.fn(),
     connectionState: 'idle', connectionHealth: { state: 'idle' }, updateBackendConnection, setSettings,
     historyEncryption: { ...history, forBackend: () => history },
+    settingsForBackend(this: { settings: unknown }) { return this.settings; }, v2ProvidersByBackend: {},
   } as unknown as TodeXSession;
   container = document.createElement('div');
   document.body.append(container);
