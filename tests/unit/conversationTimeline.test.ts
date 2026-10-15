@@ -51,6 +51,12 @@ describe('turn-based process layout', () => {
     expect(items[2]).toMatchObject({ entry: { id: 'note' } });
     expect(items[3]).toMatchObject({ entries: [{ id: 'toolB' }] });
   });
+  it('folds summary progress stubs into one trace instead of splitting it', () => {
+    const stub = { ...step('start', 't', 'assistant_progress'), subtitle: '', detailStub: true };
+    const items = buildChatRenderItems([prompt('u', 't'), step('think', 't', 'reasoning'), stub, step('toolA', 't')]);
+    expect(items.map(item => item.type)).toEqual(['entry', 'executionGroup']);
+    expect(items[1]).toMatchObject({ entries: [{ id: 'think' }, { id: 'start' }, { id: 'toolA' }] });
+  });
   it('interleaves progress folds with the text they separate', () => {
     const items = buildChatRenderItems([prompt('u', 't'), step('one', 't'), entry('answer', 'incoming', 't'),
       step('failure', 't', 'error'), step('two', 't')]);
