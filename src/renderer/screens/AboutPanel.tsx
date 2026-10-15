@@ -36,6 +36,7 @@ function InfoRow({ label, value, copyable = false }: { label: string; value: str
   );
 }
 
+/** The About page of settings: build, runtime and project link. */
 export function AboutPanel({ session }: Props) {
   const t = useT();
   const connected = session.connectionState === 'open';
@@ -44,7 +45,7 @@ export function AboutPanel({ session }: Props) {
     : t('about.notLoaded');
 
   return (
-    <div className="flex flex-col gap-6 py-1">
+    <div className="flex flex-col gap-6">
       <div className="flex items-center gap-4">
         <AppIcon className="size-16" />
         <div className="min-w-0">
@@ -60,7 +61,7 @@ export function AboutPanel({ session }: Props) {
         <div className="flex items-center gap-1.5 px-3">
           <RiServerLine aria-hidden className="size-4 text-foreground-icon-secondary" />
           <h3 className="text-body-2-medium text-text-secondary">{t('about.runtime')}</h3>
-          <Chip className="ml-auto" variant="caption" color={connected ? 'lime' : 'rose'}>
+          <Chip className="ms-auto" variant="caption" color={connected ? 'lime' : 'rose'}>
             {connectionStateLabel(session.connectionState)}
           </Chip>
         </div>
