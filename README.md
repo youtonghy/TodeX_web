@@ -11,7 +11,9 @@
 The TodeX public website lives at `/`, with the stateless web workbench at `/app`.
 The website introduces the product, offers official Desktop packages and a one-line Backend installer;
 the mobile app is not available for download yet. Each workbench browser connects
-directly to its own user-managed `todex-agentd` over REST and WebSocket.
+directly to its own user-managed `todex-agentd` over REST and WebSocket; a
+self-hosted deployment (`TODEX_BACKENDS`) instead pins its backends and reaches
+them through this server's proxy, still behind device verification.
 
 The title menu includes CLI management for the active Backend, including installed/latest version status, one-click install of missing CLIs and managed one-click upgrades. Agent accounts can be exported and imported per agent as a JSON file to sync providers between hosts.
 The chat model picker includes a search field above the list, with case-insensitive model name matching, a clear button, and keyboard navigation.
@@ -85,10 +87,22 @@ the GitHub API rate limit used by `GET /api/releases`. There is no user
 database or session store.
 
 **Self-hosting with fixed backends:** set `TODEX_BACKENDS` to comma-separated
-`Name=URL` entries. The workbench then lists exactly those backends and reaches
-them only through this server at `/backend/<id>/` (REST and WebSocket); `/`
-opens `/app`. Every browser still has to pass device verification on each
-backend, and the backends must have transport encryption enabled. See
+`Name=URL` entries (one or more). With it set:
+
+- The browser only talks to this site. Every request, WebSocket and device
+  pairing included, goes to `/backend/<id>/` and the server forwards it; the
+  backend addresses are never sent to the browser (`GET /api/config` returns
+  ids and names only).
+- The workbench lists exactly the configured backends: they cannot be added,
+  removed or re-addressed. `/` redirects to `/app`.
+- Every browser still has to pass device verification on each backend. The
+  proxy overwrites `Origin` with a fixed non-local value, so even a backend on
+  the same machine running anonymously on loopback cannot be reached through it
+  without authorization.
+- The proxied backends must have transport encryption enabled, or pairing is
+  refused.
+
+Without `TODEX_BACKENDS` nothing changes. See
 [docs/self-hosting.md](docs/self-hosting.md).
 
 Run it directly:
@@ -96,7 +110,7 @@ Run it directly:
 ```bash
 docker run -d --name todex-web --restart unless-stopped --read-only \
   -p 4173:4173 \
-  -e TODEX_BACKENDS="Home=http://192.168.1.20:7345" \
+  -e TODEX_BACKENDS="Home=http://192.168.1.20:7345,Office=https://office.lan:7345" \
   ghcr.io/youtonghy/todex_web:latest
 ```
 

@@ -8,7 +8,7 @@
   </picture>
 </p>
 
-根路径 `/` 为 TodeX 官网，原有无状态 Web 面板位于 `/app`。官网介绍产品，提供 Desktop 官方安装包下载与 Backend 一键安装命令，移动 App 暂缓发布。Node.js 只托管网页；面板中的每个浏览器通过 REST 和 WebSocket 直连各自的 `todex-agentd`。
+根路径 `/` 为 TodeX 官网，原有无状态 Web 面板位于 `/app`。官网介绍产品，提供 Desktop 官方安装包下载与 Backend 一键安装命令，移动 App 暂缓发布。默认情况下，面板中的每个浏览器通过 REST 和 WebSocket 直连各自的 `todex-agentd`；自主部署（设置 `TODEX_BACKENDS`）时则固定后端，由本站代理转发，仍需设备验证。
 
 ## 环境要求
 
@@ -37,20 +37,27 @@ CI 打包时应通过 `TODEX_BUILD_VERSION` 传入正式版本。开发构建显
 
 官网的工作台预览内嵌 `/demo`：由真实的侧栏、对话与工作台面板，基于内存中的示例数据回放一段脚本化演示（新建工作区 → 新建对话 → 发送消息 → 收到回答）。演示不会连接 Backend，也不会写入 `todex.web.*` 存储；滚出视口时自动暂停，开启“减少动态效果”时直接展示完成状态。脚本与示例数据位于 `src/renderer/demo/`。为此 CSP 仅允许同源嵌入（`frame-ancestors 'self'`）。
 
-生产服务提供网页、`GET /healthz` 和下载清单 `GET /api/releases`，不包含 Backend 代理、用户数据库或服务端会话。运行期只需 `HOST` 和 `PORT`；`GITHUB_TOKEN` 为可选项，仅用于提高 `/api/releases` 查询 GitHub API 的速率上限。
+生产服务提供网页、`GET /healthz`、下载清单 `GET /api/releases` 和部署配置 `GET /api/config`；只有设置了 `TODEX_BACKENDS` 时才提供 `/backend/<id>/` 后端代理，没有用户数据库或服务端会话。运行期只需 `HOST` 和 `PORT`；`GITHUB_TOKEN` 为可选项，仅用于提高 `/api/releases` 查询 GitHub API 的速率上限。
 
 ### Docker 部署
 
 镜像发布在 `ghcr.io/youtonghy/todex_web`，按版本号打标签并附带 `latest`。容器监听 `4173`，以非特权 `node` 用户运行（不写文件，可用 `--read-only`），并内置针对 `GET /healthz` 的健康检查。镜像同时提供 `linux/amd64` 与 `linux/arm64`。`HOST` 和 `PORT` 设置监听地址，`GITHUB_TOKEN` 为可选项。
 
-**自主部署（固定后端）：** 用 `TODEX_BACKENDS` 传入逗号分隔的 `名称=URL`。此时工作台只列出这些后端，浏览器只经本站的 `/backend/<id>/` 代理（REST 与 WebSocket）连接它们，`/` 直接打开 `/app`。每台浏览器仍需在每个后端完成设备验证，后端必须开启传输加密。详见 [docs/self-hosting.md](docs/self-hosting.md)。
+**自主部署（固定后端）：** 用 `TODEX_BACKENDS` 传入逗号分隔的 `名称=URL`（可多个）。设置后：
+
+- 浏览器只访问本站，所有请求（包括 WebSocket 和设备配对）都经 `/backend/<id>/` 由 Web 服务转发。后端地址不会发给浏览器（`GET /api/config` 只返回 id 和名称）。
+- 后端列表固定为配置中的后端，不能添加、删除或改地址；`/` 直接跳转到 `/app`。
+- 每台浏览器仍要在每个后端完成设备验证。代理会把 `Origin` 统一改写成固定的非本机值，所以即使后端和 Web 服务在同一台机器上、用匿名模式只监听本机，也无法经代理绕过授权。
+- 被代理的后端必须开启传输加密，否则配对会被拒绝。
+
+不设置 `TODEX_BACKENDS` 时行为不变。详见 [docs/self-hosting.md](docs/self-hosting.md)。
 
 直接运行：
 
 ```bash
 docker run -d --name todex-web --restart unless-stopped --read-only \
   -p 4173:4173 \
-  -e TODEX_BACKENDS="家里=http://192.168.1.20:7345" \
+  -e TODEX_BACKENDS="家里=http://192.168.1.20:7345,公司=https://office.lan:7345" \
   ghcr.io/youtonghy/todex_web:latest
 ```
 
@@ -109,7 +116,7 @@ docker buildx build \
 
 下载区只为 Desktop 提供安装包：可选版本，下载链接直达 GitHub 官方文件，同时提供版本说明和 SHA256 校验文件。Backend 改为 TodeX_backend 的一行 `install.sh` 安装命令（macOS / Linux / WSL），不依赖下载清单；Windows 下额外提供最新 release 的原生版本链接。未发布的架构不显示下载入口，移动端仅显示暂缓发布状态。云空图片和生成提示词见[官网资源说明](docs/website-assets.md)。
 
-公开部署应在可信反向代理终止 TLS。HTTPS 页面连接非 loopback Backend 时必须使用 HTTPS/WSS；Backend 还需允许站点来源的 CORS，并按网络位置配置浏览器 Private Network Access。
+公开部署应在可信反向代理终止 TLS。未设置 `TODEX_BACKENDS` 时，HTTPS 页面连接非 loopback Backend 必须使用 HTTPS/WSS；Backend 还需允许站点来源的 CORS，并按网络位置配置浏览器 Private Network Access。
 
 ## 设备验证与传输加密
 
