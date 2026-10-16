@@ -1,5 +1,5 @@
 import { Component, lazy, Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { RiAddLine, RiFolderAddLine, RiExpandLeftLine, RiExpandRightLine, RiGithubLine, RiLayoutLeftLine, RiLayoutRightLine, RiRobot2Line, RiShieldLine } from '@remixicon/react';
+import { RiAddLine, RiFolderAddLine, RiExpandLeftLine, RiExpandRightLine, RiGithubLine, RiLayoutLeftLine, RiLayoutRightLine, RiRobot2Line } from '@remixicon/react';
 import { motion, useReducedMotion } from 'motion/react';
 import { Dialog, Modal as AriaModal, ModalOverlay } from 'react-aria-components';
 import { Badge } from '@/components/base/badges/badge';
@@ -9,7 +9,7 @@ import { Select, SelectItem } from '@/components/base/select/select';
 import { useDirection } from '@/components/foundations/direction/direction';
 import { Alert } from '@/components/ui/alert';
 import { IconAction } from '@/components/ui/icon-action';
-import { ConfirmDialog, Modal } from '@/components/ui/modal';
+import { Modal } from '@/components/ui/modal';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { ToastViewport, toast } from '@/components/ui/toast';
 import { cx } from '@/utils/cx';
@@ -33,7 +33,6 @@ import { connectionStateLabel, createWorkspaceDirectory, fetchWorkspaceDirectory
 import { isWorkbenchTab, panelFromRoute, type DesktopPanel, type OpenPanelOptions, type WorkbenchItem, type WorkbenchRequest, type WorkbenchTab } from './lib/panels';
 import type { RemoteFilesBinding } from './session/fileSources';
 import { ShortcutHint, useAppShortcuts, useShortcutHintTracking } from './lib/shortcuts';
-import { getWorkspaceTrust, setWorkspaceTrust } from './lib/webBackend';
 import { useT } from './i18n';
 import type { SettingsSectionRequest } from './screens/SettingsPanel';
 import { useAppearance } from './lib/appearance';
@@ -167,9 +166,6 @@ export function App() {
   const [editingWorkspaceId, setEditingWorkspaceId] = useState<string | null>(null);
   const [capabilitiesOpen, setCapabilitiesOpen] = useState(false);
   const [gitOpen, setGitOpen] = useState(false);
-  const [trustOpen, setTrustOpen] = useState(false);
-  const [workspaceTrusted, setWorkspaceTrustedState] = useState<boolean | null>(null);
-  const [trustUpdating, setTrustUpdating] = useState(false);
 
   const [panelMotion, setPanelMotion] = useState(false);
   const panelMotionTimerRef = useRef<number | null>(null);
@@ -410,50 +406,6 @@ export function App() {
     document.title = conversation ? `TodeX · ${conversation.title} · ${status}` : `TodeX · ${status}`;
   }, [session.activeConversation, session.connectionState]);
 
-  // Workspace trust (web): the backend only runs agents, terminals and Git
-  // writes in a workspace the user trusted.
-  useEffect(() => {
-    const workspaceId = session.activeWorkspace?.id;
-    if (!workspaceId || session.connectionState !== 'open') {
-      setWorkspaceTrustedState(null);
-      return;
-    }
-    let cancelled = false;
-    setWorkspaceTrustedState(null);
-    const loadTrust = async () => {
-      for (let attempt = 0; attempt < 3 && !cancelled; attempt += 1) {
-        try {
-          const trust = await getWorkspaceTrust(session.settings, workspaceId);
-          if (!cancelled) setWorkspaceTrustedState(trust.trusted);
-          return;
-        } catch {
-          if (attempt < 2) {
-            await new Promise((resolve) => window.setTimeout(resolve, 350));
-          }
-        }
-      }
-      if (!cancelled) setWorkspaceTrustedState(null);
-    };
-    void loadTrust();
-    return () => { cancelled = true; };
-  }, [session.activeWorkspace?.id, session.connectionState, session.settings]);
-
-  const updateWorkspaceTrust = async () => {
-    const workspaceId = session.activeWorkspace?.id;
-    if (!workspaceId) return;
-    setTrustUpdating(true);
-    try {
-      const next = await setWorkspaceTrust(session.settings, workspaceId, !workspaceTrusted);
-      setWorkspaceTrustedState(next.trusted);
-      setTrustOpen(false);
-      toast.success(next.trusted ? t('app.trustTrustedToast') : t('app.trustRevokedToast'));
-    } catch (error) {
-      toast.danger(error instanceof Error ? error.message : t('app.trustUpdateFailed'));
-    } finally {
-      setTrustUpdating(false);
-    }
-  };
-
   const insetChrome = window.todexWeb.app.windowChrome === 'hidden-inset';
   const settingsOpen = panel === 'settings';
   // The "no recovery key" notice opened settings to set one up.
@@ -515,18 +467,6 @@ export function App() {
         <ConversationHeaderDetails session={session} title={session.activeConversation?.title ?? t('app.conversation')} gitOpen={gitOpen} onOpenGit={() => setGitOpen(true)} />
       )}
       <div className="flex shrink-0 items-center gap-1">
-        {/* Workspace trust is about the active workspace, which the SSH view and the board do not show. */}
-        {!sshActive && !kanbanActive && session.activeWorkspace && workspaceTrusted !== null ? (
-          <Button
-            size="small"
-            variant={workspaceTrusted ? 'ghost' : 'danger'}
-            leadingIcon={RiShieldLine}
-            aria-label={workspaceTrusted ? t('app.trustRevoke') : t('app.trustTrust')}
-            onClick={() => setTrustOpen(true)}
-          >
-            <span className="hidden sm:inline">{workspaceTrusted ? t('app.trustTrusted') : t('app.trustRequired')}</span>
-          </Button>
-        ) : null}
         {!sshActive && !kanbanActive ? (
           <span className="relative inline-flex shrink-0">
             <IconAction icon={RiGithubLine} aria-label={t('app.githubActions')} onClick={() => setGitOpen(true)} />
@@ -758,19 +698,6 @@ export function App() {
         <PanelBoundary><CapabilitiesPanel inDialog workspacePath={session.activeWorkspace?.path ?? session.settings.defaultWorkspacePath} providers={session.v2Providers} catalogs={session.capabilityCatalogs} onRefresh={(provider) => void session.refreshCapabilityCatalog(provider)} conversationId={session.activeConversation?.id} selectedSkills={session.activeConversation ? session.selectedSkills[session.activeConversation.id] ?? [] : []} canInvoke={Boolean(session.activeConversation?.v2ConversationId)} onToggleSkill={(skill, provider) => session.activeConversation && session.toggleCatalogSkill(session.activeConversation.id, skill, provider)} onPreviewSkill={(skill, provider) => session.previewSkillResource(provider, skill.resourceId)} onLoadMcpConfig={(server) => session.getMcpServerConfig(server.provider, server.resourceId)} manager={session.capabilityManager} /></PanelBoundary>
       </Modal>
       <GitActionsModal key={session.activeConversation?.id} session={session} isOpen={gitOpen} onOpenChange={setGitOpen} />
-      <ConfirmDialog
-        isOpen={trustOpen}
-        onOpenChange={setTrustOpen}
-        title={workspaceTrusted ? t('app.trustRevoke') : t('app.trustModalTitle')}
-        description={workspaceTrusted ? t('app.trustRevokeWarning') : t('app.trustTrustDescription')}
-        confirmLabel={workspaceTrusted ? t('app.trustConfirmRevoke') : t('app.trustConfirmTrust')}
-        cancelLabel={t('common.cancel')}
-        tone={workspaceTrusted ? 'danger' : 'default'}
-        isPending={trustUpdating}
-        onConfirm={() => void updateWorkspaceTrust()}
-      >
-        <p className="break-all text-caption-1-regular text-text-tertiary">{session.activeWorkspace?.path}</p>
-      </ConfirmDialog>
       {createOpen ? <CreateWorkspaceModal
         key={editingWorkspaceId ?? 'create'}
         session={session}

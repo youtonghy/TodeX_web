@@ -29,7 +29,6 @@ test('renders Pi plugin state, protects drafts, routes commands and stops the ru
     if (url.pathname === '/v2/transport-policy') body = { requiredProtocol: 'none' };
     else if (url.pathname === '/v2/version') body = { name: 'todex-agentd', version: 'test' };
     else if (url.pathname === '/health') body = { status: 'ok' };
-    else if (url.pathname.endsWith('/trust')) body = { workspacePath: manifest.workspace, trusted: true };
     else if (url.pathname === '/v2/providers') body = { providers: [provider] };
     else if (url.pathname === '/v2/providers/commands') body = { provider: 'pi', commands, source: 'pi-rpc', catalogSource: 'session', runtimeId: 'runtime-browser' };
     else if (url.pathname === '/v2/providers/models') body = { models: [] };
@@ -39,7 +38,7 @@ test('renders Pi plugin state, protects drafts, routes commands and stops the ru
       body = { conversationId: manifest.id, fromSequence: after, nextSequence: journal.length, hasMore: false,
         events: journal.filter(item => Number(item.sequence) > after) };
     } else if (url.pathname.startsWith('/v2/catalog/')) body = { skills: [], servers: [], tools: [], plugins: [] };
-    else if (url.pathname === '/v2/workspaces') body = { workspaces: [{ id: 'workspace-pi', path: manifest.workspace, name: 'Pi smoke', trusted: true }] };
+    else if (url.pathname === '/v2/workspaces') body = { workspaces: [{ id: 'workspace-pi', path: manifest.workspace, name: 'Pi smoke' }] };
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body),
       headers: { 'Access-Control-Allow-Origin': '*' } });
   });
@@ -59,7 +58,7 @@ test('renders Pi plugin state, protects drafts, routes commands and stops the ru
   await page.addInitScript(({ backend, manifest }) => {
     localStorage.setItem('todex.web.settings.v1', JSON.stringify({ serverUrl: backend, encryptionProtocol: 'none', defaultWorkspacePath: manifest.workspace }));
     localStorage.setItem('todex.web.workspaces.v1', JSON.stringify([{ id: 'workspace-pi', name: 'Pi smoke', path: manifest.workspace,
-      backendConnectionId: 'default-backend', trusted: true, model: '', sessionId: 'workspace-session', permissionMode: 'full-access' }]));
+      backendConnectionId: 'default-backend', model: '', sessionId: 'workspace-session', permissionMode: 'full-access' }]));
     localStorage.setItem('todex.web.conversations.v1', JSON.stringify([{ ...manifest, workspaceId: 'workspace-pi', v2ConversationId: manifest.id,
       backendConnectionId: 'default-backend', sessionId: 'v2_pi-browser', mode: 'implement', permissionMode: 'full-access' }]));
     localStorage.setItem('todex.web.activeSelection.v1', JSON.stringify({ workspaceId: 'workspace-pi', conversationId: manifest.id }));

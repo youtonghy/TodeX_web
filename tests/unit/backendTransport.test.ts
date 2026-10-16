@@ -26,7 +26,6 @@ import { SocketVerificationError } from '@todex/protocol/socketVerification';
 import { generateDeviceIdentity } from '@todex/protocol/deviceAuth';
 import { backendApi, backendFetch, backendTransport, describeTransportFailure } from '../../src/renderer/session/helpers';
 import { readGitStatus } from '../../src/renderer/lib/gitWorkspace';
-import { getWorkspaceTrust } from '../../src/renderer/lib/webBackend';
 
 const serverSecret = new Uint8Array(32).fill(5);
 const serverPublic = x25519.getPublicKey(serverSecret);
@@ -102,26 +101,24 @@ it('refuses REST calls to an unpaired remote backend without touching the networ
 });
 
 it('tunnels every REST helper through /v2/sealed with the inner request signed', async () => {
-  const calls = sealedBackend((inner) => inner.path === '/v2/workspaces/w%201/trust'
-    ? { status: 200, body: { workspacePath: '/w', trusted: true } }
-    : inner.path === '/v2/git/status' ? { status: 200, body: { repositoryPath: '/w', initialized: true } }
-      : { status: 200, body: { conversations: [] } });
+  const calls = sealedBackend((inner) => inner.path === '/v2/git/status'
+    ? { status: 200, body: { repositoryPath: '/w', initialized: true } }
+    : { status: 200, body: { conversations: [] } });
   const settings = { ...pinned('http://192.168.1.20:7345'), tenantId: 'local' } as never;
   expect(await backendApi(settings).listConversations()).toEqual({ conversations: [] });
-  expect(await getWorkspaceTrust(settings, 'w 1')).toMatchObject({ trusted: true });
   expect(await readGitStatus(settings, '/w')).toMatchObject({ repositoryPath: '/w' });
   const response = await backendFetch(settings, { method: 'PUT', path: '/v2/workspaces', headers: { 'content-type': 'application/json' }, body: '{"workspaces":[]}' });
   expect(response.ok).toBe(true);
   expect(calls.every(({ url }) => url.pathname === '/v2/sealed' && url.search === '')).toBe(true);
   expect(calls.map(({ inner }) => `${inner?.method} ${inner?.path}`)).toEqual([
-    'GET /v2/conversations', 'GET /v2/workspaces/w%201/trust', 'GET /v2/git/status', 'PUT /v2/workspaces',
+    'GET /v2/conversations', 'GET /v2/git/status', 'PUT /v2/workspaces',
   ]);
-  expect(calls[2].inner?.query).toBe('workspacePath=%2Fw');
+  expect(calls[1].inner?.query).toBe('workspacePath=%2Fw');
   for (const { inner } of calls) {
     expect(inner?.headers['x-todex-device-id']).toBe(device.deviceId);
     expect(inner?.headers['x-todex-auth-sig']).toBeTruthy();
   }
-  expect(new TextDecoder().decode(calls[3].inner?.body)).toBe('{"workspaces":[]}');
+  expect(new TextDecoder().decode(calls[2].inner?.body)).toBe('{"workspaces":[]}');
 });
 
 it('surfaces inner error statuses as plain responses and an unsealed answer as a request failure', async () => {

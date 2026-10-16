@@ -121,8 +121,7 @@ Quitting the TUI leaves the daemon running in the background.
 
 ## 4. Create a workspace and a conversation
 
-Add a project directory inside a configured workspace root, mark it trusted,
-then start a conversation with any available provider. Prompts, approvals,
+Add a project directory inside a configured workspace root, then start a conversation with any available provider. Prompts, approvals,
 terminal, and Git state all stream over the same connection.
 
 ## Troubleshooting
@@ -154,13 +153,11 @@ approximated.
 profiles per agent — TodeX activates one by rewriting the agent's own global
 config, so sessions started outside TodeX behave identically.
 
-## Workspaces and trust
+## Workspaces
 
 A *workspace* is a project directory under a configured *workspace root*
-(\`TODEX_AGENTD_WORKSPACE_ROOT\`, default \`~/projects\`). New workspaces are
-untrusted by default: trusting one is an explicit, owner-scoped decision that
-controls what agents may execute there. Untrusting a workspace cancels its
-active turns.
+(\`TODEX_AGENTD_WORKSPACE_ROOT\`, default \`~/projects\`). Agents, terminals,
+and Git can run in any workspace inside the configured roots.
 
 ## Conversations
 
@@ -428,9 +425,8 @@ Plaintext \`none\` is allowed only on loopback.
 ## Workspace boundaries
 
 \`workspace_roots\` restricts every file and directory API to authorized
-scopes — clients cannot read outside them. Per-workspace trust is
-owner-scoped, new workspaces start untrusted, and revoking trust cancels
-active turns and detaches the workspace without deleting its conversations.
+scopes — clients cannot read outside them. Removing a workspace cancels its
+active turns and detaches it without deleting its conversations.
 
 ## Isolation
 
@@ -468,9 +464,8 @@ API keys for scripts and services use a separate port and \`/api/v1\`; see
 | Endpoint | Purpose |
 | --- | --- |
 | \`GET /v2/workspaces\` | Cached workspaces for the current tenant |
-| \`PUT /v2/workspaces\` | Merge workspace caches; returns canonical IDs and auto-trusts undecided directories inside the workspace boundary |
-| \`GET \\| PUT /v2/workspaces/{id}/trust\` | Read or change owner-scoped execution trust (new workspaces are untrusted) |
-| \`DELETE /v2/workspaces/{id}\` | Revoke trust, cancel active turns, remove the workspace (conversations are kept) |
+| \`PUT /v2/workspaces\` | Merge workspace caches; returns canonical IDs |
+| \`DELETE /v2/workspaces/{id}\` | Cancel active turns and remove the workspace (conversations are kept) |
 | \`GET /v2/workspace/entries?workspace=&query=\` | File/folder suggestions for the \`@\` picker |
 | \`GET /v2/workspace/directories?path=\` | Directory tree explorer |
 | \`GET /v2/workspace/file?path=\` | Read a file inside the sandbox root |
@@ -578,8 +573,7 @@ Each key carries:
 
 - **Agents** — the agents it may use (all by default).
 - **Workspaces** — absolute paths it may use, subdirectories included (all
-  workspace roots by default). Listing a workspace also trusts it for the
-  key; any other workspace must already be trusted on a paired device.
+  workspace roots by default).
 - **Approval** — how permission requests are answered: \`ask\` (default,
   the caller answers), \`auto-approve\`, or \`reject\`. Requests bound to a
   specific device are never approved on a key's behalf.
@@ -795,7 +789,7 @@ where the web differs it's noted.
 Workspaces on top, conversations below. Conversation rows show the active
 agent badge and run state; right-click actions cover New, Rename, Fork, and
 Delete. Workspaces can be added from any directory under a configured
-workspace root and are trusted explicitly.
+workspace root.
 
 ## Scheduled conversations and optional features
 

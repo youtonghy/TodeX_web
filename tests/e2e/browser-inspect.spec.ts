@@ -19,14 +19,13 @@ async function openBrowserTab(page: Page) {
     if (url.pathname === '/v2/transport-policy') body = { requiredProtocol: 'none' };
     else if (url.pathname === '/v2/version') body = { name: 'todex-agentd', version: 'test' };
     else if (url.pathname === '/health') body = { status: 'ok' };
-    else if (url.pathname.endsWith('/trust')) body = { workspacePath: manifest.workspace, trusted: true };
     else if (url.pathname === '/v2/providers') body = { providers: [provider] };
     else if (url.pathname === '/v2/providers/models') body = { models: [] };
     else if (url.pathname === '/v2/providers/commands') body = { provider: 'codex', commands: [], source: 'none' };
     else if (url.pathname.startsWith('/v2/catalog/')) body = { skills: [], servers: [], tools: [], plugins: [] };
     else if (url.pathname === '/v2/conversations') body = { conversations: [manifest] };
     else if (url.pathname.endsWith('/events')) body = { conversationId: manifest.id, fromSequence: 0, nextSequence: 0, hasMore: false, events: [] };
-    else if (url.pathname === '/v2/workspaces') body = { workspaces: [{ id: manifest.workspaceId, path: manifest.workspace, name: 'Browser', trusted: true }] };
+    else if (url.pathname === '/v2/workspaces') body = { workspaces: [{ id: manifest.workspaceId, path: manifest.workspace, name: 'Browser' }] };
     else if (url.pathname === '/v2/browser/fetch') {
       fetches.push(route.request().postData() ?? '');
       body = { url: pageUrl, status: 200, contentType: 'text/html; charset=utf-8',
@@ -43,7 +42,7 @@ async function openBrowserTab(page: Page) {
   await page.addInitScript(({ backend, manifest }) => {
     localStorage.setItem('todex.web.settings.v1', JSON.stringify({ serverUrl: backend, encryptionProtocol: 'none', defaultWorkspacePath: manifest.workspace }));
     localStorage.setItem('todex.web.workspaces.v1', JSON.stringify([{ id: manifest.workspaceId, name: 'Browser', path: manifest.workspace,
-      backendConnectionId: 'default-backend', trusted: true, model: '', sessionId: 'workspace-session', permissionMode: 'full-access' }]));
+      backendConnectionId: 'default-backend', model: '', sessionId: 'workspace-session', permissionMode: 'full-access' }]));
     localStorage.setItem('todex.web.conversations.v1', JSON.stringify([{ ...manifest, v2ConversationId: manifest.id,
       backendConnectionId: 'default-backend', sessionId: 'v2_browser-inspect', mode: 'implement', permissionMode: 'full-access' }]));
     localStorage.setItem('todex.web.activeSelection.v1', JSON.stringify({ workspaceId: manifest.workspaceId, conversationId: manifest.id }));
