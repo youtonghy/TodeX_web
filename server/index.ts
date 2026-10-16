@@ -2,23 +2,31 @@ import compression from 'compression';
 import express, { type Express } from 'express';
 import helmet from 'helmet';
 import { existsSync } from 'node:fs';
-import type { IncomingMessage, ServerResponse } from 'node:http';
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createBackendProxy, deploymentConfig, parseBackendList, type DeployedBackend } from './backends.js';
 import { createReleaseCatalogHandler } from './releases.js';
 
 export type WebServerOptions = {
   clientDirectory?: string;
   releasesHandler?: (request: IncomingMessage, response: ServerResponse) => void;
+  /** Backends fixed at deploy time; non-empty turns on the managed mode. */
+  backends?: DeployedBackend[];
 };
 
 export function createApp(options: WebServerOptions = {}): Express {
   const serverDirectory = fileURLToPath(new URL('.', import.meta.url));
   const clientDirectory = options.clientDirectory ?? resolve(serverDirectory, '../../dist-client');
   const indexPath = resolve(clientDirectory, 'index.html');
+  const backends = options.backends ?? [];
+  const managed = backends.length > 0;
   const app = express();
 
   app.disable('x-powered-by');
+  // Before compression and helmet: proxied responses (sealed streams) pass
+  // through untouched.
+  if (managed) app.use(createBackendProxy(backends).handleRequest);
   app.use(compression());
   app.use(helmet({
     crossOriginEmbedderPolicy: false,
@@ -29,7 +37,8 @@ export function createApp(options: WebServerOptions = {}): Express {
         styleSrc: ["'self'", "'unsafe-inline'"],
         imgSrc: ["'self'", 'data:', 'blob:', 'http:', 'https:'],
         fontSrc: ["'self'", 'data:'],
-        connectSrc: ["'self'", 'http:', 'https:', 'ws:', 'wss:'],
+        // A managed deployment reaches its backends only through /backend/<id>.
+        connectSrc: managed ? ["'self'"] : ["'self'", 'http:', 'https:', 'ws:', 'wss:'],
         frameSrc: ["'self'"],
         objectSrc: ["'none'"],
         baseUri: ["'self'"],
@@ -47,11 +56,22 @@ export function createApp(options: WebServerOptions = {}): Express {
     response.json({ status: 'ok' });
   });
 
+  const config = deploymentConfig(backends);
+  app.get('/api/config', (_request, response) => {
+    response.setHeader('Cache-Control', 'no-store');
+    response.json(config);
+  });
+
   app.get('/api/releases', options.releasesHandler ?? createReleaseCatalogHandler());
 
   app.use('/api', (_request, response) => {
     response.status(404).json({ code: 'NOT_FOUND', message: 'TodeX Web has no server-side Backend API.' });
   });
+
+  if (managed) {
+    // A self-hosted deployment opens straight into the workbench.
+    app.get('/', (_request, response) => response.redirect(302, '/app'));
+  }
 
   app.use(express.static(clientDirectory, {
     etag: true,
@@ -82,12 +102,31 @@ export function createApp(options: WebServerOptions = {}): Express {
   return app;
 }
 
+/** The HTTP server for `createApp`, with WebSocket upgrades proxied to the
+ * deployed backends (and refused otherwise). */
+export function createWebServer(options: WebServerOptions = {}): Server {
+  const server = createServer(createApp(options));
+  const proxy = createBackendProxy(options.backends ?? []);
+  server.on('upgrade', (request, socket, head) => {
+    if (!proxy.handleUpgrade(request, socket, head)) socket.destroy();
+  });
+  return server;
+}
+
 if (process.env.NODE_ENV !== 'test') {
+  let backends: DeployedBackend[];
+  try {
+    backends = parseBackendList(process.env.TODEX_BACKENDS);
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : error);
+    process.exit(1);
+  }
   const requestedPort = Number.parseInt(process.env.PORT || '4173', 10);
   const port = Number.isInteger(requestedPort) && requestedPort > 0 && requestedPort <= 65_535 ? requestedPort : 4173;
   const host = process.env.HOST || '0.0.0.0';
-  const server = createApp().listen(port, host, () => {
+  const server = createWebServer({ backends }).listen(port, host, () => {
     console.log(`TodeX Web listening on http://${host}:${port}`);
+    for (const backend of backends) console.log(`  backend ${backend.id} (${backend.name}) -> ${backend.target.origin}${backend.target.pathname}`);
   });
   const shutdown = () => server.close(() => process.exit(0));
   process.on('SIGINT', shutdown);

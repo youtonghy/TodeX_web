@@ -16,6 +16,7 @@ import { PiExtensionEffects, canApplyPluginDraft } from './piExtensionEffects';
 import { commandContextKey, routePiSlashCommand, type ProviderCommandCatalog } from './providerCommands';
 import { piExtensionPlainText } from '../components/piExtensionPresentation';
 import { insecureBackendReason } from '../lib/webPlatform';
+import { managedBackendProfiles } from '../lib/webDeployment';
 import type { ExtensionEditorRequest } from '@todex/protocol/conversationRuntime';
 import { migrateLegacyFollowUps, restoreQueuedFollowUps, type LegacyAddResult, type LegacyFollowUps, type LegacyQueueTarget } from './queuedFollowUps';
 import { backendRateLimitState } from './sessionRateLimit';
@@ -677,7 +678,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     conversations.find((item) => item.id === activeConversationId),
     workspaces.find((item) => item.id === activeWorkspaceId),
     noWorkspaceBackendId,
-  ) || 'default-backend';
+  ) || (window.todexWeb?.deployment ? backendConnections[0]?.id : '') || 'default-backend';
   const activeBackendConnectionIdRef = useRef(activeBackendConnectionId);
   activeBackendConnectionIdRef.current = activeBackendConnectionId;
   const focusProfile = backendConnections.find((item) => item.id === activeBackendConnectionId);
@@ -1394,7 +1395,20 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       nextSettings.serverUrl = normalizeServerUrl(nextSettings.serverUrl);
       const storedProfiles = (storedBackendConnections as unknown[]).map(normalizeBackendConnectionProfile).filter((profile): profile is BackendConnectionProfile => Boolean(profile));
       const hydratedProfiles = storedProfiles.length ? await Promise.all(storedProfiles.map(async (profile) => ({ ...profile, deviceSecret: (await loadSecretOrReport(`${DEVICE_SECRET_STORAGE_KEY}.${profile.id}`)) || (profile.id === 'default-backend' ? nextSettings.deviceSecret : '') }))) : [];
-      const profiles = hydratedProfiles.length ? hydratedProfiles : [profileFromSettings(nextSettings)];
+      const unmanagedProfiles = hydratedProfiles.length ? hydratedProfiles : [profileFromSettings(nextSettings)];
+      // A self-hosted deployment pins the backend list; keys of the profiles
+      // it drops are forgotten.
+      const deployment = window.todexWeb?.deployment;
+      const profiles = deployment
+        ? managedBackendProfiles(deployment, hydratedProfiles, profileFromSettings(nextSettings))
+        : unmanagedProfiles;
+      if (deployment) {
+        const kept = new Set(profiles.map((profile) => profile.id));
+        for (const profile of storedProfiles) {
+          if (!kept.has(profile.id)) void removeSecret(`${DEVICE_SECRET_STORAGE_KEY}.${profile.id}`).catch(reportSecretStoreError);
+        }
+        nextSettings.serverUrl = profiles[0].serverUrl;
+      }
       const normalizedWorkspaces = withNoneWorkspace(storedWorkspaces, () => createNoneWorkspace(nextSettings)).map((workspace) => ({
         ...workspace,
         reasoningEffort: normalizeReasoningEffort(workspace.reasoningEffort),
@@ -5047,7 +5061,10 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     ],
   );
 
-  const updateBackendConnection = useCallback((id: string, patch: Partial<BackendConnectionProfile>) => {
+  const updateBackendConnection = useCallback((id: string, requested: Partial<BackendConnectionProfile>) => {
+    // A self-hosted deployment fixes each backend's address.
+    const { serverUrl: _pinned, ...unpinned } = requested;
+    const patch: Partial<BackendConnectionProfile> = window.todexWeb?.deployment ? unpinned : requested;
     setBackendConnections((current) => current.map((profile) => {
       if (profile.id !== id) return profile;
       const originChanged = patch.serverUrl !== undefined
@@ -5092,6 +5109,9 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   }, [updateBackendConnection]);
 
   const addBackendConnection = useCallback((profile?: Partial<BackendConnectionProfile>) => {
+    // A self-hosted deployment fixes the backend list (its settings hide
+    // the add button); stay on the first backend instead.
+    if (window.todexWeb?.deployment) return backendConnectionsRef.current[0];
     const id = createRequestId('backend');
     // A new backend never inherits the current device key or transport pin.
     const next: BackendConnectionProfile = { ...profileFromSettings(connectionRoutingRef.current, t('session.newBackend'), id), ...UNPAIRED_TRANSPORT, ...profile, id, createdAt: Date.now(), updatedAt: Date.now() };
@@ -5103,7 +5123,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
    * and history keys are forgotten. The last backend cannot be removed. */
   const removeBackendConnection = useCallback((id: string) => {
     const profiles = backendConnectionsRef.current;
-    if (profiles.length <= 1 || !profiles.some((profile) => profile.id === id)) return;
+    if (window.todexWeb?.deployment || profiles.length <= 1 || !profiles.some((profile) => profile.id === id)) return;
     closeSocket(id, true);
     linksRef.current.get(id)?.commands.dispose();
     linksRef.current.delete(id);

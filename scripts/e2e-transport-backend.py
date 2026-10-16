@@ -23,6 +23,7 @@ from pathlib import Path
 import shlex
 import shutil
 import signal
+import socket
 import subprocess
 import sys
 import tempfile
@@ -45,9 +46,22 @@ def environment(root):
 
 def lan_address():
     for interface in ("en0", "en1"):
-        result = subprocess.run(["ipconfig", "getifaddr", interface], capture_output=True, text=True)
+        try:
+            result = subprocess.run(["ipconfig", "getifaddr", interface], capture_output=True, text=True)
+        except FileNotFoundError:
+            break
         if result.returncode == 0 and result.stdout.strip():
             return result.stdout.strip()
+    # Elsewhere (Linux): the source address of the default route; UDP
+    # connect sends nothing.
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+        try:
+            probe.connect(("192.0.2.1", 9))
+            address = probe.getsockname()[0]
+        except OSError:
+            address = ""
+    if address and not address.startswith("127."):
+        return address
     raise RuntimeError("no LAN IPv4 address; the test needs a non-loopback peer")
 
 

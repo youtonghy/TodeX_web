@@ -18,6 +18,9 @@
 
 ## Docker / CI notes
 
+- Self-hosting: `TODEX_BACKENDS` (`server/backends.ts`) pins the backends. The server then serves `GET /api/config` (ids and names only), proxies `/backend/<id>/` REST and WebSocket upgrades (`createWebServer` wires the `upgrade` listener; the proxy middleware runs before compression/helmet), redirects `/` to `/app` and narrows `connect-src` to `'self'`. The proxy always overwrites `Origin` with a fixed non-local value so the backend's anonymous loopback path can never be reached through it — keep that. The workbench loads the config before installing the bridge (`lib/webDeployment.ts`, `window.todexWeb.deployment`) and passes `managed` to the shared `BackendConnectionSettings`. Proxied backend URLs carry a path prefix, which the protocol URL builders (`normalizeServerUrl`, `buildHttpUrl`, `buildV2WebSocketUrl`, `joinServerPath`) preserve.
+- Server-side runtime dependencies are only `express`, `compression` and `helmet`; client libraries belong in `devDependencies` (vite bundles them) so the runtime image's `pnpm install --prod` stays small.
+
 - In `Dockerfile`, `hpsetup` (deps stage) installs `@heroui-pro/react@latest` and its peer deps, rewriting `package.json`, `pnpm-lock.yaml`, and `pnpm-workspace.yaml` in the image. The `build` stage's `COPY . .` restores the repo copies, so the deps-stage copies are copied back right after to keep manifests in sync with `node_modules`. Without this, pnpm 11's `verifyDepsBeforeRun` (default `install`) detects drift on `pnpm run` and reinstalls the unlicensed npm stub over the licensed package contents, breaking typecheck with `TS2307`.
 
 ## Planning gate

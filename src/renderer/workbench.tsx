@@ -4,10 +4,13 @@ import { AppRoot } from './AppRoot';
 import { IosUnsupportedNotice } from './components/IosUnsupportedNotice';
 import { installWebPlatformBridge } from './lib/webPlatform';
 import { applyAppearance } from './lib/appearance';
+import { loadWebDeployment } from './lib/webDeployment';
 import '@fontsource-variable/inter';
 import './styles/global.css';
 
-installWebPlatformBridge();
+// A self-hosted server pins its backends; the session reads them from the
+// bridge on its first load, so the bridge is installed only once they are known.
+installWebPlatformBridge(await loadWebDeployment());
 applyAppearance();
 
 // Keep parity with the desktop renderer: the window-chrome attribute drives

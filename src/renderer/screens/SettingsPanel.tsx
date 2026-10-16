@@ -177,6 +177,7 @@ export function SettingsPanel({ session, historyRecoverySetup = false, repairPai
             deviceName="TodeX Web"
             pairingAutoStart={pairingAutoStart}
             historyRecoverySetup={historyRecoverySetup}
+            managed={Boolean(window.todexWeb?.deployment)}
             footer={(
               <SettingsCard>
                 <SettingsRow label={t('settings.localData')} description={t('settings.localDataHint')}>

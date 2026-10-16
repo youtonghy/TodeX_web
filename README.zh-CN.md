@@ -41,20 +41,23 @@ CI 打包时应通过 `TODEX_BUILD_VERSION` 传入正式版本。开发构建显
 
 ### Docker 部署
 
-镜像发布在 `ghcr.io/youtonghy/todex_web`，按版本号打标签并附带 `latest`。容器监听 `4173`，以非特权 `node` 用户运行，并内置针对 `GET /healthz` 的健康检查。运行期只需 `HOST` 和 `PORT`，`GITHUB_TOKEN` 为可选项。
+镜像发布在 `ghcr.io/youtonghy/todex_web`，按版本号打标签并附带 `latest`。容器监听 `4173`，以非特权 `node` 用户运行（不写文件，可用 `--read-only`），并内置针对 `GET /healthz` 的健康检查。镜像同时提供 `linux/amd64` 与 `linux/arm64`。`HOST` 和 `PORT` 设置监听地址，`GITHUB_TOKEN` 为可选项。
+
+**自主部署（固定后端）：** 用 `TODEX_BACKENDS` 传入逗号分隔的 `名称=URL`。此时工作台只列出这些后端，浏览器只经本站的 `/backend/<id>/` 代理（REST 与 WebSocket）连接它们，`/` 直接打开 `/app`。每台浏览器仍需在每个后端完成设备验证，后端必须开启传输加密。详见 [docs/self-hosting.md](docs/self-hosting.md)。
 
 直接运行：
 
 ```bash
-docker run -d --name todex-web --restart unless-stopped \
+docker run -d --name todex-web --restart unless-stopped --read-only \
   -p 4173:4173 \
+  -e TODEX_BACKENDS="家里=http://192.168.1.20:7345" \
   ghcr.io/youtonghy/todex_web:latest
 ```
 
 或使用仓库自带的 [`compose.yaml`](compose.yaml)：
 
 ```bash
-cp .env.example .env   # 可选：修改 PORT 以更换宿主机端口
+cp .env.example .env   # 设置 TODEX_BACKENDS，可选修改 PORT
 docker compose pull
 docker compose up -d
 docker compose logs -f web
@@ -69,12 +72,14 @@ services:
     restart: unless-stopped
     ports:
       - "${PORT:-4173}:4173"
+    read_only: true
     environment:
       HOST: 0.0.0.0
       PORT: "4173"
+      TODEX_BACKENDS: ${TODEX_BACKENDS:-}
 ```
 
-请在容器前放置可信的反向代理（Caddy、nginx、Traefik）终止 TLS。HTTPS 页面连接非回环 Backend 时必须使用 HTTPS/WSS，且每个 Backend 都需要在 CORS（必要时还有浏览器 Private Network Access）中放行站点 origin。
+请在容器前放置可信的反向代理（Caddy、nginx、Traefik）终止 TLS 并转发 WebSocket upgrade。设置了 `TODEX_BACKENDS` 时浏览器只连本站；未设置时，HTTPS 页面连接非回环 Backend 必须使用 HTTPS/WSS，且每个 Backend 都需要在 CORS（必要时还有浏览器 Private Network Access）中放行站点 origin。
 
 #### 构建镜像
 

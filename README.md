@@ -78,23 +78,32 @@ version `0.0.0`.
 
 Published images live at `ghcr.io/youtonghy/todex_web`, tagged with each release
 version plus `latest`. The container listens on `4173`, runs as the unprivileged
-`node` user, and ships a health check against `GET /healthz`. `HOST` and `PORT`
-are the only required runtime settings; `GITHUB_TOKEN` is optional and only
-raises the GitHub API rate limit used by `GET /api/releases`. There is no
-Backend proxy, user database, or session store.
+`node` user (no writes, so `--read-only` works), and ships a health check
+against `GET /healthz`. Images are built for `linux/amd64` and `linux/arm64`.
+`HOST` and `PORT` set the listener; `GITHUB_TOKEN` is optional and only raises
+the GitHub API rate limit used by `GET /api/releases`. There is no user
+database or session store.
+
+**Self-hosting with fixed backends:** set `TODEX_BACKENDS` to comma-separated
+`Name=URL` entries. The workbench then lists exactly those backends and reaches
+them only through this server at `/backend/<id>/` (REST and WebSocket); `/`
+opens `/app`. Every browser still has to pass device verification on each
+backend, and the backends must have transport encryption enabled. See
+[docs/self-hosting.md](docs/self-hosting.md).
 
 Run it directly:
 
 ```bash
-docker run -d --name todex-web --restart unless-stopped \
+docker run -d --name todex-web --restart unless-stopped --read-only \
   -p 4173:4173 \
+  -e TODEX_BACKENDS="Home=http://192.168.1.20:7345" \
   ghcr.io/youtonghy/todex_web:latest
 ```
 
 Or use the bundled [`compose.yaml`](compose.yaml):
 
 ```bash
-cp .env.example .env   # optional: change PORT to pick the host port
+cp .env.example .env   # set TODEX_BACKENDS and, optionally, PORT
 docker compose pull
 docker compose up -d
 docker compose logs -f web
@@ -110,15 +119,18 @@ services:
     restart: unless-stopped
     ports:
       - "${PORT:-4173}:4173"
+    read_only: true
     environment:
       HOST: 0.0.0.0
       PORT: "4173"
+      TODEX_BACKENDS: ${TODEX_BACKENDS:-}
 ```
 
 Put a trusted reverse proxy (Caddy, nginx, Traefik) in front of the container to
-terminate TLS. An HTTPS page must use HTTPS/WSS for non-loopback Backends, and
-each Backend must allow the deployed site origin through CORS and, when
-relevant, browser Private Network Access.
+terminate TLS and forward WebSocket upgrades. With `TODEX_BACKENDS` the browser
+only talks to this site. Without it, an HTTPS page must use HTTPS/WSS for
+non-loopback Backends, and each Backend must allow the deployed site origin
+through CORS and, when relevant, browser Private Network Access.
 
 #### Building the image
 

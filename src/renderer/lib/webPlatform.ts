@@ -1,4 +1,4 @@
-import type { TodeXWebApi } from '../../preload/index';
+import type { TodeXWebApi, WebDeployment } from '../../preload/index';
 import { t } from '../i18n';
 
 const STORAGE_SCHEMA_KEY = 'todex.web.schemaVersion';
@@ -47,7 +47,7 @@ export function insecureBackendReason(serverUrl: string, pageProtocol = window.l
   return null;
 }
 
-export function installWebPlatformBridge(): void {
+export function installWebPlatformBridge(deployment?: WebDeployment | null): void {
   if (window.todexWeb) {
     return;
   }
@@ -70,6 +70,7 @@ export function installWebPlatformBridge(): void {
       windowChrome: 'native' as const,
     },
     theme: browserTheme(),
+    ...(deployment?.managed ? { deployment } : {}),
   };
 
   window.todexWeb = api;
