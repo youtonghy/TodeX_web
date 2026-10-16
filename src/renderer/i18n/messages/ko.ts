@@ -281,6 +281,13 @@ export const ko: Messages = {
   'settings.localDataHint': '연결, 자격 증명, 환경 설정, 로컬 캐시를 삭제합니다.',
   'settings.localDataConfirm': '이 브라우저의 모든 TodeX Web 데이터를 삭제하시겠습니까?',
   'settings.localDataClear': '데이터 삭제',
+
+  // iOS / iPadOS notice (web-only)
+  'iosUnsupported.title': '이 브라우저는 지원되지 않습니다',
+  'iosUnsupported.body': 'TodeX Web은 아직 iOS 및 iPadOS 브라우저를 지원하지 않습니다. TodeX Web을 직접 배포해 사용하는 것을 권장하며, 방법은 저장소에서 확인할 수 있습니다.',
+  'iosUnsupported.repository': '저장소 열기',
+  'iosUnsupported.continue': '그래도 계속',
+
   'settings.language': '언어',
   'settings.languageHint': '브라우저/시스템 언어를 자동으로 인식합니다. 지원하지 않는 언어는 영어로 표시됩니다.',
 

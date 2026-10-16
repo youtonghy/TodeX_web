@@ -281,6 +281,13 @@ export const zhCN = {
   'settings.localDataHint': '删除连接、凭据、偏好和本地缓存。',
   'settings.localDataConfirm': '确定清除这个浏览器中的所有 TodeX Web 数据吗？',
   'settings.localDataClear': '清除数据',
+
+  // iOS / iPadOS notice (web-only)
+  'iosUnsupported.title': '暂不支持此浏览器',
+  'iosUnsupported.body': 'TodeX Web 暂不支持 iOS 和 iPadOS 上的浏览器。建议自行部署 TodeX Web，部署方法见代码仓库。',
+  'iosUnsupported.repository': '前往代码仓库',
+  'iosUnsupported.continue': '仍然继续',
+
   'settings.language': '语言',
   'settings.languageHint': '自动识别浏览器/系统语言；不支持的语言显示英文。',
 

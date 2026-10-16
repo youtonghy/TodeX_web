@@ -281,6 +281,13 @@ export const ja: Messages = {
   'settings.localDataHint': '接続・認証情報・設定・ローカルキャッシュを削除します。',
   'settings.localDataConfirm': 'このブラウザ内のすべての TodeX Web データを削除しますか？',
   'settings.localDataClear': 'データを削除',
+
+  // iOS / iPadOS notice (web-only)
+  'iosUnsupported.title': 'このブラウザーには対応していません',
+  'iosUnsupported.body': 'TodeX Web は現在、iOS と iPadOS のブラウザーに対応していません。TodeX Web のセルフホストをおすすめします。手順はリポジトリをご覧ください。',
+  'iosUnsupported.repository': 'リポジトリを開く',
+  'iosUnsupported.continue': 'このまま続ける',
+
   'settings.language': '言語',
   'settings.languageHint': 'ブラウザ／システムの言語を自動認識します。対応していない言語は英語で表示されます。',
 

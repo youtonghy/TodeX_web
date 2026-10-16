@@ -281,6 +281,13 @@ export const en: Messages = {
   'settings.localDataHint': 'Delete connections, credentials, preferences, and local cache.',
   'settings.localDataConfirm': 'Clear all TodeX Web data in this browser?',
   'settings.localDataClear': 'Clear data',
+
+  // iOS / iPadOS notice (web-only)
+  'iosUnsupported.title': 'This browser is not supported',
+  'iosUnsupported.body': 'TodeX Web does not support browsers on iOS and iPadOS yet. We recommend self-hosting TodeX Web; see the repository for setup instructions.',
+  'iosUnsupported.repository': 'Open repository',
+  'iosUnsupported.continue': 'Continue anyway',
+
   'settings.language': 'Language',
   'settings.languageHint': 'Detects the browser/system language automatically; unsupported languages fall back to English.',
 
