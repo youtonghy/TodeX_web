@@ -9,3 +9,4 @@ output/
 *.log
 .env
 .env.*
+!.env.example

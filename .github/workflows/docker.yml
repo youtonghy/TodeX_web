@@ -90,7 +90,7 @@ jobs:
           build-contexts: |
             todexprotocol=${{ github.workspace }}/TodeX_protocol
           push: true
-          platforms: linux/amd64
+          platforms: linux/amd64,linux/arm64
           build-args: |
             TODEX_BUILD_VERSION=${{ steps.version.outputs.version }}
           secrets: |
