@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ButtonHTMLAttributes, ComponentType, MouseEvent as ReactMouseEvent, ReactNode, RefObject } from 'react';
-import { RiAppsLine, RiCloseLine, RiDeleteBinLine, RiDownload2Line, RiEdit2Line, RiFolderAddLine, RiLinksLine, RiLink, RiServerLine, RiTerminalBoxLine, RiTerminalWindowLine, RiUpload2Line, RiGitBranchLine, RiAddLine, RiArrowLeftDoubleLine, RiArrowRightDoubleLine, RiExternalLinkLine, RiBracesLine, RiFileCodeLine, RiFileLine, RiFilePdf2Line, RiFileSettingsLine, RiFileTextLine, RiFileZipLine, RiImageLine, RiLockLine, RiMarkdownLine, RiFolder3Line, RiFolderOpenLine, RiGlobalLine, RiFocus3Line, RiLayoutColumnLine, RiLayoutRowLine, RiRefreshLine, RiStopCircleLine } from '@remixicon/react';
+import { RiAppsLine, RiCloseLine, RiDeleteBinLine, RiDownload2Line, RiEdit2Line, RiFolderAddLine, RiLinksLine, RiLink, RiServerLine, RiTerminalBoxLine, RiTerminalWindowLine, RiUpload2Line, RiGitBranchLine, RiAddLine, RiArrowLeftDoubleLine, RiArrowRightDoubleLine, RiExternalLinkLine, RiBracesLine, RiFileCodeLine, RiFileLine, RiFilePdf2Line, RiFileSettingsLine, RiFileTextLine, RiFileZipLine, RiImageLine, RiLockLine, RiMarkdownLine, RiFolder3Line, RiFolderOpenLine, RiGlobalLine, RiLayoutColumnLine, RiLayoutRowLine, RiRefreshLine, RiStopCircleLine } from '@remixicon/react';
 import { Focusable, Pressable } from 'react-aria-components';
 import type { Key, Selection } from 'react-aria-components';
 import { Badge } from '@/components/base/badges/badge';
@@ -10,7 +10,6 @@ import { Input } from '@/components/base/input/input';
 import { PillTabList } from '@/components/base/tabs/pill-tab';
 import { Tooltip, TooltipTrigger } from '@/components/base/tooltip/tooltip';
 import { TreeView, TreeViewItem } from '@/components/base/tree-view/tree-view';
-import { EmptyState } from '@/components/ui/empty-state';
 import { IconAction } from '@/components/ui/icon-action';
 import { ContextMenu, Menu, MenuItem, MenuPopover, MenuSeparator, MenuTrigger } from '@/components/ui/menu';
 import { ConfirmDialog, Modal } from '@/components/ui/modal';
@@ -24,7 +23,6 @@ import { useNoticeToast } from '../components/NoticeToast';
 import { XtermTerminal } from '../components/XtermTerminal';
 import { SshExecPane } from '../components/ssh/SshExecPane';
 import { AgentBrowserLiveView } from '../components/AgentBrowserLiveView';
-import { prepareBrowserSnapshot } from '../lib/browserSnapshot';
 import { rememberSessionSshExecTabs, sessionSshExecTabsFor, useSshExecClear, visibleSshExecs } from '../session/sshExecTabs';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { useRemoteConnector } from '../components/ssh/useRemoteConnector';
@@ -42,7 +40,6 @@ import { normalizeWorkbenchLayout } from '../session/workbenchLayout';
 import { SETTINGS_STORAGE_KEY, attachmentId, backendApi, referenceToken, uniqueReferenceName } from '../session/helpers';
 import { isConflictError } from '@todex/protocol/connectionError';
 import { isNotFoundError, type SshExecRun } from '@todex/protocol/ssh';
-import { isLoopbackUrl } from '@todex/protocol/mobileParity';
 import { t, useT, type MessageKey } from '../i18n';
 
 type Props = {
@@ -71,12 +68,13 @@ type StoredWorkbenchState = {
   activeId: string;
 };
 
-/** Types written to the tab store; 'ssh-exec' and 'agent-browser' tabs are session-only. */
-const WORKBENCH_TYPES = new Set<WorkbenchTab>(['terminal', 'browser', 'files', 'git-diff']);
+/** Types written to the tab store; 'ssh-exec' and 'agent-browser' tabs are
+ * session-only. Stored tabs of any other type (such as the removed 'browser'
+ * tab) are dropped on restore. */
+const WORKBENCH_TYPES = new Set<WorkbenchTab>(['terminal', 'files', 'git-diff']);
 
 const WORKBENCH_LABEL_KEYS: Record<WorkbenchTab, MessageKey> = {
   terminal: 'workbench.tabTerminal',
-  browser: 'workbench.tabBrowser',
   files: 'workbench.tabFiles',
   'git-diff': 'workbench.tabGitDiff',
   'ssh-exec': 'workbench.tabSshExec',
@@ -87,7 +85,6 @@ const workbenchLabel = (tab: WorkbenchTab) => t(WORKBENCH_LABEL_KEYS[tab]);
 
 const WORKBENCH_ICONS = {
   terminal: RiTerminalBoxLine,
-  browser: RiGlobalLine,
   files: RiFileTextLine,
   'git-diff': RiGitBranchLine,
   'ssh-exec': RiTerminalWindowLine,
@@ -230,7 +227,7 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
         setItems(stored.items);
         setActiveId(stored.activeId);
         const active = stored.items.find((item) => item.id === stored.activeId);
-        if (active && !requestedTargetRef.current?.filePath && !requestedTargetRef.current?.url) onTabChange(active.type);
+        if (active && !requestedTargetRef.current?.filePath) onTabChange(active.type);
       })
       .catch((reason) => {
         console.error('Failed to restore workbench tabs', reason);
@@ -261,8 +258,7 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
   }, [activeId, items, restored, tab]);
 
   useEffect(() => {
-    if (!restored || !target || !(tab === 'files' && target.filePath
-      || tab === 'browser' && (target.url || target.filePath))) return;
+    if (!restored || !target || !(tab === 'files' && target.filePath)) return;
     if (openedTargetRef.current?.target === target && openedTargetRef.current.tab === tab) return;
     openedTargetRef.current = { target, tab };
     const existing = items.find(item => item.id === activeId && item.type === tab) ?? items.find(item => item.type === tab);
@@ -448,9 +444,7 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
         ? `${item.remote.label}${item.target?.filePath ? ` ${item.target.filePath}` : ''}`
         : item.type === 'terminal'
           ? session.terminalById[terminalIdForConversation(scopeKey, item.id)]?.cwd || workspacePath
-          : item.type === 'browser'
-            ? item.target?.url || item.target?.filePath || 'http://127.0.0.1:7345'
-            : item.target?.filePath || workspacePath;
+          : item.target?.filePath || workspacePath;
     const title = item.type === 'ssh-exec' ? workbenchLabel(item.type) : location ? `${workbenchLabel(item.type)} ${location}` : item.title;
     const isActive = item.id === activeId;
     const tabIconClass = cx('size-4 transition-opacity duration-150', isActive && 'group-hover/tab:opacity-0 group-focus-within/tab:opacity-0 [@media(hover:none)]:opacity-0');
@@ -502,7 +496,6 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
       <MenuPopover placement={vertical ? 'right top' : 'bottom end'}>
         <Menu aria-label={t('workbench.newTab')} onAction={(key) => addTab(String(key) as WorkbenchTab)}>
           <MenuItem id="terminal" icon={WORKBENCH_ICONS.terminal} textValue={t('workbench.tabTerminal')}>{t('workbench.tabTerminal')}</MenuItem>
-          <MenuItem id="browser" icon={WORKBENCH_ICONS.browser} textValue={t('workbench.tabBrowser')}>{t('workbench.tabBrowser')}</MenuItem>
           <MenuItem id="files" icon={WORKBENCH_ICONS.files} textValue={t('workbench.tabFiles')}>{t('workbench.tabFiles')}</MenuItem>
           <MenuItem id="git-diff" icon={WORKBENCH_ICONS['git-diff']} textValue="Git Diff">Git Diff</MenuItem>
         </Menu>
@@ -567,8 +560,7 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
                 autoConnect={!item.ssh || freshSshTabsRef.current.has(item.id)}
               />
             ) : null}
-            {item.type === 'browser' ? <BrowserPane workspacePath={session.activeWorkspace?.path} session={session} target={item.type === tab && item.id === active?.id && (target?.filePath || target?.url) ? target : item.target} onTargetChange={next => updateTabTarget(item.id, next)} /> : null}
-            {item.type === 'files' ? <FilesPane session={session} remote={item.remote} remoteBackendId={sshBackendId} onRemoteRebind={next => updateRemoteBinding(item.id, next)} target={item.type === tab && item.id === active?.id && (target?.filePath || target?.url) ? target : item.target} onTargetChange={next => updateTabTarget(item.id, next)} /> : null}
+            {item.type === 'files' ? <FilesPane session={session} remote={item.remote} remoteBackendId={sshBackendId} onRemoteRebind={next => updateRemoteBinding(item.id, next)} target={item.type === tab && item.id === active?.id && target?.filePath ? target : item.target} onTargetChange={next => updateTabTarget(item.id, next)} /> : null}
             {item.type === 'git-diff' ? <GitDiffPane session={session} /> : null}
             {item.type === 'ssh-exec' && item.sshExec ? <SshExecPane conversationId={item.sshExec.conversationId} runs={session.conversationRuntimeById[item.sshExec.conversationId]?.sshExecs ?? NO_SSH_EXECS} isActive={item.id === active?.id} /> : null}
             {item.type === 'agent-browser' && item.agentBrowser ? <AgentBrowserLiveView session={session} isActive={shown && item.id === active?.id} conversationId={item.agentBrowser.conversationId} /> : null}
@@ -882,285 +874,6 @@ function TerminalPane({ session, terminalId, isActive, workspaceTarget, sshHost,
   );
 }
 
-/** A Workbench browser tab. The page is a native view drawn by the main
- * process (see `previewViews.ts`); this pane holds the address bar and the
- * rectangle the view fills. Only loopback pages and workspace HTML files load. */
-function BrowserPane({ workspacePath, session, target, onTargetChange }: { workspacePath?: string; session: TodeXSession; target?: OpenPanelOptions; onTargetChange?: (target: OpenPanelOptions) => void }) {
-  const t = useT();
-  const targetChangeRef = useRef(onTargetChange);
-  targetChangeRef.current = onTargetChange;
-  const [draft, setDraft] = useState('http://127.0.0.1:7345');
-  const [url, setUrl] = useState('');
-  const [srcDoc, setSrcDoc] = useState('');
-  const [error, setError] = useState('');
-  const [inspect, setInspect] = useState(false);
-  // The page currently shown; loading reports it back as the tab target, and
-  // that echo must not fetch (and remount) the same page a second time.
-  const loadedUrlRef = useRef('');
-  // State rather than a ref: the iframe is recreated whenever the page is
-  // (re)loaded, and the element picker has to re-attach to the new one.
-  const [frame, setFrame] = useState<HTMLIFrameElement | null>(null);
-  const selectedRef = useRef<HTMLElement | null>(null);
-  const selectionAnchorRef = useRef<HTMLElement | null>(null);
-  useNoticeToast(error, { variant: 'danger', scope: workspacePath });
-
-  const loadSnapshot = useCallback(async (targetUrl: string) => {
-    try {
-      const parsed = new URL(targetUrl);
-      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') throw new Error(t('workbench.httpOnly'));
-      setUrl(parsed.toString());
-      setSrcDoc('');
-      setError('');
-      const api = backendApi(session.settings);
-      const result = await api.fetchBrowser(parsed.toString());
-      if (!result.contentType.toLowerCase().includes('text/html')) {
-        throw new Error(t('workbench.cannotPreview', { contentType: result.contentType || t('workbench.nonHtml') }));
-      }
-      setUrl(result.url);
-      loadedUrlRef.current = result.url;
-      targetChangeRef.current?.({ url: result.url });
-      setSrcDoc(prepareBrowserSnapshot(result.body, result.url));
-    } catch (reason) {
-      setSrcDoc('');
-      setError(reason instanceof Error ? reason.message : t('workbench.snapshotFailed'));
-    }
-  }, [session.settings.deviceSecret, session.settings.encryptionProtocol, session.settings.encryptionPublicKey, session.settings.transportVerified, session.settings.serverUrl]);
-
-  useEffect(() => {
-    if (target?.url) {
-      if (target.url === loadedUrlRef.current) return;
-      targetChangeRef.current?.(target);
-      setDraft(target.url);
-      void loadSnapshot(target.url);
-      return;
-    }
-    if (!target?.filePath) return;
-    targetChangeRef.current?.(target);
-    setDraft(target.filePath);
-    setUrl('');
-    setSrcDoc('');
-    setError('');
-    const api = backendApi(session.settings);
-    void api.readWorkspaceFile(target.filePath)
-      .then((file) => {
-        if (!file.text) throw new Error(t('workbench.webFileNotText'));
-        setSrcDoc(file.text);
-      })
-      .catch((reason) => setError(reason instanceof Error ? reason.message : t('workbench.webFileReadFailed')));
-  }, [loadSnapshot, session.settings.deviceSecret, session.settings.serverUrl, target?.filePath, target?.url]);
-
-  const appendReference = useCallback((element: HTMLElement) => {
-    const tag = element.tagName.toLowerCase();
-    const text = (element.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 160);
-    const id = element.id ? `#${element.id}` : '';
-    const reference = t('workbench.webElement', { tag, id, text: text ? `: ${text}` : '' });
-    const conversationId = session.activeConversation?.id;
-    if (conversationId) {
-      session.setConversationChatDraft(conversationId, (current) => `${current}${current ? '\n' : ''}${reference}`);
-    }
-  }, [session.activeConversation?.id, session.setConversationChatDraft]);
-
-  useEffect(() => {
-    if (!frame || !inspect) return;
-    const bind = () => {
-      try {
-        const doc = frame.contentDocument;
-        const frameWindow = frame.contentWindow;
-        if (!doc || !frameWindow) return;
-        const FrameHTMLElement = (frameWindow as Window & typeof globalThis).HTMLElement;
-        let hovered: HTMLElement | null = null;
-        const isFrameElement = (value: EventTarget | Element | null): value is HTMLElement => (
-          value instanceof FrameHTMLElement
-        );
-        const createOverlay = (color: string) => {
-          const overlay = doc.createElement('div');
-          overlay.setAttribute('aria-hidden', 'true');
-          Object.assign(overlay.style, {
-            position: 'fixed',
-            pointerEvents: 'none',
-            zIndex: '2147483647',
-            border: `2px solid ${color}`,
-            boxSizing: 'border-box',
-            display: 'none',
-          });
-          doc.body.appendChild(overlay);
-          return overlay;
-        };
-        const rootStyle = getComputedStyle(document.documentElement);
-        const tokenColor = (name: string) => rootStyle.getPropertyValue(name).trim() || '#128DDB';
-        const hoverOverlay = createOverlay(tokenColor('--color-chart-4'));
-        const selectedOverlay = createOverlay(tokenColor('--color-accent-500'));
-        const positionOverlay = (overlay: HTMLDivElement, element: HTMLElement | null) => {
-          if (!element || !element.isConnected) {
-            overlay.style.display = 'none';
-            return;
-          }
-          const rect = element.getBoundingClientRect();
-          Object.assign(overlay.style, {
-            display: 'block',
-            left: `${rect.left}px`,
-            top: `${rect.top}px`,
-            width: `${rect.width}px`,
-            height: `${rect.height}px`,
-          });
-        };
-        const previousCursor = doc.documentElement.style.cursor;
-        doc.documentElement.style.cursor = 'crosshair';
-        const move = (event: MouseEvent) => {
-          const element = isFrameElement(event.target) ? event.target : null;
-          hovered = element;
-          if (!selectedRef.current) selectionAnchorRef.current = element;
-          positionOverlay(hoverOverlay, element === selectedRef.current ? null : element);
-        };
-        const click = (event: MouseEvent) => {
-          event.preventDefault(); event.stopPropagation();
-          if (isFrameElement(event.target)) {
-            selectedRef.current = event.target;
-            selectionAnchorRef.current = event.target;
-            positionOverlay(selectedOverlay, event.target);
-            positionOverlay(hoverOverlay, null);
-            appendReference(event.target);
-          }
-        };
-        const wheel = (event: WheelEvent) => {
-          const current = selectedRef.current ?? hovered;
-          if (!current) return;
-          event.preventDefault();
-          const anchor = selectionAnchorRef.current ?? current;
-          selectionAnchorRef.current = anchor;
-          const candidate = event.deltaY > 0
-            ? current.parentElement && current.parentElement !== doc.documentElement ? current.parentElement : null
-            : anchor && current !== anchor
-              ? Array.from(current.children).find((child) => child.contains(anchor))
-              : current.firstElementChild;
-          const next = candidate ?? null;
-          if (isFrameElement(next)) {
-            if (selectedRef.current) {
-              selectedRef.current = next;
-              positionOverlay(selectedOverlay, next);
-            } else {
-              hovered = next;
-              positionOverlay(hoverOverlay, next);
-            }
-          }
-        };
-        const reposition = () => {
-          positionOverlay(hoverOverlay, hovered === selectedRef.current ? null : hovered);
-          positionOverlay(selectedOverlay, selectedRef.current);
-        };
-        doc.addEventListener('mousemove', move, true);
-        doc.addEventListener('click', click, true);
-        frameWindow.addEventListener('wheel', wheel, { capture: true, passive: false });
-        doc.addEventListener('scroll', reposition, true);
-        frameWindow.addEventListener('resize', reposition);
-        return () => {
-          doc.removeEventListener('mousemove', move, true);
-          doc.removeEventListener('click', click, true);
-          frameWindow.removeEventListener('wheel', wheel, true);
-          doc.removeEventListener('scroll', reposition, true);
-          frameWindow.removeEventListener('resize', reposition);
-          doc.documentElement.style.cursor = previousCursor;
-          hoverOverlay.remove();
-          selectedOverlay.remove();
-        };
-      } catch { toast.danger(t('workbench.inspectBlocked')); }
-      return undefined;
-    };
-    // A cross-origin page leaves contentDocument null; say so instead of
-    // leaving a picker that silently selects nothing. A detached frame (one
-    // being replaced by a reload) is also null and is not a blocked page.
-    const bindOrReportBlocked = () => {
-      const unbind = bind();
-      if (frame.isConnected && frame.contentDocument === null) {
-        toast.danger(t('workbench.inspectBlocked'));
-        setInspect(false);
-      }
-      return unbind;
-    };
-    let cleanup = bindOrReportBlocked();
-    const handleLoad = () => {
-      cleanup?.();
-      selectedRef.current = null;
-      selectionAnchorRef.current = null;
-      cleanup = bindOrReportBlocked();
-    };
-    frame.addEventListener('load', handleLoad);
-    return () => {
-      frame.removeEventListener('load', handleLoad);
-      cleanup?.();
-    };
-  }, [appendReference, frame, inspect]);
-
-  const reload = () => {
-    const next = draft.trim();
-    if (next) void loadSnapshot(next);
-  };
-
-  return (
-    <div className="flex h-full min-h-0 flex-col px-4 pb-4 pt-3">
-      <div className="mb-3 flex items-center justify-between gap-3">
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            reload();
-          }}
-          className="min-w-0 flex-1"
-        >
-          <Input
-            aria-label={t('workbench.address')}
-            size="small"
-            value={draft}
-            onChange={setDraft}
-            placeholder="http://127.0.0.1:..."
-            inputClassName="text-caption-1-regular"
-          />
-        </form>
-        <div className="flex shrink-0 items-center gap-2">
-          <ExpandableAction
-            icon={RiRefreshLine}
-            label={t('workbench.refresh')}
-            disabled={!url && !srcDoc}
-            onClick={reload}
-            aria-label={t('workbench.refreshPage')}
-          />
-          <ExpandableAction
-            tone={inspect ? 'primary' : 'secondary'}
-            icon={RiFocus3Line}
-            label={inspect ? t('workbench.exitInspect') : t('workbench.selectElement')}
-            // The picker can be armed before a page loads; it attaches once it does.
-            onClick={() => {
-              setInspect((current) => {
-                if (!current) {
-                  selectedRef.current = null;
-                  selectionAnchorRef.current = null;
-                }
-                return !current;
-              });
-            }}
-            aria-label={inspect ? t('workbench.exitInspect') : t('workbench.selectElement')}
-          />
-        </div>
-      </div>
-      {srcDoc ? (
-        <div className="relative min-h-0 flex-1 overflow-hidden rounded-xl border border-border-button-default bg-background-primary-default">
-          <iframe ref={setFrame} title={t('workbench.webPreview')} srcDoc={srcDoc} className="size-full border-0" sandbox="allow-same-origin" />
-        </div>
-      ) : (
-        <EmptyState
-          size="sm"
-          icon={RiGlobalLine}
-          title={t('workbench.browserPreview')}
-          description={t('workbench.browserPreviewHint', { workspace: workspacePath || t('workbench.noWorkspace') })}
-          className="min-h-0 flex-1 rounded-2xl bg-background-secondary-default px-6"
-        >
-          <Button size="small" variant="secondary" onClick={() => void loadSnapshot(draft.trim() || 'http://127.0.0.1:7345')}>
-            {t('workbench.openDefault')}
-          </Button>
-        </EmptyState>
-      )}
-    </div>
-  );
-}
 function GitDiffPane({ session }: { session: TodeXSession }) {
   const t = useT();
   const conversation = session.activeConversation;

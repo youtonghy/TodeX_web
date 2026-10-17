@@ -271,7 +271,7 @@ export function App() {
     }
     panelScopeRef.current = scopeKey;
     setSlashCommand(params?.command);
-    setPanelTarget({ url: params?.url, filePath: params?.filePath });
+    setPanelTarget({ filePath: params?.filePath });
     setPanel(next);
     if (isWorkbenchTab(next)) {
       setWorkbenchTab(next);

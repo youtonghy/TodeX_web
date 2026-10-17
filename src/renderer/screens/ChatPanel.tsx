@@ -809,6 +809,15 @@ const ChatTimelineItem = memo(function ChatTimelineItem({
   && prev.onHydrateGroup === next.onHydrateGroup
   && prev.onApprove === next.onApprove);
 
+function isHttpUrl(href: string | undefined): boolean {
+  try {
+    const { protocol } = new URL(href?.trim() ?? '');
+    return protocol === 'http:' || protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
 export function ChatPanel({ session }: Props) {
   const t = useT();
   const conversation = session.activeConversation;
@@ -969,18 +978,18 @@ export function ChatPanel({ session }: Props) {
     ...baseMarkdownComponents,
     a: ({ href, children, node: _node, ref: _ref, ...props }) => {
       const target = workspaceLinkTarget(href, workspacePath);
+      // The web Workbench has no browser tab: http(s) links open in a new
+      // browser tab, workspace files (HTML included) in the Files preview.
+      const external = isHttpUrl(href);
       return (
         <a
           {...props}
           href={href}
+          {...(external ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
           onClick={(event) => {
-            if (!target) return;
+            if (external || !target || target.kind === 'browser-url') return;
             event.preventDefault();
-            if (target.kind === 'browser-url') {
-              session.openPanel('Browser', { url: target.url });
-            } else {
-              session.openPanel('Files', { filePath: target.filePath });
-            }
+            session.openPanel('Files', { filePath: target.filePath });
           }}
         >
           {children}

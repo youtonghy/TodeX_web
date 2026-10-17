@@ -53,7 +53,6 @@ beforeEach(() => {
     get: vi.fn(async (key: string) => disk.get(key)),
     set: vi.fn(async (key: string, value: unknown) => { disk.set(key, JSON.parse(JSON.stringify(value))); }),
   } } });
-  vi.spyOn(V2ApiClient.prototype, 'fetchBrowser').mockImplementation(async url => ({ url, status: 200, contentType: 'text/html', body: '<html><body>Saved browser preview</body></html>' }));
   vi.spyOn(V2ApiClient.prototype, 'listWorkspaceEntries').mockResolvedValue({ entries: [] } as never);
   vi.spyOn(V2ApiClient.prototype, 'readWorkspaceFile').mockImplementation(async path => ({ path, name: path.split('/').pop(), mimeType: 'image/png', dataUrl: png }) as never);
   container = document.createElement('div'); document.body.append(container); root = createRoot(container);
@@ -77,32 +76,40 @@ async function addTerminal() {
   await act(async () => { item!.click(); });
 }
 
-it('isolates new conversations and restores each conversation’s tabs and file/browser targets', async () => {
+it('isolates new conversations and restores each conversation’s tabs and file targets', async () => {
   await render('a');
   await open('files', { filePath: '/workspace/shot.png' });
-  await open('browser', { url: 'http://127.0.0.1:8080/preview' });
   await addTerminal();
   expect(tabButton('文件')).toBeTruthy();
-  expect(tabButton('浏览器')).toBeTruthy();
   expect(tabButton('终端')).toBeTruthy();
   const storedA = disk.get(tabsKey(scope('a')));
   expect(storedA).toEqual(expect.objectContaining({ items: expect.arrayContaining([
     expect.objectContaining({ type: 'files', target: { filePath: '/workspace/shot.png' } }),
-    expect.objectContaining({ type: 'browser', target: { url: 'http://127.0.0.1:8080/preview' } }),
     expect.objectContaining({ type: 'terminal' }),
   ]) }));
   await render('b');
   expect(container.textContent).toContain('暂无打开的标签');
   expect(container.querySelector('img')).toBeNull();
-  expect(container.querySelector('iframe')).toBeNull();
   expect(disk.get(tabsKey(scope('a')))).toEqual(storedA);
   await render('a');
   expect(tabButton('文件')).toBeTruthy();
-  expect(tabButton('浏览器')).toBeTruthy();
   expect(tabButton('终端')).toBeTruthy();
   expect(container.querySelector('img')?.alt).toBe('shot.png');
-  expect(container.querySelector('iframe')?.getAttribute('srcdoc')).toContain('Saved browser preview');
-  expect(V2ApiClient.prototype.fetchBrowser).toHaveBeenLastCalledWith('http://127.0.0.1:8080/preview');
+});
+
+it('drops stored tabs of the removed browser type on restore', async () => {
+  disk.set(tabsKey(scope('a')), { items: [
+    { id: 'old-browser', type: 'browser', title: '浏览器 1', target: { url: 'http://127.0.0.1:8080/preview' } },
+    { id: 'kept-file', type: 'files', title: '文件 1', target: { filePath: '/workspace/shot.png' } },
+  ], activeId: 'old-browser' });
+  await render('a');
+  expect(tabButton('浏览器')).toBeUndefined();
+  expect(container.querySelector('iframe')).toBeNull();
+  expect(container.querySelector('img')?.alt).toBe('shot.png');
+  expect(container.querySelector('img')?.closest('.hidden')).toBeNull();
+  const stored = disk.get(tabsKey(scope('a'))) as { items: { id: string }[]; activeId: string };
+  expect(stored.items.map(item => item.id)).toEqual(['kept-file']);
+  expect(stored.activeId).toBe('kept-file');
 });
 
 it('keeps the same shared terminal identity when changing conversations within a workspace', async () => {
@@ -129,21 +136,6 @@ it('does not share tabs across different workspaces even in workspace-sharing mo
   expect(container.querySelector('img')?.alt).toBe('shot.png');
   expect(V2ApiClient.prototype.readWorkspaceFile).toHaveBeenLastCalledWith('/one/shot.png');
 });
-
-it('routes a Files open request to Files even when Browser was the active tab', async () => {
-  await render('a');
-  await open('browser', { url: 'http://127.0.0.1:8080/preview' });
-  await open('files', { filePath: '/workspace/shot.png' });
-  expect(container.querySelector('img')?.alt).toBe('shot.png');
-  expect(container.querySelector('img')?.closest('.hidden')).toBeNull();
-  expect(container.querySelector('iframe')?.getAttribute('srcdoc')).toContain('Saved browser preview');
-  expect(V2ApiClient.prototype.fetchBrowser).toHaveBeenLastCalledWith('http://127.0.0.1:8080/preview');
-  expect(disk.get(tabsKey(scope('a')))).toEqual(expect.objectContaining({ items: expect.arrayContaining([
-    expect.objectContaining({ type: 'browser', target: { url: 'http://127.0.0.1:8080/preview' } }),
-    expect.objectContaining({ type: 'files', target: { filePath: '/workspace/shot.png' } }),
-  ]) }));
-});
-
 
 it('disables adding tabs until delayed stored tabs have finished restoring', async () => {
   let resolve!: (value: unknown) => void;

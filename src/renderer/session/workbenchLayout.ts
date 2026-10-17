@@ -19,7 +19,7 @@ type Entry = { state: WorkbenchLayout; dirty: Set<keyof SavedLayout>; hydration?
 const defaults = (): WorkbenchLayout => ({ hydrated: false, isOpen: false, tab: 'terminal', target: {} });
 export const workbenchLayoutStorageKey = (scopeKey: string) => `${SETTINGS_STORAGE_KEY}.workbenchLayout.v1:${scopeKey}`;
 
-/** Never persist commands, URL credentials, query strings, or fragments. */
+/** Never persist commands; only workspace, conversation and file targets. */
 function safeTarget(value: unknown): OpenPanelOptions {
   if (!value || typeof value !== 'object') return {};
   const source = value as Record<string, unknown>;
@@ -27,19 +27,14 @@ function safeTarget(value: unknown): OpenPanelOptions {
   for (const key of ['workspaceId', 'conversationId', 'filePath'] as const) {
     if (typeof source[key] === 'string') target[key] = source[key];
   }
-  if (typeof source.url === 'string') {
-    try {
-      const url = new URL(source.url);
-      if (url.protocol === 'http:' || url.protocol === 'https:') target.url = `${url.origin}${url.pathname}`;
-    } catch { /* Invalid URLs are not restored. */ }
-  }
   return target;
 }
 
 export function normalizeWorkbenchLayout(value: unknown): SavedLayout {
   const source = value && typeof value === 'object' ? value as Record<string, unknown> : {};
-  // 'ssh-exec' tabs are session-only, so a saved layout never points at one.
-  const tab = ['terminal', 'browser', 'files', 'git-diff'].includes(String(source.tab)) ? source.tab as WorkbenchTab : 'terminal';
+  // 'ssh-exec' tabs are session-only, so a saved layout never points at one;
+  // a layout saved on the removed 'browser' tab falls back to the terminal.
+  const tab = ['terminal', 'files', 'git-diff'].includes(String(source.tab)) ? source.tab as WorkbenchTab : 'terminal';
   return { isOpen: source.isOpen === true, tab, target: safeTarget(source.target) };
 }
 

@@ -19,9 +19,9 @@ describe('workbench scope isolation', () => {
     void store.hydrate('b');
     expect(store.snapshot('b')).toEqual({ hydrated: false, isOpen: false, tab: 'terminal', target: {} });
     expect(store.snapshot('a').isOpen).toBe(true);
-    pending.resolve({ isOpen: true, tab: 'browser', target: {} });
+    pending.resolve({ isOpen: true, tab: 'git-diff', target: {} });
     await store.hydrate('b');
-    expect(store.snapshot('b').tab).toBe('browser');
+    expect(store.snapshot('b').tab).toBe('git-diff');
   });
   it('does not let late hydration overwrite an early user open request', async () => {
     const pending = deferred();
@@ -31,7 +31,7 @@ describe('workbench scope isolation', () => {
     store.update('a', 'isOpen', true);
     store.update('a', 'tab', 'files');
     store.update('a', 'target', { filePath: '/new.png' });
-    pending.resolve({ isOpen: false, tab: 'browser', target: { url: 'https://old.example/' } });
+    pending.resolve({ isOpen: false, tab: 'git-diff', target: { filePath: '/old.png' } });
     await hydrate;
     await tick();
     expect(store.snapshot('a')).toEqual({ hydrated: true, isOpen: true, tab: 'files', target: { filePath: '/new.png' } });
@@ -41,20 +41,20 @@ describe('workbench scope isolation', () => {
     const a = deferred(); const b = deferred(); const writes: string[] = [];
     const store = new WorkbenchLayoutStore({ load: key => key.endsWith(':a') ? a.promise : b.promise, save: async key => { writes.push(key); } });
     const first = store.hydrate('a'); const second = store.hydrate('b');
-    b.resolve({ tab: 'browser' }); await second;
+    b.resolve({ tab: 'git-diff' }); await second;
     a.resolve({ tab: 'files' }); await first;
     store.update('a', 'isOpen', true); await tick();
     expect(store.snapshot('a').tab).toBe('files');
-    expect(store.snapshot('b').tab).toBe('browser');
+    expect(store.snapshot('b').tab).toBe('git-diff');
     expect(writes).toEqual([workbenchLayoutStorageKey('a')]);
   });
   it('retains in-memory navigation while persisting only a safe target', async () => {
     const saved: unknown[] = [];
     const store = new WorkbenchLayoutStore({ load: async () => null, save: async (_key, value) => { saved.push(value); } });
     await store.hydrate('a');
-    store.update('a', 'target', { url: 'https://user:secret@example.com/path?token=secret#secret', command: 'secret command' });
+    store.update('a', 'target', { filePath: '/workspace/a.png', command: 'secret command' });
     await tick();
-    expect(saved).toEqual([{ isOpen: false, tab: 'terminal', target: { url: 'https://example.com/path' } }]);
+    expect(saved).toEqual([{ isOpen: false, tab: 'terminal', target: { filePath: '/workspace/a.png' } }]);
     expect(store.snapshot('a').target.command).toBe('secret command');
   });
   it('normalizes corrupt storage and does not persist the empty scope', async () => {
@@ -63,5 +63,7 @@ describe('workbench scope isolation', () => {
     await store.hydrate(''); store.update('', 'isOpen', true); await tick();
     expect(calls).toBe(0);
     expect(normalizeWorkbenchLayout({ tab: 'bad', target: { url: 'javascript:alert(1)', token: 'private' } })).toEqual({ isOpen: false, tab: 'terminal', target: {} });
+    // Layouts saved on the removed browser tab fall back to the terminal and drop its URL.
+    expect(normalizeWorkbenchLayout({ isOpen: true, tab: 'browser', target: { url: 'http://127.0.0.1:8080/' } })).toEqual({ isOpen: true, tab: 'terminal', target: {} });
   });
 });

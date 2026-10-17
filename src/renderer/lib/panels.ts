@@ -11,7 +11,6 @@ export type DesktopPanel =
   | 'slash-action'
   | 'git-diff'
   | 'terminal'
-  | 'browser'
   | 'files'
   | 'capabilities'
   | 'experimental'
@@ -25,18 +24,17 @@ export type DesktopPanel =
   /** SSH hosts, keys and connections; renders as the main content inside AppLayout. */
   | 'ssh';
 
-export type WorkbenchTab = 'terminal' | 'browser' | 'files' | 'git-diff' | 'ssh-exec' | 'agent-browser';
+export type WorkbenchTab = 'terminal' | 'files' | 'git-diff' | 'ssh-exec' | 'agent-browser';
 
 export type OpenPanelOptions = {
   workspaceId?: string;
   conversationId?: string;
   command?: string;
-  url?: string;
   filePath?: string;
 };
 
 export function isWorkbenchTab(panel: DesktopPanel | null): panel is WorkbenchTab {
-  return panel === 'terminal' || panel === 'browser' || panel === 'files' || panel === 'git-diff' || panel === 'ssh-exec' || panel === 'agent-browser';
+  return panel === 'terminal' || panel === 'files' || panel === 'git-diff' || panel === 'ssh-exec' || panel === 'agent-browser';
 }
 
 export function panelFromRoute(name: string): DesktopPanel | null {
@@ -61,8 +59,6 @@ export function panelFromRoute(name: string): DesktopPanel | null {
       return 'git-diff';
     case 'Terminal':
       return 'terminal';
-    case 'Browser':
-      return 'browser';
     case 'Files':
       return 'files';
     case 'Capabilities':
