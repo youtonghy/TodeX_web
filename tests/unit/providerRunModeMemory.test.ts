@@ -131,3 +131,11 @@ it('reusing an unused draft conversation refreshes it to the latest remembered m
   expect(reused?.id).toBe(draft!.id);
   expect(reused?.permissionMode).toBe('full-access');
 });
+
+it('a conversation without its own mode runs with the remembered one, not the provider default', async () => {
+  await mount();
+  await act(async () => { await session.applyConversationPermissionMode('c2', 'auto'); });
+  const modeless = { ...session.conversations.find((item) => item.id === 'c')!, permissionMode: undefined };
+  // The provider default here is ask; the composer and the prompt both use auto.
+  expect(session.resolvePermissionMode(modeless, workspace as never)).toBe('auto');
+});

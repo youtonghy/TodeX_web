@@ -45,3 +45,15 @@ it('carries legacyPlaintext from manifests onto new and existing records', () =>
   const [updated] = mergeManifestConversations(current, [{ ...manifest('ca', 'wa'), legacyPlaintext: true }], [workspaceA], 'a');
   expect(updated.legacyPlaintext).toBe(true);
 });
+
+it('fixes run modes only on records it creates', () => {
+  const initial = () => ({ permissionMode: 'auto' as const });
+  const [created] = mergeManifestConversations([], [manifest('new', 'wa')], [workspaceA], 'a', initial);
+  expect(created.permissionMode).toBe('auto');
+  // An existing record keeps its own mode, and an unchanged list keeps the array.
+  const current = mergeManifestConversations([], [manifest('ca', 'wa')], [workspaceA], 'a');
+  const existing = [{ ...current[0], permissionMode: 'ask' as const }];
+  const merged = mergeManifestConversations(existing, [manifest('ca', 'wa')], [workspaceA], 'a', initial);
+  expect(merged).toBe(existing);
+  expect(merged[0].permissionMode).toBe('ask');
+});

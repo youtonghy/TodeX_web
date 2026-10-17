@@ -806,6 +806,32 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const providersForConversation = (conversation: { id: string } | null | undefined): ProviderDescriptor[] => (
     (conversation ? v2ProvidersByBackendRef.current[backendIdForConversation(conversation.id)] : undefined) ?? v2ProvidersRef.current
   );
+  /** The permission mode a conversation's next prompt runs with, so the
+   * composer shows exactly what is sent. A record without its own mode
+   * follows the mode last chosen for its agent on its backend. */
+  const resolvePermissionMode = (
+    conversation: ConversationRecord | null | undefined,
+    workspace: WorkspaceRecord | null | undefined,
+  ): PermissionMode | null => {
+    const remembered = conversation?.provider
+      ? providerModelPreferencesRef.current[
+        providerModelPreferenceKey(backendIdForConversation(conversation.id), conversation.provider)
+      ]?.lastPermissionMode
+      : undefined;
+    return conversationPermissionMode(conversation, workspace, providersForConversation(conversation), remembered);
+  };
+  /** Fixes the permission mode of a conversation first listed by `backendId`,
+   * resolved as `resolvePermissionMode` would. */
+  const manifestRunModes = (
+    backendId: string,
+    providers: ProviderDescriptor[] = v2ProvidersByBackendRef.current[backendId] ?? [],
+  ) => (record: ConversationRecord, workspace: WorkspaceRecord) => {
+    const remembered = record.provider
+      ? providerModelPreferencesRef.current[providerModelPreferenceKey(backendId, record.provider)]?.lastPermissionMode
+      : undefined;
+    const permissionMode = conversationPermissionMode(record, workspace, providers, remembered);
+    return permissionMode ? { permissionMode } : {};
+  };
   const providerModels = providerModelsByBackend[activeBackendConnectionId] ?? EMPTY_PROVIDER_MODELS;
   const providerCommands = providerCommandsByBackend[activeBackendConnectionId] ?? EMPTY_PROVIDER_COMMANDS;
   const setBackendProviders = useCallback((backendId: string, providers: ProviderDescriptor[]) => {
@@ -918,7 +944,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           if (!active) return;
           setBackendProviders(backendId, providers.providers);
           setBackendManifests(backendId, conversations.conversations);
-          setConversations((current) => mergeManifestConversations(current, withDecryptedTitles(backendId, conversations.conversations), workspacesRef.current, backendId));
+          setConversations((current) => mergeManifestConversations(current, withDecryptedTitles(backendId, conversations.conversations), workspacesRef.current, backendId, manifestRunModes(backendId, providers.providers)));
           setDirectorySyncByBackend((current) => ({ ...current, [backendId]: 'ready' }));
         })
         .catch(() => {
@@ -931,7 +957,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         void api.listConversations().then((response) => {
           if (!active) return;
           setBackendManifests(backendId, response.conversations);
-          setConversations((current) => mergeManifestConversations(current, withDecryptedTitles(backendId, response.conversations), workspacesRef.current, backendId));
+          setConversations((current) => mergeManifestConversations(current, withDecryptedTitles(backendId, response.conversations), workspacesRef.current, backendId, manifestRunModes(backendId)));
         }).catch(() => undefined);
       }, 15000);
       stops.push(() => {
@@ -1808,7 +1834,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         try {
           const conversationResponse = await backendApi(profile).listConversations();
           setBackendManifests(backendId, conversationResponse.conversations);
-          setConversations((current) => mergeManifestConversations(current, withDecryptedTitles(backendId, conversationResponse.conversations), workspacesRef.current, backendId));
+          setConversations((current) => mergeManifestConversations(current, withDecryptedTitles(backendId, conversationResponse.conversations), workspacesRef.current, backendId, manifestRunModes(backendId)));
         } catch (error) {
           setLastError(error instanceof Error ? error.message : t('sess.conversationDirSyncFailed'));
         }
@@ -4114,7 +4140,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   useEffect(() => {
     if (!decryptedTitleRevision) return;
     setConversations((current) => Object.entries(v2ConversationsByBackend).reduce(
-      (merged, [backendId, manifests]) => mergeManifestConversations(merged, withDecryptedTitles(backendId, manifests), workspacesRef.current, backendId),
+      (merged, [backendId, manifests]) => mergeManifestConversations(merged, withDecryptedTitles(backendId, manifests), workspacesRef.current, backendId, manifestRunModes(backendId)),
       current,
     ));
   }, [decryptedTitleRevision]);
@@ -7241,7 +7267,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         return false;
       }
 
-      const permissionMode = conversationPermissionMode(conversation, workspace, providersForConversation(conversation));
+      const permissionMode = resolvePermissionMode(conversation, workspace);
       if (!permissionMode) {
         setLastError(t('sess.permissionSelectRequired'));
         return false;
@@ -7458,7 +7484,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     const v2Id = context?.conversation.v2ConversationId;
     if (!context || !v2Id) return { error: new Error(t('sess.sendFailedShort')) };
     const { workspace, conversation } = context;
-    const permissionMode = conversationPermissionMode(conversation, workspace, providersForConversation(conversation));
+    const permissionMode = resolvePermissionMode(conversation, workspace);
     if (!permissionMode) return { error: new Error(t('sess.permissionSelectRequired')) };
     const attachments = liveComposerAttachments(item.text, item.attachments);
     let fields: Record<string, unknown>;
@@ -7725,7 +7751,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
 
       const { workspace, conversation } = context;
       const attachments = liveComposerAttachments(text, rawAttachments);
-      const permissionMode = conversationPermissionMode(conversation, workspace, providersForConversation(conversation));
+      const permissionMode = resolvePermissionMode(conversation, workspace);
       const preset = PERMISSION_PRESETS.find((item) => item.id === (permissionMode === 'ask' ? 'default' : permissionMode === 'auto' ? 'auto-review' : permissionMode));
       if (!preset) {
         setLastError(t('sess.permissionSelectSupported'));
@@ -8064,7 +8090,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     const context = getConversationContext(conversationId);
     if (!context) return;
     const config = conversationPermissionCapabilities(context.conversation, providersForConversation(context.conversation));
-    const selected = conversationPermissionMode(context.conversation, context.workspace, v2ProvidersRef.current);
+    const selected = resolvePermissionMode(context.conversation, context.workspace);
     const labels = { ask: t('chat.permissionAsk'), auto: t('chat.permissionAuto'), 'full-access': t('chat.permissionFullAccess') };
     desktopAlert(
       t('sess.permissionSettings'),
@@ -9675,6 +9701,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     resetMemories,
     applyPermissionProfile,
     applyConversationPermissionMode,
+    resolvePermissionMode,
     applyConversationWorkMode,
     seedTerminalState,
     resizeTerminalSession,
