@@ -8781,11 +8781,6 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         return;
       }
 
-      if (lower === 'subagents') {
-        openPanel('Subagents', { conversationId: conversation.id });
-        return;
-      }
-
       if (lower === 'personality') {
         openSlashCommandActionPage(workspace, conversation, '/personality');
         return;

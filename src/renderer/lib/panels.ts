@@ -15,6 +15,7 @@ export type DesktopPanel =
   | 'capabilities'
   | 'experimental'
   | 'v2'
+  /** Workbench tab with the subagent runs of one conversation. */
   | 'subagents'
   | 'kanban'
   /** Read-only Workbench tab following one agent `ssh_exec` call. */
@@ -24,7 +25,7 @@ export type DesktopPanel =
   /** SSH hosts, keys and connections; renders as the main content inside AppLayout. */
   | 'ssh';
 
-export type WorkbenchTab = 'terminal' | 'files' | 'git-diff' | 'ssh-exec' | 'agent-browser';
+export type WorkbenchTab = 'terminal' | 'files' | 'git-diff' | 'ssh-exec' | 'subagents' | 'agent-browser';
 
 export type OpenPanelOptions = {
   workspaceId?: string;
@@ -34,7 +35,13 @@ export type OpenPanelOptions = {
 };
 
 export function isWorkbenchTab(panel: DesktopPanel | null): panel is WorkbenchTab {
-  return panel === 'terminal' || panel === 'files' || panel === 'git-diff' || panel === 'ssh-exec' || panel === 'agent-browser';
+  return panel === 'terminal' || panel === 'files' || panel === 'git-diff' || panel === 'ssh-exec' || panel === 'subagents' || panel === 'agent-browser';
+}
+
+/** Agent SSH and Subagents tabs are opened by the agent's own calls only:
+ * they are not in the + menu and cannot be closed. */
+export function isSystemWorkbenchTab(tab: WorkbenchTab): boolean {
+  return tab === 'ssh-exec' || tab === 'subagents';
 }
 
 export function panelFromRoute(name: string): DesktopPanel | null {
@@ -67,8 +74,6 @@ export function panelFromRoute(name: string): DesktopPanel | null {
       return 'experimental';
     case 'V2Conversations':
       return 'v2';
-    case 'Subagents':
-      return 'subagents';
     case 'Kanban':
       return 'kanban';
     case 'Ssh':
@@ -81,7 +86,8 @@ export function panelFromRoute(name: string): DesktopPanel | null {
 /** One tab in the Workbench side panel. `ssh` binds a terminal tab to
  * `ssh -tt <host>`; `remote` binds a files tab to a remote SFTP/FTP
  * connection instead of the active workspace; `sshExec` binds the session-only
- * `ssh-exec` tab to the agent SSH call log of one conversation. */
+ * `ssh-exec` tab to the agent SSH call log of one conversation, and
+ * `subagents` the session-only `subagents` tab to its subagent runs. */
 export type WorkbenchItem = {
   id: string;
   type: WorkbenchTab;
@@ -90,16 +96,18 @@ export type WorkbenchItem = {
   ssh?: { host: string };
   remote?: RemoteFilesBinding;
   sshExec?: { conversationId: string };
+  subagents?: { conversationId: string };
   /** Session-only `agent-browser` tab of one conversation. */
   agentBrowser?: { conversationId: string };
 };
 
 /** Imperative requests from outside the Workbench (the SSH view, or a new
- * agent `ssh_exec` call in the viewed conversation), applied in id order once
+ * agent `ssh_exec` call or subagent in the viewed conversation), applied in id order once
  * the tab list has been restored. */
 export type WorkbenchRequest =
   | { id: number; kind: 'ssh-terminal'; host: string }
   | { id: number; kind: 'remote-files'; remote: RemoteFilesBinding }
   | { id: number; kind: 'ssh-exec'; conversationId: string }
+  | { id: number; kind: 'subagents'; conversationId: string }
   | { id: number; kind: 'agent-browser'; conversationId: string }
   | { id: number; kind: 'close'; itemId: string };
