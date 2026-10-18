@@ -463,20 +463,23 @@ it('opens on the read-only status tab with changes, commits, PR and branch state
   // Reads run one at a time and the PR, which may wait on GitHub, goes last.
   const order = [readGitLog, readGitWorkspace, readGitPullRequest].map(mock => vi.mocked(mock).mock.invocationCallOrder[0]);
   expect(order).toEqual([...order].sort((a, b) => a - b));
-  expect(readGitLog).toHaveBeenCalledWith(state.session.settings, '/project/current', 0, 1, expect.anything());
+  // The first read loads the latest commit plus the page the first expand reveals.
+  expect(readGitLog).toHaveBeenCalledWith(state.session.settings, '/project/current', 0, 6, expect.anything());
   expect(state.sendAgentMessage).not.toHaveBeenCalled();
 });
 
-it('reveals five earlier commits per expand and collapses back to the latest without refetching', async () => {
+it('names exactly how many earlier commits each expand reveals and collapses back without refetching', async () => {
   render({ tab: 'status' });
   await settle();
   const rows = () => document.querySelectorAll('ol[aria-label="提交记录"] > li').length;
   expect(rows()).toBe(1);
+  expect(readGitLog).toHaveBeenCalledExactlyOnceWith(expect.anything(), '/project/current', 0, 6, expect.anything());
   await act(async () => { button('显示更早的 5 个提交').click(); });
   await settle();
   expect(rows()).toBe(6);
-  expect(readGitLog).toHaveBeenLastCalledWith(expect.anything(), '/project/current', 1, 5, expect.anything());
-  await act(async () => { button('显示更早的 5 个提交').click(); });
+  // A page is prefetched once the loaded commits are all shown, so the next label is exact.
+  expect(readGitLog).toHaveBeenLastCalledWith(expect.anything(), '/project/current', 6, 5, expect.anything());
+  await act(async () => { button('显示更早的 2 个提交').click(); });
   await settle();
   expect(rows()).toBe(8);
   expect([...document.querySelectorAll('button')].some(item => item.textContent?.includes('显示更早'))).toBe(false);
