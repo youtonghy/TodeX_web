@@ -2661,6 +2661,7 @@ export const en: Messages = {
   'schedule.createTitle': 'Create scheduled conversation',
   'schedule.rescheduleTitle': 'Change scheduled time',
   'schedule.at': 'Send at',
+  'schedule.agent': 'Agent',
   'schedule.hint': 'Send messages in the conversation as usual: the backend holds them and sends them in order at this time.',
   'schedule.confirm': 'Create',
   'schedule.save': 'Save',
