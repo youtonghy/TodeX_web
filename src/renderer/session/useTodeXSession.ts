@@ -320,6 +320,7 @@ import {
   classifyChatEvent,
   shouldAppendV2ConversationEvent,
   reduceV2ConversationEvents,
+  connectionErrorText,
   mergeConversationTimeline,
   conversationFromManifest,
   mergeManifestConversations,
@@ -4103,7 +4104,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         payload: { sessionCursors },
       }, backendId);
     } catch (error: unknown) {
-      setLastError(error instanceof ConnectionError ? error.userMessage : t('sess.resumeFailed'));
+      setLastError(error instanceof ConnectionError ? connectionErrorText(error) : t('sess.resumeFailed'));
     }
   }, [sendRawProtocolFrame]);
 
@@ -4308,12 +4309,12 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         }
         link.lastFailureRetryable = error.retryable;
         patchLinkStatus(backendId, { state: 'error' });
-        reportLinkError(backendId, error.userMessage);
+        reportLinkError(backendId, connectionErrorText(error));
         setHealth({
           status: 'offline',
           latencyMs: null,
           lastCheckedAt: Date.now(),
-          error: error.userMessage,
+          error: connectionErrorText(error),
           code: error.code,
         });
         if (probedVersion) patchLinkStatus(backendId, { serverVersion: probedVersion });
@@ -4652,7 +4653,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         message = sendRawProtocolFrame({ id: requestId, type, payload }, backendId);
       } catch (error: unknown) {
         setLastError(
-          error instanceof ConnectionError ? error.userMessage : t('sess.sendFailed'),
+          error instanceof ConnectionError ? connectionErrorText(error) : t('sess.sendFailed'),
         );
         return false;
       }
@@ -7177,7 +7178,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         return record;
       } catch (error) {
         const message = error instanceof ConnectionError
-          ? `${error.userMessage}（${error.technicalDetails}）`
+          ? `${connectionErrorText(error)}（${error.technicalDetails}）`
           : error instanceof Error ? error.message : t('alert.createConversationFailed');
         setLastError(message);
         desktopAlert(t('alert.createConversationFailed'), message);
@@ -7413,7 +7414,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           record.conversationId !== conversation.id || record.requestId !== requestId || Boolean(record.eventId)));
         setConversationThinking(conversation.id, false);
         const message = error instanceof ConnectionError
-          ? error.userMessage
+          ? connectionErrorText(error)
           : error instanceof Error ? error.message : t('sess.sendFailedShort');
         setLastError(message);
         pendingV2SubmissionsRef.current.delete(conversation.id);

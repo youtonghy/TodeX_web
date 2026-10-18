@@ -97,8 +97,13 @@ it('labels connection failures in the interface language', () => {
     expect(connectionFailureLabel('encryption_required')).toBe('Encrypted pairing required');
     expect(connectionFailureLabel('')).toBe('');
     render({ ...health('offline', 'raw failure'), code: 'authentication_failed' });
-    expect(toast.danger).toHaveBeenCalledExactlyOnceWith('Token missing or invalid', expect.any(Object));
+    expect(toast.danger).toHaveBeenCalledExactlyOnceWith('Device not paired or authentication failed', expect.any(Object));
   } finally {
     setLocale('zh-CN');
   }
+});
+
+it('shows the backend message for a refused request such as a 403', () => {
+  render({ ...health('offline', 'You do not have permission to use this workspace'), code: 'request_failed' });
+  expect(toast.danger).toHaveBeenCalledExactlyOnceWith('You do not have permission to use this workspace', expect.any(Object));
 });
