@@ -59,6 +59,7 @@ import { CopyGlyph, FeedbackButton } from '../components/chat/MessageActions';
 import { ProcessDisclosure, ProcessStep, ProcessSteps } from '../components/chat/ProcessDisclosure';
 import { ToolCallCard, type ToolCallState } from '../components/chat/ToolCallCard';
 import { ToolElapsed } from '../components/chat/ToolRunStatus';
+import { TurnNavigator, type ChatTurn } from '../components/chat/TurnNavigator';
 import { activeChatProcessId, buildChatRenderItems, isChatTimelineEntry, isChatToolEntry, latestIncomingEntryIds, sameTimelineEntries, sortChatEntries } from '../components/conversationTimeline';
 import type { ChatRenderItem } from '../components/conversationTimeline';
 import { awaitedBackgroundTasks, type BackgroundTask } from '@todex/protocol/conversationRuntime';
@@ -1024,6 +1025,9 @@ export function ChatPanel({ session }: Props) {
   const chatEntries = useMemo(() => sortChatEntries(conversationTimeline
     .filter((entry) => isChatTimelineEntry(entry) && !isChatReminderEntry(entry))), [conversationTimeline]);
   const items = useMemo(() => buildChatRenderItems(chatEntries), [chatEntries]);
+  const chatTurns = useMemo<ChatTurn[]>(() => items.flatMap((item) => (
+    item.type === 'entry' && item.entry.kind === 'outgoing' ? [{ id: item.entry.id, preview: item.entry.subtitle.trim() }] : []
+  )), [items]);
   const actionableIncoming = useMemo(() => latestIncomingEntryIds(chatEntries), [chatEntries]);
   const sentHistory = useMemo(() => {
     const texts: string[] = [];
@@ -1053,7 +1057,8 @@ export function ChatPanel({ session }: Props) {
   const hiddenItemCount = chatWindowStartIndex >= 0 ? chatWindowStartIndex : Math.max(0, items.length - CHAT_ROW_WINDOW);
   const mountedItems = hiddenItemCount > 0 ? items.slice(hiddenItemCount) : items;
   const firstMountedKey = mountedItems[0] ? chatRenderItemKey(mountedItems[0]) : '';
-  const pendingMessageJumpRef = useRef('');
+  /** A message to scroll to once the unmounted history rows it sits in mount. */
+  const pendingMessageJumpRef = useRef<{ id: string; align: 'center' | 'top' } | null>(null);
   const messagesRef = useRef<HTMLDivElement>(null);
   const [quote, setQuote] = useState<{ text: string; left: number; top: number; messageId?: string } | null>(null);
   useEffect(() => {
@@ -1137,6 +1142,51 @@ export function ChatPanel({ session }: Props) {
     setChatWindowStart(SHOW_ALL_CHAT_ROWS);
     void session.loadEarlierHistory(conversation.id);
   };
+  // The turn being read: the last user message whose top has passed a line
+  // just below the viewport top (the newest one once scrolled to the bottom).
+  const [activeTurnId, setActiveTurnId] = useState<string | null>(null);
+  const updateActiveTurn = () => {
+    const viewport = scrollRef.current;
+    const list = messagesRef.current;
+    if (!viewport || !list || chatTurns.length === 0) return;
+    if (atBottomRef.current) {
+      setActiveTurnId(chatTurns[chatTurns.length - 1].id);
+      return;
+    }
+    const turnIds = new Set(chatTurns.map((turn) => turn.id));
+    const line = viewport.getBoundingClientRect().top + 96;
+    let current: string | null = null;
+    let firstMounted: string | null = null;
+    for (const row of list.querySelectorAll<HTMLElement>('[data-message-id]')) {
+      const id = row.dataset.messageId ?? '';
+      if (!turnIds.has(id)) continue;
+      firstMounted ??= id;
+      if (row.getBoundingClientRect().top > line) break;
+      current = id;
+    }
+    if (!current && firstMounted) {
+      // Above the first mounted turn: the reader is still in the turn before it.
+      const index = chatTurns.findIndex((turn) => turn.id === firstMounted);
+      current = chatTurns[Math.max(0, index - 1)].id;
+    }
+    setActiveTurnId(current);
+  };
+  /** Scrolls a mounted message to the top of the viewport; false when it is not mounted. */
+  const scrollMessageToTop = (id: string) => {
+    const viewport = scrollRef.current;
+    const target = messagesRef.current?.querySelector(`[data-message-id="${CSS.escape(id)}"]`);
+    if (!viewport || !target) return false;
+    const offset = target.getBoundingClientRect().top - viewport.getBoundingClientRect().top;
+    viewport.scrollTo({ top: viewport.scrollTop + offset - 16, behavior: 'smooth' });
+    setActiveTurnId(id);
+    return true;
+  };
+  const jumpToTurn = (id: string) => {
+    if (scrollMessageToTop(id)) return;
+    // The turn is in the unmounted part of the history.
+    pendingMessageJumpRef.current = { id, align: 'top' };
+    setChatWindowStart(SHOW_ALL_CHAT_ROWS);
+  };
   const updateScrollPosition = () => {
     const element = scrollRef.current;
     if (!element) return;
@@ -1161,6 +1211,7 @@ export function ChatPanel({ session }: Props) {
       setChatWindowStart((current) => current ?? firstMountedKey);
     }
     if (element.scrollTop < 240) requestEarlierHistory();
+    updateActiveTurn();
   };
   useLayoutEffect(() => {
     const anchor = historyAnchorRef.current;
@@ -1185,10 +1236,13 @@ export function ChatPanel({ session }: Props) {
     }
     const jumpTarget = pendingMessageJumpRef.current;
     if (jumpTarget) {
-      pendingMessageJumpRef.current = '';
-      messagesRef.current
-        ?.querySelector(`[data-message-id="${CSS.escape(jumpTarget)}"]`)
-        ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      pendingMessageJumpRef.current = null;
+      if (jumpTarget.align === 'top') scrollMessageToTop(jumpTarget.id);
+      else {
+        messagesRef.current
+          ?.querySelector(`[data-message-id="${CSS.escape(jumpTarget.id)}"]`)
+          ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
     }
   }, [session.timeline, firstMountedKey, earlierHistoryStatus?.loading, conversation?.id]);
   useEffect(() => {
@@ -1202,6 +1256,7 @@ export function ChatPanel({ session }: Props) {
   useEffect(() => {
     if (atBottomRef.current) scrollToLatest();
   }, [session.timeline]);
+  useEffect(updateActiveTurn, [chatTurns, firstMountedKey]);
   // Rows on screen when a conversation opens stay still; rows that arrive
   // later in a live turn blur in (see RowEntrance).
   const [entranceArmedFor, setEntranceArmedFor] = useState<string | null>(null);
@@ -1476,7 +1531,7 @@ export function ChatPanel({ session }: Props) {
         return;
       }
       // The quoted message is in the unmounted part of the history.
-      pendingMessageJumpRef.current = item.messageId;
+      pendingMessageJumpRef.current = { id: item.messageId, align: 'center' };
       setChatWindowStart(SHOW_ALL_CHAT_ROWS);
     }
   };
@@ -1744,7 +1799,7 @@ export function ChatPanel({ session }: Props) {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="relative min-h-0 flex-1">
+      <div className="@container relative min-h-0 flex-1">
         <ScrollArea
           viewportRef={scrollRef}
           onScroll={updateScrollPosition}
@@ -1827,6 +1882,13 @@ export function ChatPanel({ session }: Props) {
           ) : null}
         </div>
         </ScrollArea>
+        {/* Sits in the gutter beside the centered message column; collapses to a hover reveal when the gutter is too narrow. */}
+        <TurnNavigator
+          turns={chatTurns}
+          activeId={activeTurnId}
+          onSelect={jumpToTurn}
+          className="absolute inset-y-0 start-0 z-20 ps-3"
+        />
         {isAtBottom ? null : (
           <Button
             size="small"
