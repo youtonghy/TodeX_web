@@ -281,3 +281,50 @@ describe('grok build providers', () => {
     expect(next.config as string).not.toContain('api_key');
   });
 });
+
+describe('deepseek harness routes', () => {
+  const route = {
+    displayName: 'Gateway',
+    api: 'openai-completions',
+    baseURL: 'https://gw.example/v1',
+    apiKey: MASKED_SECRET,
+    headers: { 'X-Org': 'acme' },
+    models: [
+      { id: 'coder', contextWindow: 262144, reasoningEfforts: { off: null, low: 'low', high: 'thinking-high' } },
+      { id: 'plain', maxTokens: 8192 },
+    ],
+  };
+
+  it('reads dsh pi-ai routes into the shared model rows', () => {
+    const form = extractFormValues('deepseek-harness', { name: 'Gateway', settingsConfig: route });
+    expect(form).toMatchObject({ baseUrl: 'https://gw.example/v1', apiKey: MASKED_SECRET, apiKind: 'openai-completions' });
+    expect(form.models[0]).toMatchObject({ id: 'coder', contextWindow: '262144', reasoning: true, efforts: ['low', 'high'] });
+    expect(form.models[1]).toMatchObject({ id: 'plain', maxTokens: '8192', reasoning: false, efforts: [] });
+    expect(providerModelIds('deepseek-harness', route)).toEqual(['coder', 'plain']);
+    expect(providerBaseUrl('deepseek-harness', route)).toBe('https://gw.example/v1');
+  });
+
+  it('writes reasoningEfforts keeping custom wire values and leaves other fields alone', () => {
+    const source = { name: 'Gateway', settingsConfig: route };
+    const form = extractFormValues('deepseek-harness', source);
+    form.name = 'Team gateway';
+    form.models[0] = { ...form.models[0], efforts: ['high', 'max'] };
+    form.models.push({ ...emptyModelEntry('fresh'), reasoning: true, efforts: ['medium'] });
+    const built = buildSettingsConfig('deepseek-harness', form, source);
+    expect(built.displayName).toBe('Team gateway');
+    expect(built.headers).toEqual({ 'X-Org': 'acme' });
+    expect(built.apiKey).toBe(MASKED_SECRET);
+    const models = built.models as Record<string, unknown>[];
+    expect(models[0].reasoningEfforts).toEqual({ off: null, minimal: null, low: null, medium: null, high: 'thinking-high', xhigh: null, max: 'max' });
+    expect(models[1]).toEqual({ id: 'plain', maxTokens: 8192 });
+    expect(models[2]).toMatchObject({ id: 'fresh', reasoningEfforts: { medium: 'medium', off: null } });
+  });
+
+  it('keeps the built-in DeepSeek route to a key and an endpoint', () => {
+    const form = extractFormValues('deepseek-harness', undefined);
+    const built = buildSettingsConfig('deepseek-harness', { ...form, apiKind: '', apiKey: 'sk-1', name: 'DeepSeek' });
+    expect(built).toEqual({ apiKey: 'sk-1' });
+    expect(defaultEfforts('deepseek-harness')).toEqual(defaultEfforts('pi'));
+    expect(validateModelForm('deepseek-harness', { ...form, models: [{ ...emptyModelEntry('m'), contextWindow: 'x' }] })).toBe('ap.invalidNumber');
+  });
+});
