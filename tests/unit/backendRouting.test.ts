@@ -18,6 +18,12 @@ it('the no-workspace backend is the chosen one, else the first added', () => {
   expect(resolveNoWorkspaceBackendId([], 'b1')).toBe('');
 });
 
+it('the None row in view wins over the Settings default while it exists', () => {
+  expect(resolveNoWorkspaceBackendId(profiles, 'b1', 'b2')).toBe('b1');
+  expect(resolveNoWorkspaceBackendId(profiles, null, 'gone', 'b2')).toBe('b2');
+  expect(resolveNoWorkspaceBackendId(profiles, 'gone', '')).toBe('b1');
+});
+
 it('a conversation belongs to its own tag, then its workspace, then the no-workspace backend', () => {
   expect(ownerBackendId({ workspaceId: 'w', backendConnectionId: 'b2' }, { id: 'w', backendConnectionId: 'b1' }, 'b9')).toBe('b2');
   expect(ownerBackendId({ workspaceId: 'w' }, { id: 'w', backendConnectionId: 'b1' }, 'b9')).toBe('b1');
