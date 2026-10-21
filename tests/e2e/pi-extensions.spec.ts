@@ -86,6 +86,8 @@ test('renders Pi plugin state, protects drafts, routes commands and stops the ru
   publish('extension.message', { provider: 'pi', runtimeId: 'runtime-browser', scope: 'session', messageId: 'custom-visible',
     message: { role: 'custom', customType: 'smoke', content: '插件的 **自定义消息**', display: true } });
   ui('notify', { message: '后台任务完成', notifyType: 'info' });
+  await page.getByRole('button', { name: /^插件后台/, expanded: false }).click();
+  await page.getByRole('button', { name: '插件补充信息', expanded: false }).click();
   await expect(page.getByTestId('pi-extension-aboveEditor').getByText('已连接', { exact: true })).toBeVisible();
   await expect(page.getByTestId('pi-extension-belowEditor').getByText('插件补充说明')).toBeVisible();
   await expect(page.getByText('Pi 插件 · smoke')).toBeVisible();

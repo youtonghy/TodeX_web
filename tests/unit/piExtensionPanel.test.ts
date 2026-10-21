@@ -29,6 +29,11 @@ function button(text: string): HTMLButtonElement {
   if (!result) throw new Error(`Missing button: ${text}`);
   return result;
 }
+async function expandPanel() {
+  const toggle = container.querySelector('button[aria-expanded]')!;
+  expect(toggle.getAttribute('aria-expanded')).toBe('false');
+  await act(async () => (toggle as HTMLButtonElement).click());
+}
 beforeAll(() => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true, React });
   HTMLElement.prototype.scrollIntoView ??= () => {};
@@ -52,6 +57,8 @@ it('shows each text widget at its requested placement and renders plugin text wi
   state.extensionUi.widgets.top = { ...meta, key: 'top', placement: 'aboveEditor', lines: ['输入框上方', '<script>danger()</script>'] };
   state.extensionUi.widgets.bottom = { ...meta, key: 'bottom', placement: 'belowEditor', lines: ['输入框下方'] };
   await render(state);
+  expect(container.textContent).not.toContain('已连接');
+  await expandPanel();
   expect(container.textContent).toContain('已连接');
   expect(container.textContent).toContain('输入框上方');
   expect(container.textContent).toContain('<script>danger()</script>');
@@ -59,6 +66,7 @@ it('shows each text widget at its requested placement and renders plugin text wi
   expect(container.querySelector('img,script')).toBeNull();
   expect(container.textContent).not.toContain('\u001b');
   await render({ ...state, placement: 'belowEditor' });
+  if (button('插件补充信息').getAttribute('aria-expanded') === 'false') await act(async () => button('插件补充信息').click());
   expect(container.textContent).toContain('输入框下方');
   expect(container.textContent).not.toContain('已连接');
   expect(container.textContent).not.toContain('停止后台运行');
@@ -70,7 +78,6 @@ it('keeps a pending draft actionable when details are collapsed and only replace
   const onDismissEditor = vi.fn();
   await render(props({ pendingEditorRequest, onReplaceEditor, onDismissEditor }));
   expect(onReplaceEditor).not.toHaveBeenCalled();
-  await act(async () => button('Pi 插件').click());
   expect(button('Pi 插件').getAttribute('aria-expanded')).toBe('false');
   expect(button('替换草稿').closest('[hidden]')).toBeNull();
   await act(async () => button('替换草稿').click());
@@ -86,6 +93,7 @@ it('keeps notifications available for review without an automatic live announcem
     { ...meta, eventId: 'event-b', sequence: 2, message: '设置需 Pi 终端', level: 'warning', time: '2026-09-11T00:00:01Z', scope: 'turn' },
   ];
   await render(state);
+  await expandPanel();
   expect(button('查看通知记录').getAttribute('aria-expanded')).toBe('false');
   await act(async () => button('查看通知记录').click());
   const history = container.querySelector('ol[aria-label="插件通知记录"]');
@@ -104,6 +112,7 @@ it('exposes a separate runtime stop action and disables it when disconnected', a
   expect(button('停止后台运行').disabled).toBe(true);
   expect(container.textContent).toContain('运行状态待确认');
   await render(props({ providerRuntime: { provider: 'pi', runtimeId: 'runtime-a', status: 'stopped', reason: 'user_closed' }, onStopRuntime }));
+  await expandPanel();
   expect(container.textContent).toContain('后台已停止');
   expect(container.querySelector('button[aria-label="停止 Pi 后台运行，保留聊天历史"]')).toBeNull();
   expect(container.textContent).toContain('你已停止 Pi 后台运行。');
