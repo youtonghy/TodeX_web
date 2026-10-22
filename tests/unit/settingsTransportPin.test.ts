@@ -32,7 +32,7 @@ function render(props: { repairPairing?: boolean } = {}) {
   const session = {
     activeBackendConnectionId: 'a', backendConnections: [{ id: 'a', name: 'Backend A', serverUrl: 'https://a.test', tenantId: '', ...credentials }],
     settings: { serverUrl: 'https://a.test', tenantId: '', ...credentials },
-    backendLinkStatus: {}, noWorkspaceBackendId: 'a', setNoWorkspaceBackendId: vi.fn(),
+    backendLinkStatus: {}, noWorkspaceBackendId: 'a',
     connectionState: 'idle', connectionHealth: { state: 'idle' }, updateBackendConnection, setSettings,
     historyEncryption: { ...history, forBackend: () => history },
     settingsForBackend(this: { settings: unknown }) { return this.settings; }, v2ProvidersByBackend: {},
