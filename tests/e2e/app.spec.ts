@@ -11,9 +11,9 @@ test('renders the responsive three-pane workbench without horizontal overflow', 
   if (viewport && viewport.width <= 768) {
     // Phones keep the sidebar in a drawer the header button slides open.
     await page.getByRole('button', { name: '打开导航侧栏' }).click();
-    await expect(page.getByRole('button', { name: 'TodeX 菜单' })).toBeInViewport();
+    await expect(page.getByRole('button', { name: '个人主页' })).toBeInViewport();
     await page.keyboard.press('Escape');
-    await expect(page.getByRole('button', { name: 'TodeX 菜单' })).not.toBeInViewport();
+    await expect(page.getByRole('button', { name: '个人主页' })).not.toBeInViewport();
   }
   await expect(page.getByRole('button', { name: '打开右侧面板' })).toBeVisible();
 
