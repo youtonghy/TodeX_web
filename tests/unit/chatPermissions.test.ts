@@ -20,12 +20,12 @@ beforeAll(() => {
   Element.prototype.scrollTo ??= () => {};
 });
 afterEach(() => { act(() => root?.unmount()); container?.remove(); vi.useRealTimers(); });
-function render(provider = 'codex', readonly = false, missingCapabilities = false) {
+function render(provider = 'codex', readonly = false, missingCapabilities = false, modes?: string[], timeline: unknown[] = []) {
   const session = {
     activeConversation: { id: 'c', workspaceId: 'w', provider, title: 'Test', mode: 'implement' },
     activeWorkspace: { id: 'w', path: '/tmp', ...(readonly ? { sandboxMode: 'read-only' } : {}) },
-    connectionState: 'open', recoveringConversations: {}, openStatusByConversation: {}, settings: {}, timeline: [], pendingRequests: [], conversations: [], usageRecords: [], modelCatalog: [],
-    v2Providers: [{ id: provider, available: true, profiles: [], models: [], capabilities: { permissionConfig: { modes: provider === 'pi' ? ['full-access'] : ['ask', 'auto', 'full-access'], defaultMode: provider === 'pi' ? 'full-access' : 'ask', supportsPlan: provider === 'codex' } } }],
+    connectionState: 'open', recoveringConversations: {}, openStatusByConversation: {}, settings: {}, timeline, pendingRequests: [], conversations: [], usageRecords: [], modelCatalog: [],
+    v2Providers: [{ id: provider, available: true, profiles: [], models: [], capabilities: { permissionConfig: { modes: modes ?? (provider === 'pi' ? ['full-access'] : ['ask', 'auto', 'full-access']), defaultMode: provider === 'pi' ? 'full-access' : 'ask', supportsPlan: provider === 'codex' } } }],
     applyConversationPermissionMode: vi.fn(async () => true), applyConversationWorkMode: vi.fn(async () => true),
     resolvePermissionMode: (conversation: never, workspace: never) => conversationPermissionMode(conversation, workspace, session.v2Providers),
     chatDrafts: {}, composerSelections: {}, composerAttachments: {}, getProviderCommandCatalog: vi.fn(), providerCommands: {}, refreshProviderCommands: vi.fn(), pendingPluginDrafts: {}, stoppingProviderRuntimes: {}, thinkingConversations: {}, submissionStatusByConversation: {}, conversationRuntimeById: {}, compactionByConversation: {}, providerModels: {}, providerImageInput: {}, contextUsageByConversation: {}, selectedSkills: {}, controlStatusByConversation: {}, turnIds: {},
@@ -60,6 +60,33 @@ it('Codex permission and plan selectors call the session configuration API', asy
   const plan = [...document.querySelectorAll('[role="option"]')].find(option => option.textContent === '计划') as HTMLElement;
   await act(async () => { plan.click(); });
   expect(session.applyConversationWorkMode).toHaveBeenCalledWith('c', 'plan');
+});
+
+it('offers accept-edits only to agents that declare it, in menu order', async () => {
+  const session = render('claude-code', false, false, ['full-access', 'accept-edits', 'ask', 'bypassPermissions']);
+  const trigger = [...container.querySelectorAll('button')].find(button => button.textContent?.includes('请求审批'))!;
+  await act(async () => { trigger.click(); });
+  const options = [...document.querySelectorAll('[role="option"]')];
+  expect(options.map(option => option.textContent)).toEqual(['请求审批', '自动接受编辑', '完全访问']);
+  await act(async () => { (options.find(option => option.textContent === '自动接受编辑') as HTMLElement).click(); });
+  expect(session.applyConversationPermissionMode).toHaveBeenCalledWith('c', 'accept-edits');
+});
+
+it('names the settings layer behind permission notices', () => {
+  const notice = (id: string, extra: Record<string, unknown>) => ({
+    id, kind: 'system', title: 'provider.event', subtitle: '', raw: '', at: 1, workspaceId: 'w', conversationId: 'c', turnId: 't', ...extra,
+  });
+  render('claude-code', false, false, undefined, [
+    notice('a', { providerNotice: 'auto_mode_unavailable', providerNoticeCause: 'settings', providerNoticeSettingsSource: 'policySettings' }),
+    notice('b', { providerNotice: 'auto_mode_unavailable' }),
+    notice('c', { providerNotice: 'bypass_mode_disabled', providerNoticeSettingsSource: 'projectSettings' }),
+    notice('d', { providerNotice: 'bypass_mode_disabled' }),
+  ]);
+  const notes = [...container.querySelectorAll('[role="note"]')].map(note => note.textContent);
+  expect(notes).toContain('Claude Code 设置（托管策略）禁用了自动模式，本轮按「请求审批」运行');
+  expect(notes).toContain('当前模型或账户不支持自动模式，本轮已按请求审批执行');
+  expect(notes).toContain('Claude Code 设置（项目设置）禁用了完全访问模式。请在 CLI 设置 → 权限 中关闭「disableBypassPermissionsMode」后重试。');
+  expect(notes).toContain('Claude Code 设置禁用了完全访问模式。请在 CLI 设置 → 权限 中关闭「disableBypassPermissionsMode」后重试。');
 });
 
 it('shows missing permission capability once as a toast and clears it when resolved', () => {
