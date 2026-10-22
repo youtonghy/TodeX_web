@@ -8,6 +8,7 @@ import { sshWorkbenchScopeKey } from '../../src/renderer/session/workbenchLayout
 import { SETTINGS_STORAGE_KEY } from '../../src/renderer/session/helpers';
 import { normalizeRemoteFilesBinding, remoteFileSource, uploadRemoteFile, workspaceFileSource, type RemoteFilesBinding } from '../../src/renderer/session/fileSources';
 import { REMOTE_UPLOAD_CHUNK_BYTES } from '@todex/protocol/ssh';
+import { TerminalStreamStore } from '@todex/protocol/terminalStream';
 import type { TodeXSession } from '../../src/renderer/session/useTodeXSession';
 import type { WorkbenchItem, WorkbenchRequest, WorkbenchTab } from '../../src/renderer/lib/panels';
 
@@ -95,7 +96,9 @@ describe('SSH workbench', () => {
   let pushRequest: (request: WorkbenchRequest) => void;
   let terminals: Record<string, unknown> = {};
   const disk = new Map<string, unknown>();
-  const status = vi.fn();
+  // The pane opens terminals through the session: join a running one, else
+  // start it when `autoStart` says so.
+  const open = vi.fn();
   const startTerminal = vi.fn();
   const handled = vi.fn();
   const itemsChanged = vi.fn();
@@ -113,7 +116,7 @@ describe('SSH workbench', () => {
     const session = {
       activeConversation: { id: 'c' }, activeWorkspace: { id: 'w', path: '/w', tenantId: 'local' },
       settings: { serverUrl: 'https://backend.test', deviceSecret: 'test-secret', tenantId: 'local' }, terminalById: terminals,
-      connectionState: 'open', connectionHealth: { latencyMs: null }, requestTerminalStatus: status,
+      connectionState: 'open', connectionHealth: { latencyMs: null }, openTerminalSession: open, terminalStreams: new TerminalStreamStore(),
       startTerminalSession: startTerminal, stopTerminalSession: vi.fn(), resizeTerminalSession: vi.fn(), sendTerminalInput: vi.fn(),
       settingsForBackend(this: { settings: unknown }) { return this.settings; }, backendConnections: [], v2ProvidersByBackend: {},
       activeBackendConnectionId: 'b', backendLinkStatus: { b: { state: 'open' } },
@@ -142,7 +145,7 @@ describe('SSH workbench', () => {
     expect(container.querySelector('[aria-label="新建工作台标签"]')).toBeNull();
     await act(async () => { pushRequest({ id: 1, kind: 'ssh-terminal', host: 'prod' }); });
     expect(handled).toHaveBeenLastCalledWith(1);
-    expect(status).toHaveBeenLastCalledWith({ kind: 'ssh', host: 'prod', backendConnectionId: 'b' }, expect.any(String));
+    expect(open).toHaveBeenLastCalledWith({ kind: 'ssh', host: 'prod', backendConnectionId: 'b' }, expect.objectContaining({ terminalId: expect.any(String), autoStart: true }));
     expect(container.querySelector('[aria-label="终端路径"]')).toBeNull();
     expect(container.textContent).toContain('prod');
     const items = itemsChanged.mock.calls.at(-1)?.[0] as WorkbenchItem[];
@@ -154,8 +157,8 @@ describe('SSH workbench', () => {
   it('does not auto-restart an exited SSH terminal and reconnects on request', async () => {
     await render();
     await act(async () => { pushRequest({ id: 1, kind: 'ssh-terminal', host: 'prod' }); });
-    const terminalId = status.mock.calls.at(-1)?.[1] as string;
-    terminals = { [terminalId]: { terminalId, ssh: { host: 'prod' }, status: 'exited', output: [], rows: 30, cols: 100 } };
+    const terminalId = (open.mock.calls.at(-1)?.[1] as { terminalId: string }).terminalId;
+    terminals = { [terminalId]: { terminalId, ssh: { host: 'prod' }, status: 'exited', rows: 30, cols: 100 } };
     vi.useFakeTimers();
     await render();
     startTerminal.mockClear();
@@ -172,16 +175,17 @@ describe('SSH workbench', () => {
     await render();
     await act(async () => { pushRequest({ id: 1, kind: 'ssh-terminal', host: 'prod' }); });
     await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
-    expect(startTerminal).toHaveBeenCalledWith({ kind: 'ssh', host: 'prod', backendConnectionId: 'b' }, expect.objectContaining({ cwd: '' }));
+    expect(open).toHaveBeenCalledWith({ kind: 'ssh', host: 'prod', backendConnectionId: 'b' }, expect.objectContaining({ cwd: '', autoStart: true }));
 
-    // A fresh mount (app restart) restores the tab from storage.
+    // A fresh mount (app restart) restores the tab from storage: it rejoins
+    // a live session but does not start ssh on its own.
     act(() => root.unmount());
     root = createRoot(container);
     startTerminal.mockClear();
-    status.mockClear();
+    open.mockClear();
     await render();
     await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
-    expect(status).toHaveBeenCalledWith({ kind: 'ssh', host: 'prod', backendConnectionId: 'b' }, expect.any(String));
+    expect(open).toHaveBeenCalledWith({ kind: 'ssh', host: 'prod', backendConnectionId: 'b' }, expect.objectContaining({ autoStart: false }));
     expect(startTerminal).not.toHaveBeenCalled();
     const connect = container.querySelector<HTMLButtonElement>('[aria-label="重新连接"]');
     expect(connect).not.toBeNull();

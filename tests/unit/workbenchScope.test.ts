@@ -1,3 +1,4 @@
+import { TerminalStreamStore } from '@todex/protocol/terminalStream';
 import { afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest';
 import * as React from 'react';
 import { act, createElement, useCallback, useState } from 'react';
@@ -21,10 +22,13 @@ let root: Root;
 let container: HTMLDivElement;
 let requestOpen: (tab: WorkbenchTab, target: OpenPanelOptions) => void;
 const disk = new Map<string, unknown>();
-const status = vi.fn();
+/** `openTerminalSession`: joins a running terminal or starts it. */
+const openTerminal = vi.fn();
 const startTerminal = vi.fn();
 const stopTerminal = vi.fn();
 let terminals: Record<string, unknown> = {};
+const terminalStreams = new TerminalStreamStore();
+const openedId = () => (openTerminal.mock.calls.at(-1)?.[1] as { terminalId: string } | undefined)?.terminalId;
 const scope = (conversation: string, workspace = 'workspace', mode: 'conversation' | 'workspace' = 'conversation') => workbenchScopeKey(mode, 'backend', workspace, conversation);
 const tabsKey = (key: string) => `${SETTINGS_STORAGE_KEY}.workbenchTabs.v1:${key}`;
 const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB';
@@ -38,7 +42,7 @@ function Harness({ conversation, workspace, mode }: { conversation: string; work
   const session = {
     activeConversation: { id: conversation }, activeWorkspace: { id: workspace, path: `/${workspace}` },
     settings: { serverUrl: 'https://backend.test', deviceSecret: 'test-secret' }, terminalById: terminals,
-    connectionState: 'open', connectionHealth: { latencyMs: null }, requestTerminalStatus: status,
+    connectionState: 'open', connectionHealth: { latencyMs: null }, openTerminalSession: openTerminal, terminalStreams,
     startTerminalSession: startTerminal, stopTerminalSession: stopTerminal, resizeTerminalSession: vi.fn(),
     settingsForBackend(this: { settings: unknown }) { return this.settings; }, backendConnections: [], backendLinkStatus: {}, v2ProvidersByBackend: {},
   } as unknown as TodeXSession;
@@ -48,7 +52,7 @@ function Harness({ conversation, workspace, mode }: { conversation: string; work
 beforeAll(() => { Object.assign(globalThis, { React, IS_REACT_ACT_ENVIRONMENT: true }); });
 beforeEach(() => {
   disk.clear();
-  status.mockClear(); startTerminal.mockClear(); stopTerminal.mockClear(); terminals = {};
+  openTerminal.mockClear(); startTerminal.mockClear(); stopTerminal.mockClear(); terminals = {};
   Object.assign(window, { todexWeb: { store: {
     get: vi.fn(async (key: string) => disk.get(key)),
     set: vi.fn(async (key: string, value: unknown) => { disk.set(key, JSON.parse(JSON.stringify(value))); }),
@@ -115,12 +119,12 @@ it('drops stored tabs of the removed browser type on restore', async () => {
 it('keeps the same shared terminal identity when changing conversations within a workspace', async () => {
   await render('a', 'workspace', 'workspace');
   await addTerminal();
-  const firstId = status.mock.calls.at(-1)?.[1];
+  const firstId = openedId();
   expect(firstId).toBeTruthy();
   await render('b', 'workspace', 'workspace');
   expect(tabButton('终端')).toBeTruthy();
-  expect(status.mock.calls.at(-1)?.[1]).toBe(firstId);
-  expect(status.mock.calls.at(-1)?.[0]).toEqual(expect.objectContaining({ kind: 'workspace', conversation: expect.objectContaining({ id: 'b' }) }));
+  expect(openedId()).toBe(firstId);
+  expect(openTerminal.mock.calls.at(-1)?.[0]).toEqual(expect.objectContaining({ kind: 'workspace', conversation: expect.objectContaining({ id: 'b' }) }));
   const tabKeys = [...disk.keys()].filter(key => key.includes('.workbenchTabs.v1:'));
   expect(tabKeys).toEqual([tabsKey(scope('a', 'workspace', 'workspace'))]);
 });
@@ -159,18 +163,20 @@ it('disables adding tabs until delayed stored tabs have finished restoring', asy
 it('keeps a manually stopped shared terminal stopped when switching conversations', async () => {
   await render('a', 'workspace', 'workspace');
   await addTerminal();
-  const terminalId = status.mock.calls.at(-1)?.[1] as string;
+  const terminalId = openedId() as string;
   expect(terminalId).toBeTruthy();
-  terminals = { [terminalId]: { id: terminalId, status: 'running', output: [], rows: 24, cols: 80 } };
+  terminals = { [terminalId]: { id: terminalId, status: 'running', rows: 24, cols: 80 } };
   await render('a', 'workspace', 'workspace');
   vi.useFakeTimers();
   const stop = container.querySelector<HTMLButtonElement>('[aria-label="停止终端"]');
   expect(stop?.disabled).toBe(false);
   await act(async () => { stop!.click(); });
   expect(stopTerminal).toHaveBeenCalled();
-  terminals = { [terminalId]: { id: terminalId, status: 'exited', output: [], rows: 24, cols: 80 } };
+  terminals = { [terminalId]: { id: terminalId, status: 'exited', rows: 24, cols: 80 } };
   await render('b', 'workspace', 'workspace');
+  openTerminal.mockClear();
   await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
   expect(startTerminal).not.toHaveBeenCalled();
+  expect(openTerminal).not.toHaveBeenCalled();
   expect(tabButton('终端')).toBeTruthy();
 });

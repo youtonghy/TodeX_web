@@ -1,3 +1,4 @@
+import { TerminalStreamStore } from '@todex/protocol/terminalStream';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as React from 'react';
 import { act, createElement } from 'react';
@@ -26,7 +27,7 @@ const session = {
   activeConversation: { id: 'conversation' },
   activeWorkspace: { id: 'workspace', path: '/workspace' },
   settings: { serverUrl: 'https://backend.test', deviceSecret: 'test-secret' },
-  terminalById: {}, connectionState: 'closed', connectionHealth: { latencyMs: null },
+  terminalById: {}, terminalStreams: new TerminalStreamStore(), connectionState: 'closed', connectionHealth: { latencyMs: null },
   settingsForBackend(this: { settings: unknown }) { return this.settings; }, backendConnections: [], backendLinkStatus: {}, v2ProvidersByBackend: {},
 } as unknown as TodeXSession;
 

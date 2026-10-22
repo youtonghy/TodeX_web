@@ -516,7 +516,7 @@ TodeX는 페일-클로즈드입니다. 디바이스가 명시적으로 승인되
   이벤트 저널
 - 프롬프트 디스패치 및 취소
 - 권한 결정
-- \`terminal.open\` / \`terminal.input\` / \`terminal.resize\` / \`terminal.close\` — PTY 세션
+- \`terminal.start\` / \`terminal.input\` / \`terminal.resize\` / \`terminal.stop\` — PTY 세션, \`terminal.attach\`로 실행 중인 터미널에 다시 연결하고 최근 출력을 재생
 - 로컬 Codex 엔진 프로세스 제어
 
 프레임은 UTF-8 길이 제한을 강제하고, 하트비트가 끊어진 연결을
@@ -840,7 +840,7 @@ Settings에는 고정된 프로토콜, 키 지문, 검증 상태가 표시됩니
 | --- | --- |
 | Slash Commands | 프로바이더 명령 참조 |
 | Git Diff | 작업 디렉터리 변경 사항 실시간 표시 |
-| Terminal | 직접 키보드 입력과 자동 크기 조정을 지원하는 내장 xterm.js PTY |
+| Terminal | 재연결·새로 고침 후에도 출력이 복원되는 내장 xterm.js PTY(WebGL). 찾기, 링크, 셸 통합, 명령 완료 알림 지원 |
 | Capabilities | 활성 Skills 및 MCP 서버의 읽기 전용 카탈로그 |
 | Experiments | 기능 토글 및 개발자 진단 |
 
@@ -858,6 +858,28 @@ Settings에는 고정된 프로토콜, 키 지문, 검증 상태가 표시됩니
 
 > 브라우저는 ⌘N / ⇧⌘N / ⇧⌘T를 예약하므로, 웹 클라이언트는 두 개의 "새로
 > 만들기" 작업과 터미널 보기에 Option 수정자를 사용합니다. 나머지는 모두 동일합니다.
+
+## 터미널
+
+터미널 안에서(macOS는 ⌘, Linux와 Windows는 Ctrl Shift):
+
+| 키 | 동작 |
+| --- | --- |
+| ⌘C / Ctrl Shift C | 복사(텍스트를 선택한 동안에는 Ctrl C도 복사) |
+| ⌘V / Ctrl Shift V | 붙여넣기 |
+| ⌘F / Ctrl Shift F | 찾기 |
+| ⌘K / Ctrl Shift K | 지우기 |
+| ⌘↑ ⌘↓ / Ctrl Shift ↑ ↓ | 이전 / 다음 프롬프트 |
+
+오른쪽 클릭으로도 같은 동작을 쓸 수 있습니다. Ctrl/⌘ 클릭으로 링크와
+작업 공간 파일의 \`경로:줄\` 참조를 엽니다. bracketed paste를 쓰지 않는
+프로그램에 여러 줄을 붙여넣으면 먼저 확인합니다.
+
+**셸 통합**(설정 → 모양 → 터미널, 기본값 켜짐)은 새 bash, zsh, fish
+터미널에 작은 스크립트를 불러옵니다. 프롬프트마다 표시를 남기고(실패한
+명령은 빨간색), 경로 칸이 셸의 디렉터리를 따르며, 명령이 실행 중인 탭을
+닫기 전에 확인하고, 보이지 않는 동안 끝난 10초 이상 명령을 알려 줍니다.
+프로그램도 OSC 9 / OSC 777로 알림을 보낼 수 있습니다.
 
 수정자 키를 잠시 누르고 있으면 UI에 단축키 힌트 배지가 표시됩니다.
 `),

@@ -1,3 +1,4 @@
+import { TerminalStreamStore } from '@todex/protocol/terminalStream';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as React from 'react';
 import { act, createElement, useCallback, useState } from 'react';
@@ -7,6 +8,9 @@ import { WorkbenchPanel } from '../../src/renderer/screens/WorkbenchPanel';
 import { createAgentBrowserWatch, takeNewAgentBrowserTab } from '../../src/renderer/session/agentBrowserTabs';
 import type { TodeXSession } from '../../src/renderer/session/useTodeXSession';
 import type { WorkbenchRequest, WorkbenchTab } from '../../src/renderer/lib/panels';
+
+/** Stable like the session's own store, so terminal views are not rebuilt on every render. */
+const terminalStreams = new TerminalStreamStore();
 
 vi.hoisted(() => {
   window.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false, media: '', onchange: null });
@@ -83,7 +87,7 @@ describe('WorkbenchPanel agent browser tab', () => {
     const session = {
       activeConversation: { id: conversationId }, activeWorkspace: { id: 'w', path: '/w', tenantId: 'local' },
       settings: { serverUrl: 'https://backend.test', deviceSecret: 'test-secret', tenantId: 'local' }, terminalById: {},
-      connectionState: 'closed', connectionHealth: { latencyMs: null }, requestTerminalStatus: vi.fn(),
+      connectionState: 'closed', connectionHealth: { latencyMs: null }, requestTerminalStatus: vi.fn(), openTerminalSession: vi.fn(), terminalStreams,
       startTerminalSession: vi.fn(), stopTerminalSession: vi.fn(), resizeTerminalSession: vi.fn(), sendTerminalInput: vi.fn(),
       conversations: [{ id: conversationId, v2ConversationId: 'v2-browser' }], watchAgentBrowser,
       conversationRuntimeById: { [conversationId]: { desktopBrowser: runtime(1, 'a').desktopBrowser } as unknown as ConversationRuntime },

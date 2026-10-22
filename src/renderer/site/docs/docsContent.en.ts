@@ -509,7 +509,7 @@ One connection multiplexes:
 - \`conversation.subscribe\` — live event journals with sequence-based resume
 - Prompt dispatch and cancellation
 - Permission decisions
-- \`terminal.open\` / \`terminal.input\` / \`terminal.resize\` / \`terminal.close\` — PTY sessions
+- \`terminal.start\` / \`terminal.input\` / \`terminal.resize\` / \`terminal.stop\` — PTY sessions; \`terminal.attach\` rejoins a running one and replays its recent output
 - Local Codex engine process control
 
 Frames enforce UTF-8 length limits; heartbeats detect dead connections.
@@ -827,7 +827,7 @@ workspace root.
 | --- | --- |
 | Slash Commands | Reference of the provider's commands |
 | Git Diff | Live working-directory changes |
-| Terminal | Embedded xterm.js PTY with direct keyboard input and auto resize |
+| Terminal | Embedded xterm.js PTY (WebGL) that survives reconnects and reloads, with find, links, shell integration and command-finished notices |
 | Capabilities | Read-only catalog of active Skills and MCP servers |
 | Experiments | Feature toggles and developer diagnostics |
 
@@ -845,6 +845,29 @@ workspace root.
 
 > Browsers reserve ⌘N / ⇧⌘N / ⇧⌘T, so the web client uses the Option modifier
 > for the two "new" actions and the Terminal view. Everything else is identical.
+
+## Terminal
+
+Inside a terminal (macOS uses ⌘, Linux and Windows use Ctrl Shift):
+
+| Keys | Action |
+| --- | --- |
+| ⌘C / Ctrl Shift C | Copy (Ctrl C also copies while text is selected) |
+| ⌘V / Ctrl Shift V | Paste |
+| ⌘F / Ctrl Shift F | Find |
+| ⌘K / Ctrl Shift K | Clear |
+| ⌘↑ ⌘↓ / Ctrl Shift ↑ ↓ | Previous / next prompt |
+
+Right-click opens the same actions. Ctrl/⌘-click opens links and
+\`path:line\` references to workspace files. Pasting several lines into a
+program that does not use bracketed paste asks first.
+
+**Shell integration** (Settings → Appearance → Terminal, on by default)
+loads a small script into new bash, zsh and fish terminals. It marks each
+prompt (red for a failed command), keeps the path field on the shell's
+directory, asks before closing a tab whose command is still running, and
+posts a notice when a command of 10 seconds or more finishes out of sight.
+Programs can post notices too (OSC 9 / OSC 777).
 
 Holding the modifier briefly reveals shortcut hint badges in the UI.
 `),

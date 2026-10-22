@@ -498,7 +498,7 @@ Provider 账户位于 \`/v2/agent-providers/{agent}\` 之下，
 - \`conversation.subscribe\` ——实时事件日志，支持按序号续传
 - 提示词分发与取消
 - 权限裁决
-- \`terminal.open\` / \`terminal.input\` / \`terminal.resize\` / \`terminal.close\` ——PTY 会话
+- \`terminal.start\` / \`terminal.input\` / \`terminal.resize\` / \`terminal.stop\` ——PTY 会话；\`terminal.attach\` 重新接入运行中的终端并回放最近输出
 - 本地 Codex 引擎进程控制
 
 帧强制 UTF-8 长度限制；心跳用于检测死连接。
@@ -798,7 +798,7 @@ Web 端有差异之处会单独注明。
 | --- | --- |
 | 斜杠命令 | Provider 命令参考 |
 | Git Diff | 实时工作目录变更 |
-| 终端 | 内嵌 xterm.js PTY，支持直接键盘输入与自动尺寸调整 |
+| 终端 | 内嵌 xterm.js PTY（WebGL），断线与重载后恢复输出，支持查找、链接、Shell 集成和命令结束提醒 |
 | 能力 | 已启用 Skills 与 MCP 服务器的只读目录 |
 | 实验 | 功能开关与开发者诊断 |
 
@@ -816,6 +816,27 @@ Web 端有差异之处会单独注明。
 
 > 浏览器保留了 ⌘N / ⇧⌘N / ⇧⌘T，因此 Web 端这两个“新建”操作
 > 和终端视图改用 Option 键。其余快捷键完全一致。
+
+## 终端
+
+在终端内（macOS 用 ⌘，Linux 与 Windows 用 Ctrl Shift）：
+
+| 按键 | 操作 |
+| --- | --- |
+| ⌘C / Ctrl Shift C | 复制（有选中文本时 Ctrl C 也会复制） |
+| ⌘V / Ctrl Shift V | 粘贴 |
+| ⌘F / Ctrl Shift F | 查找 |
+| ⌘K / Ctrl Shift K | 清屏 |
+| ⌘↑ ⌘↓ / Ctrl Shift ↑ ↓ | 上一个 / 下一个提示符 |
+
+右键菜单提供同样的操作。Ctrl/⌘ 点击可打开链接，以及工作区内文件的
+\`路径:行号\` 引用。向未开启 bracketed paste 的程序粘贴多行内容时会先确认。
+
+**Shell 集成**（设置 → 外观 → 终端，默认开启）会为新开的 bash、zsh、
+fish 终端加载一小段脚本：标记每个提示符（失败的命令显示为红色）、
+让路径框跟随 shell 的当前目录、关闭仍有命令运行的标签前先确认，
+并在不可见时结束的 10 秒以上命令发出提醒。程序也可以通过
+OSC 9 / OSC 777 发送提醒。
 
 短暂按住修饰键，界面上会显示快捷键提示徽标。
 `),

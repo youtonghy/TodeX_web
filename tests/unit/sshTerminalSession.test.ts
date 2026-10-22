@@ -95,9 +95,9 @@ it('starts SSH terminals with an ssh payload and no workspace or cwd', async () 
 it('does not echo SSH input locally, so password prompts never land in the transcript', async () => {
   const socket = await mount();
   await act(async () => { session.startTerminalSession({ kind: 'ssh', host: 'prod' }, { terminalId: 'term-ssh', cwd: '', shell: '', rows: 24, cols: 80 }); });
-  const before = session.terminalById['term-ssh'].output.length;
+  const before = session.terminalStreams.get('term-ssh').snapshot();
   await act(async () => { session.sendTerminalInput('term-ssh', 'local', 'hunter2\n'); });
   expect(sentFrames(socket, 'terminal.input').at(-1)?.payload).toMatchObject({ terminalId: 'term-ssh', data: 'hunter2\n' });
-  expect(session.terminalById['term-ssh'].output).toHaveLength(before);
-  expect(session.terminalById['term-ssh'].output.some(entry => entry.text.includes('hunter2'))).toBe(false);
+  expect(session.terminalStreams.get('term-ssh').snapshot()).toBe(before);
+  expect(session.terminalStreams.get('term-ssh').snapshot()).not.toContain('hunter2');
 });
