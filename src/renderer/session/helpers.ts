@@ -1626,6 +1626,8 @@ export const KANBAN_TASKS_STORAGE_KEY = 'todex.web.kanbanTasks.v1';
 export const DEVICE_SECRET_STORAGE_KEY = 'todex.web.deviceSecret.v1';
 export const DEVICE_ORIGIN_STORAGE_KEY = 'todex.web.deviceOrigin.v1';
 export const WORKSPACE_TOMBSTONES_STORAGE_KEY = 'todex.web.workspaceTombstones.v1';
+/** Config-sync baselines: content hashes per source → target pair, never values. */
+export const CONFIG_SYNC_STORAGE_KEY = 'todex.web.configSync.v1';
 export const JSON_SAVE_DEBOUNCE_MS = 350;
 export const SESSION_CURSOR_SAVE_DEBOUNCE_MS = 800;
 export const WORKSPACE_SYNC_DEBOUNCE_MS = 900;
