@@ -4,15 +4,11 @@ export type DesktopPanel =
   | 'settings'
   | 'usage'
   | 'quota'
-  | 'cli-manager'
-  | 'agent-providers'
-  | 'cleanup'
   | 'slash-commands'
   | 'slash-action'
   | 'git-diff'
   | 'terminal'
   | 'files'
-  | 'capabilities'
   | 'experimental'
   | 'v2'
   /** Workbench tab with the subagent runs of one conversation. */
@@ -54,12 +50,6 @@ export function panelFromRoute(name: string): DesktopPanel | null {
       return 'usage';
     case 'Quota':
       return 'quota';
-    case 'CliManager':
-      return 'cli-manager';
-    case 'AgentProviders':
-      return 'agent-providers';
-    case 'Cleanup':
-      return 'cleanup';
     case 'SlashCommands':
       return 'slash-commands';
     case 'SlashCommandAction':
@@ -70,8 +60,6 @@ export function panelFromRoute(name: string): DesktopPanel | null {
       return 'terminal';
     case 'Files':
       return 'files';
-    case 'Capabilities':
-      return 'capabilities';
     case 'Experimental':
       return 'experimental';
     case 'V2Conversations':
