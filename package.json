@@ -62,7 +62,7 @@
     "jsdom": "^28.0.0",
     "jsqr": "^1.4.0",
     "marked": "^18.0.11",
-    "motion": "^13.1.1",
+    "motion": "^14.5.0",
     "react": "^19.3.0",
     "react-aria-components": "1.21.1",
     "react-dom": "^19.3.0",
