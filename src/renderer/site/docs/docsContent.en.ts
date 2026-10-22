@@ -869,6 +869,17 @@ directory, asks before closing a tab whose command is still running, and
 posts a notice when a command of 10 seconds or more finishes out of sight.
 Programs can post notices too (OSC 9 / OSC 777).
 
+**Images.** Paste an image (when the clipboard holds no text) or drop image
+files onto a terminal: TodeX stores them where the terminal runs — on the
+backend machine, or under \`~/.cache/todex/paste\` on the SSH host — and
+pastes their paths, which Claude Code and Codex attach as images. Pasted
+images are removed after 7 days. Ctrl V still goes to the program.
+
+**Reconnecting.** A terminal keeps running while you are away. When the app
+reconnects or reloads, it picks up where it left off, or, when that output
+is no longer kept, the backend sends the current screen — full-screen
+programs such as vim or Claude Code come back as they were.
+
 Holding the modifier briefly reveals shortcut hint badges in the UI.
 `),
     },

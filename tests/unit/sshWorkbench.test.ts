@@ -144,6 +144,8 @@ describe('SSH workbench', () => {
     await render();
     expect(container.querySelector('[aria-label="新建工作台标签"]')).toBeNull();
     await act(async () => { pushRequest({ id: 1, kind: 'ssh-terminal', host: 'prod' }); });
+    // The pane opens its terminal once the view has a size (or after 400 ms).
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 450)); });
     expect(handled).toHaveBeenLastCalledWith(1);
     expect(open).toHaveBeenLastCalledWith({ kind: 'ssh', host: 'prod', backendConnectionId: 'b' }, expect.objectContaining({ terminalId: expect.any(String), autoStart: true }));
     expect(container.querySelector('[aria-label="终端路径"]')).toBeNull();
@@ -157,6 +159,7 @@ describe('SSH workbench', () => {
   it('does not auto-restart an exited SSH terminal and reconnects on request', async () => {
     await render();
     await act(async () => { pushRequest({ id: 1, kind: 'ssh-terminal', host: 'prod' }); });
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 450)); });
     const terminalId = (open.mock.calls.at(-1)?.[1] as { terminalId: string }).terminalId;
     terminals = { [terminalId]: { terminalId, ssh: { host: 'prod' }, status: 'exited', rows: 30, cols: 100 } };
     vi.useFakeTimers();

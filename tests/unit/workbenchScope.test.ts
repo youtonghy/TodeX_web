@@ -71,6 +71,11 @@ function tabButton(name: string) {
   return [...container.querySelectorAll<HTMLElement>('button[aria-label]')]
     .find(node => node.getAttribute('aria-label')?.startsWith(name));
 }
+/** Terminals open once their view reports a size, or after 400 ms when it
+ * cannot (jsdom lays nothing out). */
+async function viewSettles() {
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 450)); });
+}
 async function addTerminal() {
   const trigger = container.querySelector<HTMLElement>('[aria-label="新建工作台标签"]');
   expect(trigger).not.toBeNull();
@@ -119,9 +124,11 @@ it('drops stored tabs of the removed browser type on restore', async () => {
 it('keeps the same shared terminal identity when changing conversations within a workspace', async () => {
   await render('a', 'workspace', 'workspace');
   await addTerminal();
+  await viewSettles();
   const firstId = openedId();
   expect(firstId).toBeTruthy();
   await render('b', 'workspace', 'workspace');
+  await viewSettles();
   expect(tabButton('终端')).toBeTruthy();
   expect(openedId()).toBe(firstId);
   expect(openTerminal.mock.calls.at(-1)?.[0]).toEqual(expect.objectContaining({ kind: 'workspace', conversation: expect.objectContaining({ id: 'b' }) }));
@@ -163,6 +170,7 @@ it('disables adding tabs until delayed stored tabs have finished restoring', asy
 it('keeps a manually stopped shared terminal stopped when switching conversations', async () => {
   await render('a', 'workspace', 'workspace');
   await addTerminal();
+  await viewSettles();
   const terminalId = openedId() as string;
   expect(terminalId).toBeTruthy();
   terminals = { [terminalId]: { id: terminalId, status: 'running', rows: 24, cols: 80 } };
