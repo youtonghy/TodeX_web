@@ -199,6 +199,22 @@ describe('codex context window', () => {
     expect(validateModelForm('codex', { ...form, contextWindow: '12.5' })).toBe('ap.invalidNumber');
     expect(validateModelForm('codex', { ...form, contextWindow: '' })).toBeNull();
   });
+
+  it('drops only the top-level effort and window keys when cleared', () => {
+    const existing = {
+      settingsConfig: {
+        auth: {},
+        config: 'model_provider = "gw"\nmodel_reasoning_effort = "high"\nmodel_context_window = 272000\n\n[model_providers.gw]\nbase_url = "https://gw/v1"\nmodel_context_window = 1\n',
+      },
+    };
+    const form = extractFormValues('codex', existing);
+    expect(form.reasoningEffort).toBe('high');
+    const config = buildSettingsConfig('codex', { ...form, reasoningEffort: '', contextWindow: '' }, existing).config as string;
+    expect(config).not.toContain('model_reasoning_effort');
+    expect(config).not.toContain('model_context_window = 272000');
+    expect(config).toContain('model_context_window = 1');
+    expect(config).toContain('base_url = "https://gw/v1"');
+  });
 });
 
 describe('defaultEfforts', () => {
