@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest';
 import {
   MASKED_SECRET,
   buildSettingsConfig,
+  claudeUnmanagedKeys,
   defaultEfforts,
   emptyModelEntry,
   extractFormValues,
+  isClaudeManagedKey,
   providerBaseUrl,
   providerModelIds,
   validateModelForm,
@@ -326,5 +328,38 @@ describe('deepseek harness routes', () => {
     expect(built).toEqual({ apiKey: 'sk-1' });
     expect(defaultEfforts('deepseek-harness')).toEqual(defaultEfforts('pi'));
     expect(validateModelForm('deepseek-harness', { ...form, models: [{ ...emptyModelEntry('m'), contextWindow: 'x' }] })).toBe('ap.invalidNumber');
+  });
+});
+
+describe('claude code profiles', () => {
+  const claude = (env: Record<string, unknown>, extra: Record<string, unknown> = {}) => ({ name: 'P', settingsConfig: { ...extra, env } });
+
+  it('writes a key read from ANTHROPIC_API_KEY back there, masked or not', () => {
+    const source = claude({ ANTHROPIC_API_KEY: MASKED_SECRET, ANTHROPIC_BASE_URL: 'https://a' });
+    const form = extractFormValues('claude-code', source);
+    expect(form.apiKey).toBe(MASKED_SECRET);
+    expect(buildSettingsConfig('claude-code', form, source).env).toEqual({ ANTHROPIC_API_KEY: MASKED_SECRET, ANTHROPIC_BASE_URL: 'https://a' });
+  });
+
+  it('uses ANTHROPIC_AUTH_TOKEN for new profiles and ones that already have it', () => {
+    expect(buildSettingsConfig('claude-code', { ...extractFormValues('claude-code'), apiKey: 'sk' }).env).toEqual({ ANTHROPIC_AUTH_TOKEN: 'sk' });
+    const both = claude({ ANTHROPIC_AUTH_TOKEN: 'a', ANTHROPIC_API_KEY: 'b' });
+    expect(buildSettingsConfig('claude-code', { ...extractFormValues('claude-code', both), apiKey: 'c' }, both).env)
+      .toEqual({ ANTHROPIC_AUTH_TOKEN: 'c', ANTHROPIC_API_KEY: 'b' });
+  });
+
+  it('removes the env keys of cleared fields', () => {
+    const source = claude({ ANTHROPIC_BASE_URL: 'https://a', ANTHROPIC_API_KEY: 'k', ANTHROPIC_MODEL: 'm', OTHER: '1' }, { permissions: {} });
+    const form = { ...extractFormValues('claude-code', source), baseUrl: ' ', apiKey: '', model: '' };
+    expect(buildSettingsConfig('claude-code', form, source)).toEqual({ permissions: {}, env: { OTHER: '1' } });
+  });
+
+  it('lists the keys a switch no longer writes', () => {
+    expect(isClaudeManagedKey('env', 'ANTHROPIC_SMALL_FAST_MODEL')).toBe(true);
+    expect(isClaudeManagedKey('env', 'CLAUDE_CODE_USE_FOUNDRY')).toBe(true);
+    expect(isClaudeManagedKey('env', 'CLAUDE_CODE_MAX_OUTPUT_TOKENS')).toBe(false);
+    expect(isClaudeManagedKey('top', 'apiKeyHelper')).toBe(true);
+    expect(claudeUnmanagedKeys({ model: 'x', permissions: {}, env: { ANTHROPIC_MODEL: 'm', HTTP_PROXY: 'p' } }))
+      .toEqual(['permissions', 'env.HTTP_PROXY']);
   });
 });
