@@ -2,8 +2,8 @@ import { resolve } from 'node:path';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { defineConfig, type Plugin } from 'vite';
-import { createBackendProxy, deploymentConfig, parseBackendList } from './server/backends';
-import { createReleaseCatalogHandler } from './server/releases';
+import { createBackendProxy, deploymentConfig, parseBackendList } from './server/backends.ts';
+import { createReleaseCatalogHandler } from './server/releases.ts';
 
 const webRoot = import.meta.dirname;
 const buildVersion = process.env.TODEX_BUILD_VERSION?.trim() || 'DEV0.0.0';
