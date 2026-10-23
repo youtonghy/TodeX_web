@@ -4,7 +4,7 @@ import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { ToastViewport, toast } from '../../src/renderer/components/ui/toast';
 import { DevicePairingPanel } from '../../src/renderer/components/DevicePairingPanel';
-import { DevicePairingRetryableError, beginDevicePairing } from '../../src/renderer/session/devicePairing';
+import { DevicePairingRetryableError, beginDevicePairing, fetchBackendDeployment } from '../../src/renderer/session/devicePairing';
 import type { DevicePairingRequest } from '../../src/renderer/session/devicePairing';
 import type { TodeXSession } from '../../src/renderer/session/useTodeXSession';
 import { deviceIdentityFromSecret, generateDeviceIdentity } from '@todex/protocol/deviceAuth';
@@ -17,6 +17,7 @@ vi.hoisted(() => {
 vi.mock('../../src/renderer/session/devicePairing', async importOriginal => ({
   ...await importOriginal<typeof import('../../src/renderer/session/devicePairing')>(),
   beginDevicePairing: vi.fn(),
+  fetchBackendDeployment: vi.fn(),
 }));
 let root: Root;
 let container: HTMLDivElement;
@@ -28,6 +29,7 @@ const TOAST_VARIANTS = ['info', 'success', 'warning', 'danger'] as const;
 beforeEach(() => {
   vi.useFakeTimers();
   vi.mocked(beginDevicePairing).mockReset();
+  vi.mocked(fetchBackendDeployment).mockReset().mockResolvedValue('host');
   // Pass-through spies: they record each toast key so afterEach can clear the stack.
   for (const variant of TOAST_VARIANTS) vi.spyOn(toast, variant);
 });
@@ -114,6 +116,27 @@ it('shows the code and fingerprint, then pins the device key and the verified tr
   expect(state.updateBackendConnection).not.toHaveBeenCalled();
   expect(notices()).toContain('已批准，可连接');
   expect(req.cancel).not.toHaveBeenCalled();
+});
+
+it('a container backend shows the host commands that approve the code', async () => {
+  vi.mocked(beginDevicePairing).mockResolvedValue(request());
+  vi.mocked(fetchBackendDeployment).mockResolvedValue('container');
+  render();
+  await press('设备验证');
+  await flushNotices();
+  expect(fetchBackendDeployment).toHaveBeenCalledWith('https://a.test', expect.any(AbortSignal));
+  expect(container.textContent).toContain('这个后端运行在容器里');
+  expect(container.textContent).toContain('todexc pair');
+  expect(container.textContent).toContain('docker exec -u todex todex todex-agentd pair approve SAFE-1234');
+});
+
+it('a host backend shows no container commands', async () => {
+  vi.mocked(beginDevicePairing).mockResolvedValue(request());
+  render();
+  await press('设备验证');
+  await flushNotices();
+  expect(container.textContent).toContain('SAFE-1234');
+  expect(container.textContent).not.toContain('todexc pair');
 });
 
 it('re-pairing the same backend reuses its device key', async () => {

@@ -29,7 +29,8 @@ import { AppIcon } from './components/AppIcon';
 import { ChatPanel } from './screens/ChatPanel';
 import { HistoryRecoveryNotice } from './components/HistoryRecoveryNotice';
 import { Field } from './components/Field';
-import { connectionStateLabel, conversationDisplayTitle, createWorkspaceDirectory, fetchWorkspaceDirectorySnapshot } from './session/helpers';
+import { connectionStateLabel, conversationDisplayTitle, createWorkspaceDirectory, fetchWorkspaceDirectorySnapshot, isUnmountedPathError } from './session/helpers';
+import { WorkspaceMountHint } from './components/WorkspaceMountHint';
 import { isWorkbenchTab, panelFromRoute, type DesktopPanel, type OpenPanelOptions, type WorkbenchItem, type WorkbenchRequest, type WorkbenchTab } from './lib/panels';
 import type { RemoteFilesBinding } from './session/fileSources';
 import { ShortcutHint, useAppShortcuts, useShortcutHintTracking } from './lib/shortcuts';
@@ -706,6 +707,8 @@ function CreateWorkspaceModal({
   const [activeRoot, setActiveRoot] = useState('');
   const [newFolderName, setNewFolderName] = useState<string | null>(null);
   const [creatingFolder, setCreatingFolder] = useState(false);
+  // Folder a container backend cannot see ('' hides the hint).
+  const [mountHint, setMountHint] = useState('');
   const settingsForBackend = (id: string) => {
     const profile = session.backendConnections.find((candidate) => candidate.id === id);
     return profile ? { ...session.settings, serverUrl: profile.serverUrl, deviceSecret: profile.deviceSecret, tenantId: profile.tenantId, encryptionProtocol: profile.encryptionProtocol, encryptionPublicKey: profile.encryptionPublicKey, transportVerified: profile.transportVerified } : session.settings;
@@ -715,6 +718,7 @@ function CreateWorkspaceModal({
   const browseRequest = useRef(0);
 
   const applySnapshot = (snapshot: Awaited<ReturnType<typeof fetchWorkspaceDirectorySnapshot>>) => {
+    setMountHint('');
     setPath(snapshot.current);
     setEntries(snapshot.entries.map((entry) => entry.path));
     setRoots(snapshot.roots);
@@ -754,6 +758,12 @@ function CreateWorkspaceModal({
   }, [isOpen, workspace, session.activeBackendConnectionId, session.settings]);
 
   const readFailed = (error: unknown) => toast.danger(error instanceof Error ? error.message : t('app.workspaceReadFailed'));
+  const serverVersion = session.backendLinkStatus[workspace?.backendConnectionId ?? backendId]?.serverVersion;
+  // A container backend that cannot see the folder gets the mount hint instead of the raw error.
+  const pathFailed = (error: unknown) => {
+    if (isUnmountedPathError(serverVersion?.deployment, error)) setMountHint(path);
+    else readFailed(error);
+  };
 
   const submitNewFolder = async () => {
     const folderName = newFolderName?.trim();
@@ -795,7 +805,7 @@ function CreateWorkspaceModal({
                 try {
                   validatedPath = (await fetchWorkspaceDirectorySnapshot(directorySettings, path)).current;
                 } catch (error) {
-                  readFailed(error);
+                  pathFailed(error);
                   return;
                 }
               }
@@ -827,7 +837,8 @@ function CreateWorkspaceModal({
       >
         {session.backendConnections.map((profile) => <SelectItem key={profile.id} id={profile.id} textValue={profile.name}>{profile.name} · {profile.serverUrl}</SelectItem>)}
       </Select>
-      <Field label={t('app.workspaceDirectory')} value={path} onChange={setPath} />
+      <Field label={t('app.workspaceDirectory')} value={path} onChange={(value) => { setPath(value); setMountHint(''); }} />
+      {mountHint ? <WorkspaceMountHint path={mountHint} /> : null}
       {roots.length > 1 ? (
         <Select
           label={t('app.workspaceRoot')}
@@ -851,7 +862,7 @@ function CreateWorkspaceModal({
             try {
               applySnapshot(await fetchWorkspaceDirectorySnapshot(directorySettings, path));
             } catch (error) {
-              readFailed(error);
+              pathFailed(error);
             }
           }}
         >

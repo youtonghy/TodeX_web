@@ -9,7 +9,7 @@ import type { TodeXSession } from '../../src/renderer/session/useTodeXSession';
 vi.hoisted(() => {
   window.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false, media: '', onchange: null });
 });
-vi.mock('../../src/renderer/session/devicePairing', () => ({ beginDevicePairing: vi.fn() }));
+vi.mock('../../src/renderer/session/devicePairing', () => ({ beginDevicePairing: vi.fn(), fetchBackendDeployment: vi.fn().mockResolvedValue('host') }));
 let root: Root;
 let container: HTMLDivElement;
 beforeAll(() => {
