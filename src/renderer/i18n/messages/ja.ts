@@ -3649,4 +3649,8 @@ export const ja: Messages = {
   'agentCalling.cliMcpTool': 'MCP ツール',
   'agentCalling.cliEndpoint': 'CLI エンドポイント',
   'agentCalling.cliNoEndpoint': 'なし（実行中の呼び出しを待機）',
+
+  // local backend (container approval from the desktop)
+  'localBackend.dockerApproving': "docker exec で承認中…",
+  'localBackend.dockerApproveFailed': "自動承認に失敗しました: {error}。代わりに下のコマンドを実行してください。",
 };

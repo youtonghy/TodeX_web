@@ -3649,4 +3649,8 @@ export const ko: Messages = {
   'agentCalling.cliMcpTool': 'MCP 도구',
   'agentCalling.cliEndpoint': 'CLI 엔드포인트',
   'agentCalling.cliNoEndpoint': '없음(실행 중인 호출 대기)',
+
+  // local backend (container approval from the desktop)
+  'localBackend.dockerApproving': "docker exec로 승인 중…",
+  'localBackend.dockerApproveFailed': "자동 승인 실패: {error}. 대신 아래 명령을 실행하세요.",
 };

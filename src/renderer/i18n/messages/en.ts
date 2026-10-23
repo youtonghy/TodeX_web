@@ -3649,4 +3649,8 @@ export const en: Messages = {
   'agentCalling.cliMcpTool': 'MCP tool',
   'agentCalling.cliEndpoint': 'CLI endpoint',
   'agentCalling.cliNoEndpoint': 'None (waits for a running call)',
+
+  // local backend (container approval from the desktop)
+  'localBackend.dockerApproving': "Approving with docker exec…",
+  'localBackend.dockerApproveFailed': "Automatic approval failed: {error}. Run one of the commands below instead.",
 };

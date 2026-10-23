@@ -3649,4 +3649,8 @@ export const zhCN = {
   'agentCalling.cliMcpTool': 'MCP 工具',
   'agentCalling.cliEndpoint': 'CLI 接口',
   'agentCalling.cliNoEndpoint': '无（等待已有调用的结果）',
+
+  // local backend (container approval from the desktop)
+  'localBackend.dockerApproving': "正在通过 docker exec 批准…",
+  'localBackend.dockerApproveFailed': "自动批准失败：{error}。请手动运行下面的命令。",
 } satisfies Record<string, string>;
