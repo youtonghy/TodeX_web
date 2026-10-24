@@ -144,7 +144,10 @@ Put a trusted reverse proxy (Caddy, nginx, Traefik) in front of the container to
 terminate TLS and forward WebSocket upgrades. With `TODEX_BACKENDS` the browser
 only talks to this site. Without it, an HTTPS page must use HTTPS/WSS for
 non-loopback Backends, and each Backend must allow the deployed site origin
-through CORS and, when relevant, browser Private Network Access.
+through CORS and, when relevant, browser Private Network Access: add it to the
+Backend's `security.cors_origins` (or `TODEX_AGENTD_CORS_ORIGINS`, comma
+separated), which also governs Private Network Access. Backends allow only the
+desktop app and loopback pages otherwise.
 
 #### Building the image
 

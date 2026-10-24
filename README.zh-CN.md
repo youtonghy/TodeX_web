@@ -86,7 +86,7 @@ services:
       TODEX_BACKENDS: ${TODEX_BACKENDS:-}
 ```
 
-请在容器前放置可信的反向代理（Caddy、nginx、Traefik）终止 TLS 并转发 WebSocket upgrade。设置了 `TODEX_BACKENDS` 时浏览器只连本站；未设置时，HTTPS 页面连接非回环 Backend 必须使用 HTTPS/WSS，且每个 Backend 都需要在 CORS（必要时还有浏览器 Private Network Access）中放行站点 origin。
+请在容器前放置可信的反向代理（Caddy、nginx、Traefik）终止 TLS 并转发 WebSocket upgrade。设置了 `TODEX_BACKENDS` 时浏览器只连本站；未设置时，HTTPS 页面连接非回环 Backend 必须使用 HTTPS/WSS，且每个 Backend 都需要在 CORS（必要时还有浏览器 Private Network Access）中放行站点 origin：把它加入 Backend 的 `security.cors_origins`（或逗号分隔的 `TODEX_AGENTD_CORS_ORIGINS`，同时决定 Private Network Access）；否则 Backend 只放行桌面端与回环页面。
 
 #### 构建镜像
 
@@ -116,7 +116,7 @@ docker buildx build \
 
 下载区只为 Desktop 提供安装包：可选版本，下载链接直达 GitHub 官方文件，同时提供版本说明和 SHA256 校验文件。Backend 改为 TodeX_backend 的一行 `install.sh` 安装命令（macOS / Linux / WSL），不依赖下载清单；Windows 下额外提供最新 release 的原生版本链接。未发布的架构不显示下载入口，移动端仅显示暂缓发布状态。云空图片和生成提示词见[官网资源说明](docs/website-assets.md)。
 
-公开部署应在可信反向代理终止 TLS。未设置 `TODEX_BACKENDS` 时，HTTPS 页面连接非 loopback Backend 必须使用 HTTPS/WSS；Backend 还需允许站点来源的 CORS，并按网络位置配置浏览器 Private Network Access。
+公开部署应在可信反向代理终止 TLS。未设置 `TODEX_BACKENDS` 时，HTTPS 页面连接非 loopback Backend 必须使用 HTTPS/WSS；Backend 还需在 `security.cors_origins` 中允许站点来源（CORS 与浏览器 Private Network Access 都按此放行）。
 
 ## 设备验证与传输加密
 
