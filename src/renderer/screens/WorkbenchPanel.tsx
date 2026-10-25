@@ -37,6 +37,7 @@ import {
   type TerminalTarget,
 } from '../session/helpers';
 import { isSystemWorkbenchTab, type OpenPanelOptions, type WorkbenchItem, type WorkbenchRequest, type WorkbenchTab } from '../lib/panels';
+import { ShortcutHint, useAppShortcuts, workbenchTabShortcut, type ShortcutId } from '../lib/shortcuts';
 import { normalizeWorkbenchLayout } from '../session/workbenchLayout';
 import { SETTINGS_STORAGE_KEY, attachmentId, backendApi, referenceToken, uniqueReferenceName } from '../session/helpers';
 import { isConflictError } from '@todex/protocol/connectionError';
@@ -455,7 +456,23 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
       });
   };
 
-  const tabStrip = items.map((item) => {
+  const selectTab = (item: WorkbenchItem) => {
+    setActiveId(item.id);
+    onTabChange(item.type);
+  };
+  const [newTabMenuOpen, setNewTabMenuOpen] = useState(false);
+  const shortcutHandlers: Partial<Record<ShortcutId, () => void>> = {};
+  if (shown) {
+    items.forEach((item, index) => {
+      const id = workbenchTabShortcut(index);
+      if (id) shortcutHandlers[id] = () => selectTab(item);
+    });
+    if (!sshMode && restored) shortcutHandlers.newWorkbenchTab = () => setNewTabMenuOpen(true);
+  }
+  useAppShortcuts(shortcutHandlers);
+
+  const tabStrip = items.map((item, index) => {
+    const tabShortcut = workbenchTabShortcut(index);
     const Icon = item.ssh || item.remote ? REMOTE_ICONS[item.type === 'terminal' ? 'terminal' : 'files'] : WORKBENCH_ICONS[item.type];
     const workspacePath = session.activeWorkspace?.path;
     const location = isSystemWorkbenchTab(item.type)
@@ -490,7 +507,7 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
                 'transition-colors duration-150 ease focus-visible:ring-2 focus-visible:ring-border-focus-ring',
                 isActive ? 'text-accent-500' : 'text-foreground-icon-secondary hover:bg-pill-tab-blue-hover-background hover:text-foreground-icon-primary',
               )}
-              onClick={() => { setActiveId(item.id); onTabChange(item.type); }}
+              onClick={() => selectTab(item)}
             >
               {item.sshExec ? (
                 <SshExecTabIcon conversationId={item.sshExec.conversationId} runs={session.conversationRuntimeById[item.sshExec.conversationId]?.sshExecs} className={tabIconClass} />
@@ -507,6 +524,7 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
             {item.type === 'terminal' ? <TerminalTabTitle terminalId={terminalIdForConversation(scopeKey, item.id)} fallback={title} /> : title}
           </Tooltip>
         </TooltipTrigger>
+        {tabShortcut ? <ShortcutHint id={tabShortcut} compact className="absolute -top-1 -end-1 z-20" /> : null}
         {closable ? (
           <IconAction
             icon={RiCloseLine} size="xs" aria-label={t('workbench.closeTab', { title })}
@@ -522,10 +540,13 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
   });
 
   const newTabDropdown = (
-    <MenuTrigger>
-      <Pressable isDisabled={!restored}>
-        <IconAction icon={RiAddLine} aria-label={t('workbench.newTab')} disabled={!restored} />
-      </Pressable>
+    <MenuTrigger isOpen={newTabMenuOpen} onOpenChange={setNewTabMenuOpen}>
+      <span className="relative inline-flex shrink-0">
+        <Pressable isDisabled={!restored}>
+          <IconAction icon={RiAddLine} aria-label={t('workbench.newTab')} disabled={!restored} />
+        </Pressable>
+        <ShortcutHint id="newWorkbenchTab" compact className="absolute -top-1 -end-1 z-20" />
+      </span>
       <MenuPopover placement={vertical ? 'right top' : 'bottom end'}>
         <Menu aria-label={t('workbench.newTab')} onAction={(key) => addTab(String(key) as WorkbenchTab)}>
           <MenuItem id="terminal" icon={WORKBENCH_ICONS.terminal} textValue={t('workbench.tabTerminal')}>{t('workbench.tabTerminal')}</MenuItem>
