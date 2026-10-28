@@ -1,6 +1,6 @@
 // @vitest-environment node
 
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -14,10 +14,11 @@ afterEach(async () => {
   await Promise.all(cleanup.splice(0).map((path) => rm(path, { recursive: true, force: true })));
 });
 
-async function withServer(run: (origin: string) => Promise<void>, options: WebServerOptions = {}) {
+async function withServer(run: (origin: string) => Promise<void>, options: WebServerOptions = {}, prepare?: (clientDirectory: string) => Promise<void>) {
   const clientDirectory = await mkdtemp(join(tmpdir(), 'todex-web-test-'));
   cleanup.push(clientDirectory);
-  await writeFile(join(clientDirectory, 'index.html'), '<!doctype html><title>TodeX Test</title>');
+  if (prepare) await prepare(clientDirectory);
+  else await writeFile(join(clientDirectory, 'index.html'), '<!doctype html><title>TodeX Test</title>');
   const server = createServer(createApp({ clientDirectory, ...options }));
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   const address = server.address();
@@ -69,6 +70,57 @@ describe('Node static server', () => {
       const api = await fetch(`${origin}/api/connections`);
       expect(api.status).toBe(404);
     });
+  });
+
+  it('allows WebAssembly compilation and narrows images in a managed deployment', async () => {
+    await withServer(async (origin) => {
+      const csp = (await fetch(`${origin}/app`)).headers.get('content-security-policy');
+      expect(csp).toContain("script-src 'self' 'wasm-unsafe-eval'");
+      expect(csp).toContain("img-src 'self' data: blob: http: https:");
+    });
+    await withServer(async (origin) => {
+      const csp = (await fetch(`${origin}/app`)).headers.get('content-security-policy');
+      expect(csp).toContain("img-src 'self' data: blob:;");
+    }, { backends: [{ id: 'home', name: 'Home', target: new URL('http://127.0.0.1:9') }] });
+  });
+
+  it('answers 404 for missing build assets and caches only hashed assets forever', async () => {
+    await withServer(async (origin) => {
+      const missing = await fetch(`${origin}/assets/index-DEADBEEF1.js`);
+      expect(missing.status).toBe(404);
+      expect(await missing.text()).not.toContain('TodeX Test');
+
+      const hashed = await fetch(`${origin}/assets/index-AbCdEf123.js`);
+      expect(hashed.status).toBe(200);
+      expect(hashed.headers.get('cache-control')).toBe('public, max-age=31536000, immutable');
+      const named = await fetch(`${origin}/images/logo-12345678.png`);
+      expect(named.status).toBe(200);
+      expect(named.headers.get('cache-control')).not.toContain('immutable');
+
+      const page = await fetch(`${origin}/app`);
+      expect(page.headers.get('cache-control')).toBe('no-store');
+    }, {}, async (clientDirectory) => {
+      await writeFile(join(clientDirectory, 'index.html'), '<!doctype html><title>TodeX Test</title>');
+      await mkdir(join(clientDirectory, 'assets'));
+      await writeFile(join(clientDirectory, 'assets', 'index-AbCdEf123.js'), 'export {};');
+      await mkdir(join(clientDirectory, 'images'));
+      await writeFile(join(clientDirectory, 'images', 'logo-12345678.png'), 'png');
+    });
+  });
+
+  it('reports server errors without leaking their message', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      // No client build: the SPA fallback fails with a message naming the build step.
+      await withServer(async (origin) => {
+        const response = await fetch(`${origin}/app`);
+        expect(response.status).toBe(500);
+        expect(await response.json()).toEqual({ code: 'WEB_SERVER_ERROR', message: 'Unexpected server error.' });
+      }, {}, async () => {});
+      expect(consoleError).toHaveBeenCalled();
+    } finally {
+      consoleError.mockRestore();
+    }
   });
 });
 

@@ -3,7 +3,7 @@ import express, { type Express } from 'express';
 import helmet from 'helmet';
 import { existsSync } from 'node:fs';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
-import { resolve } from 'node:path';
+import { isAbsolute, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createBackendProxy, deploymentConfig, parseBackendList, type BackendProxy, type DeployedBackend } from './backends.js';
 import { createReleaseCatalogHandler } from './releases.js';
@@ -33,9 +33,11 @@ export function createApp(options: WebServerOptions = {}): Express {
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
-        scriptSrc: ["'self'"],
+        // Shiki compiles its Oniguruma regex engine from WebAssembly.
+        scriptSrc: ["'self'", "'wasm-unsafe-eval'"],
         styleSrc: ["'self'", "'unsafe-inline'"],
-        imgSrc: ["'self'", 'data:', 'blob:', 'http:', 'https:'],
+        // A managed deployment shows only its own and generated images.
+        imgSrc: managed ? ["'self'", 'data:', 'blob:'] : ["'self'", 'data:', 'blob:', 'http:', 'https:'],
         fontSrc: ["'self'", 'data:'],
         // A managed deployment reaches its backends only through /backend/<id>.
         connectSrc: managed ? ["'self'"] : ["'self'", 'http:', 'https:', 'ws:', 'wss:'],
@@ -73,16 +75,27 @@ export function createApp(options: WebServerOptions = {}): Express {
     app.get('/', (_request, response) => response.redirect(302, '/app'));
   }
 
+  const assetsDirectory = resolve(clientDirectory, 'assets');
   app.use(express.static(clientDirectory, {
     etag: true,
     fallthrough: true,
     index: false,
     setHeaders(response, path) {
-      if (/-[A-Za-z0-9_-]{8,}\./.test(path)) {
+      // Only Vite's content-hashed build output is immutable; the test runs on
+      // the path inside assets/, never on the deployment's own directories.
+      const inAssets = relative(assetsDirectory, path);
+      if (!inAssets.startsWith('..') && !isAbsolute(inAssets) && /-[A-Za-z0-9_-]{8,}\.[A-Za-z0-9]+$/.test(inAssets)) {
         response.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
       }
     },
   }));
+
+  // A missing build asset (e.g. a chunk from an older deploy) is a 404, not
+  // the SPA page, which a browser would try to run as a script.
+  app.use('/assets', (_request, response) => {
+    response.setHeader('Cache-Control', 'no-store');
+    response.status(404).type('text/plain').send('Not found');
+  });
 
   app.get(/.*/, (_request, response, next) => {
     if (!existsSync(indexPath)) {
@@ -93,13 +106,31 @@ export function createApp(options: WebServerOptions = {}): Express {
     response.sendFile(indexPath);
   });
 
-  app.use((error: unknown, _request: express.Request, response: express.Response, _next: express.NextFunction) => {
-    void _next;
-    const message = error instanceof Error ? error.message : 'Unexpected server error';
-    response.status(500).json({ code: 'WEB_SERVER_ERROR', message });
+  app.use((error: unknown, _request: express.Request, response: express.Response, next: express.NextFunction) => {
+    if (response.headersSent) {
+      next(error);
+      return;
+    }
+    // Never echo error.message: it can carry filesystem paths.
+    const status = clientErrorStatus(error);
+    if (status) {
+      response.status(status).json({ code: 'BAD_REQUEST', message: 'The request could not be processed.' });
+      return;
+    }
+    console.error('[web] request failed:', error);
+    response.status(500).json({ code: 'WEB_SERVER_ERROR', message: 'Unexpected server error.' });
   });
 
   return app;
+}
+
+/** The 4xx status an error carries (`status` / `statusCode`, as set by
+ * body parsers and `send`), or null for anything else. */
+function clientErrorStatus(error: unknown): number | null {
+  if (typeof error !== 'object' || error === null) return null;
+  const { status, statusCode } = error as { status?: unknown; statusCode?: unknown };
+  const value = typeof status === 'number' ? status : statusCode;
+  return typeof value === 'number' && Number.isInteger(value) && value >= 400 && value < 500 ? value : null;
 }
 
 const proxies = new WeakMap<Server, BackendProxy>();
