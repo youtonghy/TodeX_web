@@ -2,7 +2,7 @@ import { afterEach, beforeAll, expect, it, vi } from 'vitest';
 import * as React from 'react';
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { formatElapsed, ToolElapsed, ToolSilentNotice, TOOL_SILENT_AFTER_MS } from '../../src/renderer/components/chat/ToolRunStatus';
+import { formatElapsed, ToolElapsed } from '../../src/renderer/components/chat/ToolRunStatus';
 import { setLocale } from '../../src/renderer/i18n';
 
 let root: Root;
@@ -40,22 +40,3 @@ it('omits the elapsed time without a start event', () => {
   expect(container.textContent).toBe('');
 });
 
-it('offers to stop the turn after the tool stays quiet', () => {
-  vi.useFakeTimers();
-  const last = Date.parse('2026-10-14T08:28:20Z');
-  vi.setSystemTime(last + TOOL_SILENT_AFTER_MS - 1_000);
-  const onStop = vi.fn();
-  render(createElement(ToolSilentNotice, { lastEventAt: last, running: true, onStop }));
-  expect(container.textContent).toBe('');
-  act(() => { vi.advanceTimersByTime(1_000); });
-  expect(container.textContent).toContain('No new output for 2 minutes');
-  const button = container.querySelector('button');
-  expect(button?.textContent).toContain('Stop this turn');
-  act(() => { button!.click(); });
-  expect(onStop).toHaveBeenCalledTimes(1);
-  // Read-only conversations get the notice without the action.
-  act(() => { root.render(createElement(ToolSilentNotice, { lastEventAt: last, running: true })); });
-  expect(container.querySelector('button')).toBeNull();
-  act(() => { root.render(createElement(ToolSilentNotice, { lastEventAt: last, running: false, onStop })); });
-  expect(container.textContent).toBe('');
-});

@@ -99,43 +99,8 @@ describe('conversation run status rendering', () => {
     expect(dom.textContent).not.toContain('建议压缩上下文');
   });
 
-  it('uses one transient toast after locally observed quiet time, never an inline alert', () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date('2026-09-06T01:00:00Z'));
-    const notify = vi.spyOn(toast, 'info').mockReturnValue('quiet');
-    const close = vi.spyOn(toast, 'close').mockImplementation(() => {});
-    const dom = render(createElement(ConversationRunStatus, base));
-    // Replayed progress from an hour ago does not trigger a warning on mount.
-    expect(notify).not.toHaveBeenCalled();
-    act(() => vi.advanceTimersByTime(120_000));
-    expect(notify).toHaveBeenCalledOnce();
-    expect(notify).toHaveBeenCalledWith('暂未收到新的运行状态', expect.objectContaining({ timeout: 6000 }));
-    expect(dom.textContent).not.toContain('暂未收到');
-    act(() => vi.advanceTimersByTime(120_000));
-    expect(notify).toHaveBeenCalledOnce();
-    render(createElement(ConversationRunStatus, { ...base,
-      runtime: { ...base.runtime, lastProgressAt: new Date().toISOString() } }));
-    expect(close).toHaveBeenCalledWith('quiet');
-    act(() => vi.advanceTimersByTime(119_000));
-    expect(notify).toHaveBeenCalledOnce();
-  });
-
-  it('does not notify while tools run, then starts a fresh wait after completion', () => {
-    vi.useFakeTimers();
-    const notify = vi.spyOn(toast, 'info').mockReturnValue('quiet');
-    vi.spyOn(toast, 'close').mockImplementation(() => {});
-    const tool = { id: 'tool', kind: 'system' as const, title: '工具调用', subtitle: 'test', raw: '',
-      at: Date.now(), turnId: 't', category: 'tool' as const, phase: 'started' as const };
-    render(createElement(ConversationRunStatus, { ...base, runtime: { ...base.runtime, timeline: [tool] } }));
-    act(() => vi.advanceTimersByTime(10 * 60_000));
-    expect(notify).not.toHaveBeenCalled();
-    render(createElement(ConversationRunStatus, { ...base, runtime: { ...base.runtime,
-      timeline: [{ ...tool, phase: 'completed' }] } }));
-    act(() => vi.advanceTimersByTime(120_000));
-    expect(notify).toHaveBeenCalledOnce();
-  });
-
-  it.each(['permission', 'unknown', 'recovery', 'disconnected', 'completed'] as const)(
+  // The two-minute no-progress toast was dropped: quiet time never notifies.
+  it.each(['running', 'permission', 'unknown', 'recovery', 'disconnected', 'completed'] as const)(
     'does not count quiet time during %s', (mode) => {
       vi.useFakeTimers();
       const notify = vi.spyOn(toast, 'info').mockReturnValue('quiet');
@@ -149,18 +114,6 @@ describe('conversation run status rendering', () => {
       expect(notify).not.toHaveBeenCalled();
     },
   );
-
-  it('closes an old conversation toast and restarts observation when switching conversations', () => {
-    vi.useFakeTimers();
-    const notify = vi.spyOn(toast, 'info').mockReturnValue('old');
-    const close = vi.spyOn(toast, 'close').mockImplementation(() => {});
-    render(createElement(ConversationRunStatus, base));
-    act(() => vi.advanceTimersByTime(120_000));
-    render(createElement(ConversationRunStatus, { ...base, runtime: { ...base.runtime, conversationId: 'other' } }));
-    expect(close).toHaveBeenCalledWith('old');
-    act(() => vi.advanceTimersByTime(119_000));
-    expect(notify).toHaveBeenCalledOnce();
-  });
 
   it('renders missing usage without invented token counts or TPS', () => {
     const dom = render(createElement(TurnUsageSummary, { records: [] }));

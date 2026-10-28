@@ -9,7 +9,7 @@ import { WorkbenchPanel } from '../../src/renderer/screens/WorkbenchPanel';
 import { SETTINGS_STORAGE_KEY } from '../../src/renderer/session/helpers';
 import {
   countLines,
-  createSshExecWatch,
+  createRunWatch,
   formatSshExecTime,
   isSshExecFailed,
   sshExecTranscript,
@@ -38,7 +38,7 @@ const at = (minute: number, second = 0) => new Date(2026, 9, 5, 10, minute, seco
 
 describe('takeNewSshExecs', () => {
   it('only reports calls that start after the conversation became the viewed one', () => {
-    const watch = createSshExecWatch();
+    const watch = createRunWatch();
     // Not loaded yet, then the first (history) runtime only seeds.
     expect(takeNewSshExecs(watch, 'c1', undefined, false)).toEqual([]);
     expect(takeNewSshExecs(watch, 'c1', runtime(10, [run('a')]), false)).toEqual([]);
@@ -49,7 +49,7 @@ describe('takeNewSshExecs', () => {
   });
 
   it('ignores history paged in below the window and recovery batches', () => {
-    const watch = createSshExecWatch();
+    const watch = createRunWatch();
     takeNewSshExecs(watch, 'c1', runtime(10, []), false);
     // Earlier page: new ids but the applied sequence did not move.
     expect(takeNewSshExecs(watch, 'c1', runtime(10, [run('old')]), false)).toEqual([]);
@@ -59,7 +59,7 @@ describe('takeNewSshExecs', () => {
   });
 
   it('reseeds when another conversation becomes the viewed one', () => {
-    const watch = createSshExecWatch();
+    const watch = createRunWatch();
     takeNewSshExecs(watch, 'c1', runtime(1, []), false);
     // c2's past calls never open the log, even though they are unseen.
     expect(takeNewSshExecs(watch, 'c2', runtime(50, [run('x'), run('y')]), false)).toEqual([]);
@@ -180,19 +180,11 @@ describe('Agent SSH log tab', () => {
     expect(container.textContent).toContain('运行中');
   });
 
-  it('re-creates and activates the log after the user closed it', async () => {
+  it('keeps the log as a system tab the user cannot close', async () => {
     await render();
     await newCall(run('e1'));
-    await press(container.querySelector('[aria-label="关闭Agent SSH"]'));
-    expect(logTabs()).toHaveLength(0);
-    // The runtime updating without a request (history, replay) opens nothing.
-    runs = [run('old'), ...runs];
-    await render();
-    expect(logTabs()).toHaveLength(0);
-    await newCall(run('e2'));
     expect(logTabs()).toHaveLength(1);
-    expect(logTabs()[0].getAttribute('aria-pressed')).toBe('true');
-    expect(cardIds()).toEqual(['old', 'e1', 'e2']);
+    expect(container.querySelector('[aria-label="关闭Agent SSH"]')).toBeNull();
   });
 
   it('separates turns and filters by host and failures', async () => {
