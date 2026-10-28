@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { parseBackendList } from '../../server/backends';
-import { createWebServer } from '../../server/index';
+import { createWebServer, shutdownWebServer } from '../../server/index';
 
 const cleanup: Array<() => Promise<void>> = [];
 
@@ -108,12 +108,21 @@ describe('managed deployment', () => {
     const origin = await webServer(`Home=${backend.origin}`);
     const response = await fetch(`${origin}/backend/home/v2/sealed?x=1`, {
       method: 'POST',
-      headers: { origin: 'http://localhost', cookie: 'session=1', 'x-todex-device-id': 'dev' },
+      headers: {
+        origin: 'http://localhost',
+        cookie: 'session=1',
+        'x-todex-device-id': 'dev',
+        'x-forwarded-for': '203.0.113.9',
+        'x-real-ip': '203.0.113.9',
+        forwarded: 'for=203.0.113.9',
+      },
       body: 'sealed-bytes',
     });
     expect(response.status).toBe(201);
     expect(response.headers.get('x-backend')).toBe('yes');
     expect(response.headers.get('set-cookie')).toBeNull();
+    expect(response.headers.get('x-content-type-options')).toBe('nosniff');
+    expect(response.headers.get('content-security-policy')).toBe("sandbox; default-src 'none'");
     expect(await response.json()).toEqual({ path: '/v2/sealed?x=1' });
     const [request] = backend.seen;
     expect(request.method).toBe('POST');
@@ -122,6 +131,11 @@ describe('managed deployment', () => {
     expect(request.headers.host).toBe(new URL(backend.origin).host);
     expect(request.headers.cookie).toBeUndefined();
     expect(request.headers['x-todex-device-id']).toBe('dev');
+    // Client-supplied forwarding headers are replaced by the real peer, so
+    // the backend sees a forwarded (never local) request.
+    expect(request.headers['x-forwarded-for']).toBe('127.0.0.1');
+    expect(request.headers['x-real-ip']).toBeUndefined();
+    expect(request.headers.forwarded).toBeUndefined();
 
     // Same-origin GETs carry no Origin; the proxy still adds the fixed one.
     await fetch(`${origin}/backend/home/health`);
@@ -153,6 +167,7 @@ describe('managed deployment', () => {
     expect(message).toBe('hello');
     expect(backend.seen[0].url).toBe('/v2/ws?tv=2');
     expect(backend.seen[0].headers.origin).toBe('https://todex-web.invalid');
+    expect(backend.seen[0].headers['x-forwarded-for']).toBe('127.0.0.1');
 
     await expect(new Promise((resolve, reject) => {
       const socket = new WebSocket(`${ws}/backend/home/v2/ws?deny=1`);
@@ -164,6 +179,38 @@ describe('managed deployment', () => {
       socket.onopen = resolve;
       socket.onerror = () => reject(new Error('refused'));
     })).rejects.toThrow('refused');
+  });
+
+  it('breaks the client response when the backend fails mid-body', async () => {
+    const broken = createServer((_request, response) => {
+      response.writeHead(200, { 'content-type': 'text/plain', 'content-length': '100' });
+      response.write('partial');
+      setTimeout(() => response.socket?.destroy(), 20);
+    });
+    const brokenOrigin = await listen(broken);
+    const origin = await webServer(`Broken=${brokenOrigin}`);
+    const response = await fetch(`${origin}/backend/broken/stream`);
+    expect(response.status).toBe(200);
+    await expect(response.text()).rejects.toThrow();
+  });
+
+  it('cuts proxied WebSockets when the server shuts down', async () => {
+    const backend = await fakeBackend();
+    const clientDirectory = await mkdtemp(join(tmpdir(), 'todex-web-proxy-'));
+    cleanup.push(() => rm(clientDirectory, { recursive: true, force: true }));
+    const server = createWebServer({ clientDirectory, backends: parseBackendList(`Home=${backend.origin}`) });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('server did not bind');
+    const socket = new WebSocket(`ws://127.0.0.1:${address.port}/backend/home/v2/ws?tv=2`);
+    await new Promise<void>((resolve, reject) => {
+      socket.onmessage = () => resolve();
+      socket.onerror = () => reject(new Error('socket failed'));
+    });
+    const closed = new Promise<void>((resolve) => { socket.onclose = () => resolve(); });
+    await shutdownWebServer(server, 10);
+    await closed;
+    expect(server.listening).toBe(false);
   });
 });
 

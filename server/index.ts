@@ -5,7 +5,7 @@ import { existsSync } from 'node:fs';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createBackendProxy, deploymentConfig, parseBackendList, type DeployedBackend } from './backends.js';
+import { createBackendProxy, deploymentConfig, parseBackendList, type BackendProxy, type DeployedBackend } from './backends.js';
 import { createReleaseCatalogHandler } from './releases.js';
 
 export type WebServerOptions = {
@@ -102,15 +102,34 @@ export function createApp(options: WebServerOptions = {}): Express {
   return app;
 }
 
+const proxies = new WeakMap<Server, BackendProxy>();
+
 /** The HTTP server for `createApp`, with WebSocket upgrades proxied to the
  * deployed backends (and refused otherwise). */
 export function createWebServer(options: WebServerOptions = {}): Server {
   const server = createServer(createApp(options));
   const proxy = createBackendProxy(options.backends ?? []);
+  proxies.set(server, proxy);
   server.on('upgrade', (request, socket, head) => {
     if (!proxy.handleUpgrade(request, socket, head)) socket.destroy();
   });
   return server;
+}
+
+/**
+ * Stops accepting connections, lets in-flight requests finish for
+ * `graceMs`, then cuts what is left, including proxied WebSockets (which the
+ * HTTP server no longer tracks and would otherwise hold it open forever).
+ */
+export function shutdownWebServer(server: Server, graceMs = 3_000): Promise<void> {
+  return new Promise((resolveClosed) => {
+    server.close(() => resolveClosed());
+    server.closeIdleConnections();
+    setTimeout(() => {
+      proxies.get(server)?.destroyUpgradedSockets();
+      server.closeAllConnections();
+    }, graceMs).unref();
+  });
 }
 
 if (process.env.NODE_ENV !== 'test') {
@@ -128,7 +147,12 @@ if (process.env.NODE_ENV !== 'test') {
     console.log(`TodeX Web listening on http://${host}:${port}`);
     for (const backend of backends) console.log(`  backend ${backend.id} (${backend.name}) -> ${backend.target.origin}${backend.target.pathname}`);
   });
-  const shutdown = () => server.close(() => process.exit(0));
+  let stopping = false;
+  const shutdown = () => {
+    if (stopping) return;
+    stopping = true;
+    void shutdownWebServer(server).then(() => process.exit(0));
+  };
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
 }

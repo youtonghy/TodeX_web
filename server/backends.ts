@@ -1,6 +1,6 @@
 import { request as httpRequest, type IncomingHttpHeaders, type IncomingMessage, type ServerResponse } from 'node:http';
 import { request as httpsRequest } from 'node:https';
-import type { Duplex } from 'node:stream';
+import { pipeline, type Duplex } from 'node:stream';
 
 /** A TodeX backend fixed at deploy time (`TODEX_BACKENDS`), reached only
  * through this server at `/backend/<id>/…`. */
@@ -17,6 +17,17 @@ export const BACKEND_PROXY_PREFIX = '/backend/';
 // ever reaching that path, whatever headers the caller sends.
 const PROXY_ORIGIN = 'https://todex-web.invalid';
 
+// Proxied answers are API payloads, never documents: they bypass helmet, so
+// these keep a browser from sniffing or rendering one as active content.
+const PROXIED_RESPONSE_HEADERS = {
+  'x-content-type-options': 'nosniff',
+  'content-security-policy': "sandbox; default-src 'none'",
+};
+
+// Client-supplied forwarding headers are dropped below and replaced by one
+// naming the TCP peer, so the backend treats every proxied request as
+// forwarded (never "from this machine") and, with this server listed in its
+// `security.trusted_proxies`, attributes it to the real client.
 const HOP_BY_HOP = new Set([
   'connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization', 'proxy-connection',
   'te', 'trailer', 'transfer-encoding', 'upgrade', 'host', 'origin', 'cookie', 'forwarded',
@@ -69,7 +80,8 @@ export function deploymentConfig(backends: DeployedBackend[]): DeploymentConfig 
   return { managed: backends.length > 0, backends: backends.map(({ id, name }) => ({ id, name })) };
 }
 
-function forwardedHeaders(headers: IncomingHttpHeaders, target: URL, keepUpgrade: boolean): Record<string, string | string[]> {
+function forwardedHeaders(request: IncomingMessage, target: URL, keepUpgrade: boolean): Record<string, string | string[]> {
+  const { headers } = request;
   const out: Record<string, string | string[]> = {};
   for (const [name, value] of Object.entries(headers)) {
     if (value === undefined || HOP_BY_HOP.has(name)) continue;
@@ -77,6 +89,9 @@ function forwardedHeaders(headers: IncomingHttpHeaders, target: URL, keepUpgrade
   }
   out.host = target.host;
   out.origin = PROXY_ORIGIN;
+  // Always present (even when the peer address is gone) so the request is
+  // never mistaken for a local one.
+  out['x-forwarded-for'] = request.socket.remoteAddress ?? 'unknown';
   if (keepUpgrade) {
     out.connection = 'Upgrade';
     out.upgrade = typeof headers.upgrade === 'string' ? headers.upgrade : 'websocket';
@@ -99,10 +114,26 @@ export type BackendProxy = {
   /** `upgrade` listener: proxies WebSockets under `/backend/<id>/`; returns
    * false (leaving the socket alone) for any other path. */
   handleUpgrade(request: IncomingMessage, socket: Duplex, head: Buffer): boolean;
+  /** Destroys every client socket of a pending or established WebSocket
+   * proxy (they are no longer tracked by the HTTP server). */
+  destroyUpgradedSockets(): void;
 };
+
+function errorSummary(error: unknown): string {
+  if (!(error instanceof Error)) return String(error);
+  const code = (error as NodeJS.ErrnoException).code;
+  return code ? `${code} ${error.message}` : error.message;
+}
+
+function logUpstreamError(backend: DeployedBackend, stage: string, error: unknown): void {
+  console.warn(`[proxy] backend ${backend.id}: ${stage} failed: ${errorSummary(error)}`);
+}
+
+const ignore = () => {};
 
 export function createBackendProxy(backends: DeployedBackend[]): BackendProxy {
   const byId = new Map(backends.map((backend) => [backend.id, backend]));
+  const upgradedSockets = new Set<Duplex>();
 
   const resolve = (url: string | undefined): { backend: DeployedBackend | null; path: string } | null => {
     if (!url?.startsWith(BACKEND_PROXY_PREFIX)) return null;
@@ -128,7 +159,7 @@ export function createBackendProxy(backends: DeployedBackend[]): BackendProxy {
       port: backend.target.port || undefined,
       method: request.method,
       path,
-      headers: forwardedHeaders(request.headers, backend.target, upgrade),
+      headers: forwardedHeaders(request, backend.target, upgrade),
     });
   };
 
@@ -148,17 +179,29 @@ export function createBackendProxy(backends: DeployedBackend[]): BackendProxy {
         json(response, 404, 'BACKEND_NOT_FOUND', 'This deployment has no such backend.');
         return;
       }
-      const upstream = send(resolved.backend, resolved.path, request, false);
+      const { backend } = resolved;
+      const upstream = send(backend, resolved.path, request, false);
       upstream.on('response', (answer) => {
-        response.writeHead(answer.statusCode ?? 502, responseHeaders(answer.headers));
-        answer.pipe(response);
+        response.writeHead(answer.statusCode ?? 502, { ...responseHeaders(answer.headers), ...PROXIED_RESPONSE_HEADERS });
+        // A body that fails midway destroys the client response, so the
+        // browser sees a broken transfer rather than a truncated success.
+        pipeline(answer, response, (error) => {
+          if (error && (error as NodeJS.ErrnoException).code !== 'ERR_STREAM_PREMATURE_CLOSE') {
+            logUpstreamError(backend, 'response body', error);
+          }
+        });
       });
-      upstream.on('error', () => {
+      let clientGone = false;
+      upstream.on('error', (error) => {
+        // Destroying the upstream for a departed client is not a failure.
+        if (!clientGone) logUpstreamError(backend, 'request', error);
         if (response.headersSent) response.destroy();
         else json(response, 502, 'BACKEND_UNREACHABLE', 'The backend did not answer.');
       });
       response.on('close', () => {
-        if (!response.writableFinished) upstream.destroy();
+        if (response.writableFinished) return;
+        clientGone = true;
+        upstream.destroy();
       });
       request.pipe(upstream);
     },
@@ -170,14 +213,27 @@ export function createBackendProxy(backends: DeployedBackend[]): BackendProxy {
         socket.end('HTTP/1.1 404 Not Found\r\nConnection: close\r\nContent-Length: 0\r\n\r\n');
         return true;
       }
-      const upstream = send(resolved.backend, resolved.path, request, true);
-      const fail = () => {
+      const { backend } = resolved;
+      upgradedSockets.add(socket);
+      const upstream = send(backend, resolved.path, request, true);
+      let answered = false;
+      upstream.on('error', (error) => {
+        if (!socket.destroyed) logUpstreamError(backend, 'upgrade', error);
         if (socket.writable) socket.end('HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\nContent-Length: 0\r\n\r\n');
         else socket.destroy();
-      };
-      upstream.on('error', fail);
+      });
       socket.on('error', () => upstream.destroy());
+      socket.on('close', () => {
+        upgradedSockets.delete(socket);
+        // The client left before the backend answered: drop the attempt.
+        if (!answered) upstream.destroy();
+      });
       upstream.on('upgrade', (answer, upstreamSocket, upstreamHead) => {
+        answered = true;
+        if (socket.destroyed) {
+          upstreamSocket.destroy();
+          return;
+        }
         const lines = [`HTTP/1.1 ${answer.statusCode ?? 101} ${answer.statusMessage ?? 'Switching Protocols'}`];
         for (const [name, value] of Object.entries(responseHeaders(answer.headers))) {
           for (const item of Array.isArray(value) ? value : [value]) lines.push(`${name}: ${item}`);
@@ -193,6 +249,7 @@ export function createBackendProxy(backends: DeployedBackend[]): BackendProxy {
         socket.pipe(upstreamSocket);
       });
       upstream.on('response', (answer) => {
+        answered = true;
         // The backend refused the upgrade (e.g. 401): relay its answer and close.
         const lines = [`HTTP/1.1 ${answer.statusCode ?? 502} ${answer.statusMessage ?? ''}`];
         for (const [name, value] of Object.entries(responseHeaders(answer.headers))) {
@@ -200,10 +257,15 @@ export function createBackendProxy(backends: DeployedBackend[]): BackendProxy {
         }
         lines.push('Connection: close');
         socket.write(`${lines.join('\r\n')}\r\n\r\n`);
-        answer.pipe(socket);
+        pipeline(answer, socket, ignore);
       });
       upstream.end();
       return true;
+    },
+
+    destroyUpgradedSockets() {
+      for (const socket of upgradedSockets) socket.destroy();
+      upgradedSockets.clear();
     },
   };
 }
