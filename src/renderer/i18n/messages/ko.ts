@@ -361,6 +361,21 @@ export const ko: Messages = {
   'iosUnsupported.repository': '저장소 열기',
   'iosUnsupported.continue': '그래도 계속',
 
+  // 비보안 컨텍스트 안내와 브라우저 키 저장소 오류 (웹 전용)
+  'secureContext.title': 'HTTPS 또는 localhost가 필요합니다',
+  'secureContext.body': '이 페이지는 다른 주소에서 일반 HTTP로 열려 있어 브라우저가 보안 컨텍스트로 취급하지 않습니다. TodeX Web은 기기 키를 생성하고 암호화하려면 보안 컨텍스트가 필요하므로 여기서는 워크벤치를 시작할 수 없습니다.',
+  'secureContext.hint': 'TodeX Web을 HTTPS로 제공하거나(예: 인증서가 있는 리버스 프록시 뒤에 배치), 실행 중인 컴퓨터에서 http://localhost로 여세요.',
+  'secureContext.guide': '자체 배포 가이드',
+  'secureContext.webCryptoUnavailable': '이 페이지는 보안 컨텍스트(HTTPS 또는 localhost)가 아니므로 브라우저가 키를 암호화해 저장할 수 없습니다',
+  'secureContext.indexedDbUnavailable': '이 브라우저는 IndexedDB를 지원하지 않아 기록 키를 저장할 수 없습니다',
+  'secureContext.keyStoreOpenFailed': '기록 키 저장소를 열 수 없습니다',
+  'secureContext.keyStoreAccessFailed': '기록 키 저장소를 읽거나 쓰지 못했습니다',
+  'secureContext.keyCreateFailed': '기록 키를 만들 수 없습니다',
+  'secureContext.keyStoreClearFailed': '기록 키 저장소를 지울 수 없습니다',
+  'secureContext.historyKeyUnreadable': '기록 키를 풀 수 없습니다(브라우저 키 저장소가 지워졌을 수 있습니다). 설정에서 이 기기를 다시 등록하세요',
+  'secureContext.historyKeyCorrupt': '기록 키가 손상되었습니다. 설정에서 이 기기를 다시 등록하세요',
+  'secureContext.deviceKeyUnreadable': '기기 키를 풀 수 없습니다(브라우저 키 저장소가 지워졌을 수 있습니다). 이 기기를 다시 페어링하세요',
+
   'settings.language': '언어',
   'settings.languageHint': '브라우저/시스템 언어를 자동으로 인식합니다. 지원하지 않는 언어는 영어로 표시됩니다.',
 

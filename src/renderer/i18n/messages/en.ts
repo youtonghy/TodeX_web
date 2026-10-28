@@ -361,6 +361,21 @@ export const en: Messages = {
   'iosUnsupported.repository': 'Open repository',
   'iosUnsupported.continue': 'Continue anyway',
 
+  // Non-secure context notice and browser key store errors (web-only)
+  'secureContext.title': 'HTTPS or localhost required',
+  'secureContext.body': 'This page was opened over plain HTTP from another address, which browsers do not treat as a secure context. TodeX Web needs one to generate and encrypt device keys, so the workbench cannot start here.',
+  'secureContext.hint': 'Serve TodeX Web over HTTPS (for example behind a reverse proxy with a certificate), or open it as http://localhost on the machine that runs it.',
+  'secureContext.guide': 'Self-hosting guide',
+  'secureContext.webCryptoUnavailable': 'This page is not a secure context (HTTPS or localhost), so the browser cannot encrypt and store keys',
+  'secureContext.indexedDbUnavailable': 'This browser does not support IndexedDB, so history keys cannot be saved',
+  'secureContext.keyStoreOpenFailed': 'Could not open the history key store',
+  'secureContext.keyStoreAccessFailed': 'Could not read or write the history key store',
+  'secureContext.keyCreateFailed': 'Could not create the history key',
+  'secureContext.keyStoreClearFailed': 'Could not clear the history key store',
+  'secureContext.historyKeyUnreadable': 'The history key cannot be unlocked (the browser key store may have been cleared). Register this device again in Settings',
+  'secureContext.historyKeyCorrupt': 'The history key is damaged. Register this device again in Settings',
+  'secureContext.deviceKeyUnreadable': 'The device key cannot be unlocked (the browser key store may have been cleared). Pair this device again',
+
   'settings.language': 'Language',
   'settings.languageHint': 'Detects the browser/system language automatically; unsupported languages fall back to English.',
 

@@ -361,6 +361,21 @@ export const ja: Messages = {
   'iosUnsupported.repository': 'リポジトリを開く',
   'iosUnsupported.continue': 'このまま続ける',
 
+  // 非セキュアコンテキストの案内とブラウザー鍵ストアのエラー（Web のみ）
+  'secureContext.title': 'HTTPS または localhost が必要です',
+  'secureContext.body': 'このページは別のアドレスから通常の HTTP で開かれているため、ブラウザーはセキュアコンテキストとして扱いません。TodeX Web はデバイス鍵の生成と暗号化にセキュアコンテキストを必要とするため、ここではワークベンチを起動できません。',
+  'secureContext.hint': 'TodeX Web を HTTPS で配信する（例：証明書付きのリバースプロキシの背後に置く）か、実行しているマシン上で http://localhost として開いてください。',
+  'secureContext.guide': 'セルフホストガイド',
+  'secureContext.webCryptoUnavailable': 'このページはセキュアコンテキスト（HTTPS または localhost）ではないため、ブラウザーは鍵を暗号化して保存できません',
+  'secureContext.indexedDbUnavailable': 'このブラウザーは IndexedDB に対応していないため、履歴の鍵を保存できません',
+  'secureContext.keyStoreOpenFailed': '履歴の鍵ストアを開けませんでした',
+  'secureContext.keyStoreAccessFailed': '履歴の鍵ストアの読み書きに失敗しました',
+  'secureContext.keyCreateFailed': '履歴の鍵を作成できませんでした',
+  'secureContext.keyStoreClearFailed': '履歴の鍵ストアを消去できませんでした',
+  'secureContext.historyKeyUnreadable': '履歴の鍵を解除できません（ブラウザーの鍵ストアが消去された可能性があります）。設定でこのデバイスを再登録してください',
+  'secureContext.historyKeyCorrupt': '履歴の鍵が破損しています。設定でこのデバイスを再登録してください',
+  'secureContext.deviceKeyUnreadable': 'デバイス鍵を解除できません（ブラウザーの鍵ストアが消去された可能性があります）。このデバイスを再度ペアリングしてください',
+
   'settings.language': '言語',
   'settings.languageHint': 'ブラウザ／システムの言語を自動認識します。対応していない言語は英語で表示されます。',
 

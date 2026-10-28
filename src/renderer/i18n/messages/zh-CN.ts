@@ -361,6 +361,21 @@ export const zhCN = {
   'iosUnsupported.repository': '前往代码仓库',
   'iosUnsupported.continue': '仍然继续',
 
+  // 非安全上下文提示与浏览器密钥库错误（仅 Web）
+  'secureContext.title': '需要 HTTPS 或 localhost',
+  'secureContext.body': '此页面通过普通 HTTP 从其他地址打开，浏览器不会将其视为安全上下文。TodeX Web 需要安全上下文来生成并加密设备密钥，因此无法在这里启动工作台。',
+  'secureContext.hint': '请通过 HTTPS 提供 TodeX Web（例如在配有证书的反向代理之后），或在运行它的机器上以 http://localhost 打开。',
+  'secureContext.guide': '自行部署指南',
+  'secureContext.webCryptoUnavailable': '当前页面不是安全上下文（HTTPS 或 localhost），浏览器无法加密保存密钥',
+  'secureContext.indexedDbUnavailable': '此浏览器不支持 IndexedDB，无法保存历史记录密钥',
+  'secureContext.keyStoreOpenFailed': '无法打开历史记录密钥库',
+  'secureContext.keyStoreAccessFailed': '历史记录密钥库读写失败',
+  'secureContext.keyCreateFailed': '无法创建历史记录密钥',
+  'secureContext.keyStoreClearFailed': '无法清除历史记录密钥库',
+  'secureContext.historyKeyUnreadable': '历史记录密钥无法解开（浏览器密钥库可能已被清除），请在设置中重新登记此设备',
+  'secureContext.historyKeyCorrupt': '历史记录密钥已损坏，请在设置中重新登记此设备',
+  'secureContext.deviceKeyUnreadable': '设备密钥无法解开（浏览器密钥库可能已被清除），请重新配对此设备',
+
   'settings.language': '语言',
   'settings.languageHint': '自动识别浏览器/系统语言；不支持的语言显示英文。',
 

@@ -5,6 +5,8 @@
 // origin can use the key but never read it out, and a copy of the sealed
 // records alone (backups, exported storage) is useless.
 
+import { t, type MessageKey } from '../i18n';
+
 const DB_NAME = 'todex.web.keys';
 const STORE = 'keys';
 const WRAP_KEY_ID = 'history-wrap-key.v1';
@@ -14,12 +16,12 @@ const secretId = (key: string) => `secret.v1.${key}`;
 type SealedSeed = { iv: Uint8Array; ct: ArrayBuffer };
 
 function openDatabase(): Promise<IDBDatabase> {
-  if (typeof indexedDB === 'undefined') return Promise.reject(new Error('此浏览器不支持 IndexedDB，无法保存历史记录密钥'));
+  if (typeof indexedDB === 'undefined') return Promise.reject(new Error(t('secureContext.indexedDbUnavailable')));
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, 1);
     request.onupgradeneeded = () => request.result.createObjectStore(STORE);
     request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error ?? new Error('无法打开历史记录密钥库'));
+    request.onerror = () => reject(request.error ?? new Error(t('secureContext.keyStoreOpenFailed')));
   });
 }
 
@@ -30,8 +32,8 @@ async function run<T>(mode: IDBTransactionMode, action: (store: IDBObjectStore) 
       const transaction = db.transaction(STORE, mode);
       const request = action(transaction.objectStore(STORE));
       transaction.oncomplete = () => resolve(request.result as T);
-      transaction.onerror = () => reject(transaction.error ?? new Error('历史记录密钥库读写失败'));
-      transaction.onabort = () => reject(transaction.error ?? new Error('历史记录密钥库读写失败'));
+      transaction.onerror = () => reject(transaction.error ?? new Error(t('secureContext.keyStoreAccessFailed')));
+      transaction.onabort = () => reject(transaction.error ?? new Error(t('secureContext.keyStoreAccessFailed')));
     });
   } finally {
     db.close();
@@ -44,7 +46,7 @@ let wrapKeyPromise: Promise<CryptoKey> | null = null;
 function wrapKey(): Promise<CryptoKey> {
   wrapKeyPromise ??= (async () => {
     // WebCrypto only exists in secure contexts (HTTPS, localhost).
-    if (!globalThis.crypto?.subtle) throw new Error('当前页面不是安全上下文（HTTPS 或 localhost），浏览器无法加密保存密钥');
+    if (!globalThis.crypto?.subtle) throw new Error(t('secureContext.webCryptoUnavailable'));
     const existing = await run<CryptoKey | undefined>('readonly', (store) => store.get(WRAP_KEY_ID));
     if (existing) return existing;
     const key = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
@@ -54,7 +56,7 @@ function wrapKey(): Promise<CryptoKey> {
       return key;
     } catch {
       const stored = await run<CryptoKey | undefined>('readonly', (store) => store.get(WRAP_KEY_ID));
-      if (!stored) throw new Error('无法创建历史记录密钥');
+      if (!stored) throw new Error(t('secureContext.keyCreateFailed'));
       return stored;
     }
   })().catch((error: unknown) => {
@@ -87,7 +89,7 @@ async function seal(id: string, plain: Uint8Array): Promise<void> {
 }
 
 /** `null` when absent; rejects with `unreadable` when the record cannot be opened. */
-async function unseal(id: string, unreadable: string): Promise<Uint8Array | null> {
+async function unseal(id: string, unreadable: MessageKey): Promise<Uint8Array | null> {
   if (memoryRecords) return memoryRecords.get(id) ?? null;
   const sealed = await run<SealedSeed | undefined>('readonly', (store) => store.get(id));
   if (!sealed) return null;
@@ -95,12 +97,14 @@ async function unseal(id: string, unreadable: string): Promise<Uint8Array | null
   try {
     return new Uint8Array(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: sealed.iv as BufferSource, additionalData: new TextEncoder().encode(id) }, key, sealed.ct));
   } catch {
-    throw new Error(unreadable);
+    throw new Error(t(unreadable));
   }
 }
 
-export function loadHistorySeed(profileId: string): Promise<Uint8Array | null> {
-  return unseal(seedId(profileId), '历史记录密钥无法解开（浏览器密钥库可能已被清除），请在设置中重新登记此设备');
+export async function loadHistorySeed(profileId: string): Promise<Uint8Array | null> {
+  const seed = await unseal(seedId(profileId), 'secureContext.historyKeyUnreadable');
+  if (seed && seed.length !== 32) throw new Error(t('secureContext.historyKeyCorrupt'));
+  return seed;
 }
 
 export function saveHistorySeed(profileId: string, seed: Uint8Array): Promise<void> {
@@ -108,7 +112,7 @@ export function saveHistorySeed(profileId: string, seed: Uint8Array): Promise<vo
 }
 
 export async function loadSealedSecret(key: string): Promise<string | null> {
-  const plain = await unseal(secretId(key), '设备密钥无法解开（浏览器密钥库可能已被清除），请重新配对此设备');
+  const plain = await unseal(secretId(key), 'secureContext.deviceKeyUnreadable');
   return plain ? new TextDecoder().decode(plain) : null;
 }
 
@@ -133,7 +137,7 @@ export function clearHistoryKeyStore(): Promise<void> {
   return new Promise((resolve, reject) => {
     const request = indexedDB.deleteDatabase(DB_NAME);
     request.onsuccess = () => resolve();
-    request.onerror = () => reject(request.error ?? new Error('无法清除历史记录密钥库'));
+    request.onerror = () => reject(request.error ?? new Error(t('secureContext.keyStoreClearFailed')));
     // Another tab still holds the database open; it is deleted once it closes.
     request.onblocked = () => resolve();
   });
