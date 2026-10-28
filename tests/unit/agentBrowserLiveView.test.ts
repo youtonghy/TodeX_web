@@ -6,6 +6,7 @@ import type { AgentBrowserFrame } from '@todex/protocol/agentDesktop';
 import { V2ApiClient } from '@todex/protocol/v2';
 import { AgentBrowserLiveView } from '../../src/renderer/components/AgentBrowserLiveView';
 import type { TodeXSession } from '../../src/renderer/session/useTodeXSession';
+import { withStores } from './helpers/sessionStores';
 
 let root: Root;
 let container: HTMLDivElement;
@@ -17,7 +18,7 @@ const action = (actionId: string, extra: Record<string, unknown> = {}) => ({
 });
 
 function session(listeners: Map<string, (frame: AgentBrowserFrame) => void>, unwatch = vi.fn()) {
-  return {
+  return withStores({
     settings: { serverUrl: 'https://backend.test', deviceSecret: '' },
     // The runtime is keyed by the local id; the backend knows the v2 id.
     conversations: [{ id: 'c', v2ConversationId: 'v2-c' }],
@@ -28,7 +29,7 @@ function session(listeners: Map<string, (frame: AgentBrowserFrame) => void>, unw
       listeners.set(conversationId, listener);
       return unwatch;
     },
-  } as unknown as TodeXSession;
+  }) as unknown as TodeXSession;
 }
 
 async function render(value: TodeXSession, isActive = true) {

@@ -11,6 +11,7 @@ import { REMOTE_UPLOAD_CHUNK_BYTES } from '@todex/protocol/ssh';
 import { TerminalStreamStore } from '@todex/protocol/terminalStream';
 import type { TodeXSession } from '../../src/renderer/session/useTodeXSession';
 import type { WorkbenchItem, WorkbenchRequest, WorkbenchTab } from '../../src/renderer/lib/panels';
+import { withStores } from './helpers/sessionStores';
 
 vi.hoisted(() => {
   window.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false, media: '', onchange: null });
@@ -113,14 +114,14 @@ describe('SSH workbench', () => {
       setRequests(current => current.filter(request => request.id > lastId));
     }, []);
     const onItems = useCallback((items: WorkbenchItem[]) => itemsChanged(items), []);
-    const session = {
+    const session = withStores({
       activeConversation: { id: 'c' }, activeWorkspace: { id: 'w', path: '/w', tenantId: 'local' },
       settings: { serverUrl: 'https://backend.test', deviceSecret: 'test-secret', tenantId: 'local' }, terminalById: terminals,
       connectionState: 'open', connectionHealth: { latencyMs: null }, openTerminalSession: open, terminalStreams: new TerminalStreamStore(),
       startTerminalSession: startTerminal, stopTerminalSession: vi.fn(), resizeTerminalSession: vi.fn(), sendTerminalInput: vi.fn(),
       settingsForBackend(this: { settings: unknown }) { return this.settings; }, backendConnections: [], v2ProvidersByBackend: {},
       activeBackendConnectionId: 'b', backendLinkStatus: { b: { state: 'open' } },
-    } as unknown as TodeXSession;
+    }) as unknown as TodeXSession;
     return createElement(WorkbenchPanel, {
       key: scopeKey, scopeKey, session, tab, onTabChange: setTab, sshMode: true,
       requests, onRequestsHandled: onHandled, onItemsChange: onItems,

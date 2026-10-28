@@ -8,6 +8,7 @@ import { WorkbenchPanel } from '../../src/renderer/screens/WorkbenchPanel';
 import { createAgentBrowserWatch, takeNewAgentBrowserTab } from '../../src/renderer/session/agentBrowserTabs';
 import type { TodeXSession } from '../../src/renderer/session/useTodeXSession';
 import type { WorkbenchRequest, WorkbenchTab } from '../../src/renderer/lib/panels';
+import { withStores } from './helpers/sessionStores';
 
 /** Stable like the session's own store, so terminal views are not rebuilt on every render. */
 const terminalStreams = new TerminalStreamStore();
@@ -84,7 +85,7 @@ describe('WorkbenchPanel agent browser tab', () => {
     pushRequest = (request) => setRequests(current => [...current, request]);
     setShown = setShownState;
     const onHandled = useCallback((lastId: number) => setRequests(current => current.filter(request => request.id > lastId)), []);
-    const session = {
+    const session = withStores({
       activeConversation: { id: conversationId }, activeWorkspace: { id: 'w', path: '/w', tenantId: 'local' },
       settings: { serverUrl: 'https://backend.test', deviceSecret: 'test-secret', tenantId: 'local' }, terminalById: {},
       connectionState: 'closed', connectionHealth: { latencyMs: null }, requestTerminalStatus: vi.fn(), openTerminalSession: vi.fn(), terminalStreams,
@@ -92,7 +93,7 @@ describe('WorkbenchPanel agent browser tab', () => {
       conversations: [{ id: conversationId, v2ConversationId: 'v2-browser' }], watchAgentBrowser,
       conversationRuntimeById: { [conversationId]: { desktopBrowser: runtime(1, 'a').desktopBrowser } as unknown as ConversationRuntime },
       settingsForBackend(this: { settings: unknown }) { return this.settings; }, backendConnections: [], backendLinkStatus: {}, v2ProvidersByBackend: {},
-    } as unknown as TodeXSession;
+    }) as unknown as TodeXSession;
     return createElement(WorkbenchPanel, { key: scopeKey, scopeKey, session, tab, onTabChange: setTab, shown, requests, onRequestsHandled: onHandled });
   }
   const render = async () => { await act(async () => { root.render(createElement(Harness)); }); };

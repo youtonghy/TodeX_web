@@ -8,6 +8,7 @@ import { ConversationPermissionActions, PermissionRequestCard } from '../../src/
 import { deviceIdentityFromSecret } from '@todex/protocol/deviceAuth';
 import type { TodeXSession } from '../../src/renderer/session/useTodeXSession';
 import { conversationPermissionMode } from '../../src/renderer/session/permissions';
+import { withStores } from './helpers/sessionStores';
 vi.hoisted(() => { window.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false, media: '', onchange: null }); });
 let root: Root;
 let container: HTMLDivElement;
@@ -21,7 +22,7 @@ beforeAll(() => {
 });
 afterEach(() => { act(() => root?.unmount()); container?.remove(); vi.useRealTimers(); });
 function render(provider = 'codex', readonly = false, missingCapabilities = false, modes?: string[], timeline: unknown[] = []) {
-  const session = {
+  const session = withStores({
     activeConversation: { id: 'c', workspaceId: 'w', provider, title: 'Test', mode: 'implement' },
     activeWorkspace: { id: 'w', path: '/tmp', ...(readonly ? { sandboxMode: 'read-only' } : {}) },
     connectionState: 'open', recoveringConversations: {}, openStatusByConversation: {}, settings: {}, timeline, pendingRequests: [], conversations: [], usageRecords: [], modelCatalog: [],
@@ -29,7 +30,7 @@ function render(provider = 'codex', readonly = false, missingCapabilities = fals
     applyConversationPermissionMode: vi.fn(async () => true), applyConversationWorkMode: vi.fn(async () => true),
     resolvePermissionMode: (conversation: never, workspace: never) => conversationPermissionMode(conversation, workspace, session.v2Providers),
     chatDrafts: {}, composerSelections: {}, composerAttachments: {}, getProviderCommandCatalog: vi.fn(), providerCommands: {}, refreshProviderCommands: vi.fn(), pendingPluginDrafts: {}, stoppingProviderRuntimes: {}, thinkingConversations: {}, submissionStatusByConversation: {}, conversationRuntimeById: {}, compactionByConversation: {}, providerModels: {}, providerImageInput: {}, contextUsageByConversation: {}, selectedSkills: {}, controlStatusByConversation: {}, turnIds: {},
-  } as unknown as TodeXSession;
+  }) as unknown as TodeXSession;
   if (missingCapabilities) delete session.v2Providers[0].capabilities.permissionConfig;
   container = document.createElement('div'); document.body.append(container); root = createRoot(container);
   act(() => root.render(createElement(React.StrictMode, null, createElement(ChatPanel, { session }))));

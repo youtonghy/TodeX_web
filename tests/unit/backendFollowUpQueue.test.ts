@@ -462,6 +462,7 @@ async function promptAndFail(socket: TestSocket, text: string, failure: Record<s
 
 it('leaves the rate-limit continuation to the daemon and reads the wait from its queue snapshot', async () => {
   const socket = await mount();
+  const listsOnOpen = framesOf(socket, 'conversation.queue.list').length;
   const resumeAt = '2026-10-06T05:30:00Z';
   await promptAndFail(socket, 'long task', { code: 'PROVIDER_UNAVAILABLE',
     message: "provider unavailable: You've hit your session limit · resets 5:30pm (Australia/Perth)" });
@@ -474,7 +475,8 @@ it('leaves the rate-limit continuation to the daemon and reads the wait from its
   // The daemon continues the prompt itself; a local copy would run twice and
   // the error text is not parsed into a local wait.
   expect(framesOf(socket, 'conversation.queue.add')).toHaveLength(0);
-  expect(framesOf(socket, 'conversation.queue.list')).toHaveLength(1); // only the one sent on open
+  // The failure asks the daemon for nothing: its snapshot already said it continues.
+  expect(framesOf(socket, 'conversation.queue.list')).toHaveLength(listsOnOpen);
   expect(session.chatDrafts.c).toBe('');
   expect(session.lastError).toBe(t('sess.sessionLimitReached', { reset: formatResetInstant(Date.parse(resumeAt)) }));
   // While the daemon waits, a new message joins its queue instead of starting a turn.

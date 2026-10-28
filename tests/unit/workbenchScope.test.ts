@@ -9,6 +9,7 @@ import { workbenchScopeKey } from '../../src/renderer/session/workbenchLayout';
 import { SETTINGS_STORAGE_KEY } from '../../src/renderer/session/helpers';
 import type { TodeXSession } from '../../src/renderer/session/useTodeXSession';
 import type { OpenPanelOptions, WorkbenchTab } from '../../src/renderer/lib/panels';
+import { withStores } from './helpers/sessionStores';
 
 vi.hoisted(() => {
   window.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false, media: '', onchange: null });
@@ -39,13 +40,13 @@ function Harness({ conversation, workspace, mode }: { conversation: string; work
   const consumed = useCallback(() => setTarget({}), []);
   const tabChanged = useCallback((next: WorkbenchTab) => { setTab(next); setTarget({}); }, []);
   requestOpen = (next, nextTarget) => { setTab(next); setTarget(nextTarget); };
-  const session = {
+  const session = withStores({
     activeConversation: { id: conversation }, activeWorkspace: { id: workspace, path: `/${workspace}` },
     settings: { serverUrl: 'https://backend.test', deviceSecret: 'test-secret' }, terminalById: terminals,
     connectionState: 'open', connectionHealth: { latencyMs: null }, openTerminalSession: openTerminal, terminalStreams,
     startTerminalSession: startTerminal, stopTerminalSession: stopTerminal, resizeTerminalSession: vi.fn(),
     settingsForBackend(this: { settings: unknown }) { return this.settings; }, backendConnections: [], backendLinkStatus: {}, v2ProvidersByBackend: {},
-  } as unknown as TodeXSession;
+  }) as unknown as TodeXSession;
   const scopeKey = scope(conversation, workspace, mode);
   return createElement(WorkbenchPanel, { key: scopeKey, scopeKey, session, tab, target, onTabChange: tabChanged, onTargetConsumed: consumed });
 }

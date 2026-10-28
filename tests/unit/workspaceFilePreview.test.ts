@@ -9,6 +9,7 @@ import { WorkspaceFilePreview, type PreviewFile, type WorkspaceFileSaveOutcome }
 import { buildConflictMergeDocument, conflictMarkersRemain } from '../../src/renderer/session/helpers';
 import type { TodeXSession } from '../../src/renderer/session/useTodeXSession';
 import type { OpenPanelOptions } from '../../src/renderer/lib/panels';
+import { withStores } from './helpers/sessionStores';
 
 vi.hoisted(() => {
   window.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false, media: '', onchange: null });
@@ -23,13 +24,13 @@ let stored: unknown;
 const storeGet = vi.fn(async () => stored);
 const storeSet = vi.fn(async () => undefined);
 const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB';
-const session = {
+const session = withStores({
   activeConversation: { id: 'conversation' },
   activeWorkspace: { id: 'workspace', path: '/workspace' },
   settings: { serverUrl: 'https://backend.test', deviceSecret: 'test-secret' },
   terminalById: {}, terminalStreams: new TerminalStreamStore(), connectionState: 'closed', connectionHealth: { latencyMs: null },
   settingsForBackend(this: { settings: unknown }) { return this.settings; }, backendConnections: [], backendLinkStatus: {}, v2ProvidersByBackend: {},
-} as unknown as TodeXSession;
+}) as unknown as TodeXSession;
 
 beforeAll(() => { Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true, React }); });
 beforeEach(() => {

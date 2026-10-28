@@ -5,6 +5,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { toast } from '../../src/renderer/components/ui/toast';
 // Behaviour the session-store split must keep (see the plan of 2026-10-29).
 import { useTodeXSession, type TodeXSession } from '../../src/renderer/session/useTodeXSession';
+import { useConversationTimeline } from '../../src/renderer/session/conversationStore';
 import { loadJson } from '../../src/renderer/lib/storage';
 import { defaultSettings, SETTINGS_STORAGE_KEY, WORKSPACES_STORAGE_KEY, CONVERSATIONS_STORAGE_KEY,
   ACTIVE_SELECTION_STORAGE_KEY, BACKEND_CONNECTIONS_STORAGE_KEY } from '../../src/renderer/session/helpers';
@@ -165,15 +166,16 @@ it('keeps the workspace and conversation lists when a periodic sync changes noth
   expect(session.conversations).toBe(conversations);
 });
 
-it('renders the session at most twice per streamed delta', async () => {
+it('renders the session at most once for a stream of deltas', async () => {
   const socket = await mount();
   await deliver(socket, frame('ca', HIGH_WATER + 1, 'turn.started', { turnId: 'live' }));
   renders = 0;
   for (let index = 2; index <= 11; index++) {
     await deliver(socket, frame('ca', HIGH_WATER + index, 'message.delta', { turnId: 'live', content: `d${index} ` }));
   }
-  // Measured before the store split (20); later steps must not exceed it.
-  expect(renders).toBeLessThanOrEqual(20);
+  // 20 before the session stores; deltas now land in the store, and the
+  // conversation record takes its new high-water mark at most every 2 s.
+  expect(renders).toBeLessThanOrEqual(1);
 });
 
 const draft = { id: 'cd', workspaceId: 'wa', title: 'New conversation', sessionId: 'cdxs_draft', threadId: '',
@@ -216,4 +218,30 @@ it('keeps the draft and sends nothing legacy when no agent is available', async 
   await act(async () => { session.submitChat('cd'); await vi.advanceTimersByTimeAsync(50); });
   expect(session.chatDrafts.cd).toBe('hello');
   expect(sentTypes(socket).filter((type) => type.startsWith('codex.'))).toEqual([]);
+});
+
+it('re-renders a conversation view only for its own conversation\'s rows', async () => {
+  let probeRenders = 0;
+  let rows: unknown[] = [];
+  const Probe = React.memo(function Probe({ stores }: { stores: TodeXSession['stores'] }) {
+    rows = useConversationTimeline(stores, 'ca');
+    probeRenders += 1;
+    return null;
+  });
+  function Harness() { session = useTodeXSession(() => {}); return createElement(Probe, { stores: session.stores }); }
+  container = document.createElement('div'); document.body.append(container); root = createRoot(container);
+  await act(async () => { root.render(createElement(Harness)); });
+  await act(async () => { session.connect(); });
+  const socket = TestSocket.instances.at(-1)!;
+  await act(async () => { socket.open(); await vi.advanceTimersByTimeAsync(200); });
+  await deliver(socket, frame('cb', HIGH_WATER + 1, 'turn.started', { turnId: 'bg' }));
+  const before = probeRenders;
+  for (let index = 2; index <= 6; index++) {
+    await deliver(socket, frame('cb', HIGH_WATER + index, 'message.delta', { turnId: 'bg', content: `b${index} ` }));
+  }
+  expect(probeRenders).toBe(before);
+  await deliver(socket, frame('ca', HIGH_WATER + 1, 'turn.started', { turnId: 'live' }));
+  await deliver(socket, frame('ca', HIGH_WATER + 2, 'message.delta', { turnId: 'live', content: 'mine' }));
+  expect(probeRenders).toBeGreaterThan(before);
+  expect(JSON.stringify(rows)).toContain('mine');
 });
