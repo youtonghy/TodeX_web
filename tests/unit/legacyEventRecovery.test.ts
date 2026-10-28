@@ -25,3 +25,15 @@ it('does not advance the cursor when projection fails', () => {
   expect(project).toHaveBeenCalledOnce();
   expect(cursor).toBe(1);
 });
+
+it('asks for a replay again once the socket that was asked closes', () => {
+  const recovery = new LegacyEventRecovery<string>();
+  const replay = vi.fn(() => true);
+  const receive = (sequence: number) => recovery.receive('s', sequence, `${sequence}`, () => 0, () => {}, () => {}, replay);
+  receive(2);
+  receive(3);
+  expect(replay).toHaveBeenCalledTimes(1);
+  recovery.resetRequests();
+  receive(4);
+  expect(replay).toHaveBeenCalledTimes(2);
+});

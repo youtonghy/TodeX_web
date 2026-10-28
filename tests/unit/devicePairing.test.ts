@@ -245,7 +245,7 @@ it('rejects a reveal the server does not accept, before showing a code', async (
     if (path.endsWith('/create')) return createResponse(String(init?.body));
     return response({ code: 'CONFLICT' }, 409);
   });
-  await expect(beginDevicePairing('http://localhost', 'Web', device)).rejects.toThrow('409');
+  await expect(beginDevicePairing('http://localhost', 'Web', device)).rejects.toThrow('此配对请求已被处理');
 });
 
 it('binds the offered transport key: a mismatching credential pins nothing', async () => {

@@ -20,6 +20,15 @@ it('reads the selected workspace using an encoded query and device authenticatio
   expect((options.headers as Record<string, string>)['x-todex-auth-sig']).toBeTruthy();
 });
 
+it('keeps a sub-path server URL (a proxied backend) once in the request path', async () => {
+  const snapshot = { repositoryPath: '/test', initialized: true, currentBranch: 'main', branches: [], worktrees: [], dirty: false };
+  const fetcher = vi.fn(async () => new Response(JSON.stringify(snapshot)));
+  vi.stubGlobal('fetch', fetcher);
+  await readGitWorkspace({ ...settings, serverUrl: 'http://localhost:4173/backend/office' }, '/test');
+  const [url] = fetcher.mock.calls[0] as unknown as [string, RequestInit];
+  expect(new URL(url).pathname).toBe('/backend/office/v2/git/workspace');
+});
+
 it('posts the operation as structured JSON with the workspace and no shell interpolation', async () => {
   const result = { repositoryPath: '/test', action: 'create-branch', output: 'Created branch' };
   const fetcher = vi.fn(async () => new Response(JSON.stringify(result)));
