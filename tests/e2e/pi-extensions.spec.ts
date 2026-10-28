@@ -66,7 +66,7 @@ test('renders Pi plugin state, protects drafts, routes commands and stops the ru
   await page.goto('/app');
   const composer = page.getByRole('textbox', { name: '消息输入' });
   await expect(composer).toBeVisible();
-  await expect.poll(() => requests.some(item => item.type === 'session.resume')).toBe(true);
+  await expect.poll(() => requests.some(item => item.type === 'conversation.subscribe')).toBe(true);
   publish('provider.runtime', { provider: 'pi', runtimeId: 'runtime-browser', status: 'ready' });
   const ui = (method: string, values: Record<string, unknown>, delivery = 'live') => publish('extension.ui', { provider: 'pi', runtimeId: 'runtime-browser', scope: 'session', method, ...values }, delivery);
   ui('setTitle', { title: '插件后台' });

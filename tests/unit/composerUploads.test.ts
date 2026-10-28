@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { attachmentToken, codexInputFromComposer, composerTokensInText, expandTextCapsules, liveComposerAttachments, type ComposerAttachmentDraft } from '../../src/renderer/session/helpers';
+import { attachmentToken, composerTokensInText, expandTextCapsules, liveComposerAttachments, type ComposerAttachmentDraft } from '../../src/renderer/session/helpers';
 import { prepareSentAttachments } from '../../src/renderer/session/sentAttachments';
 
 function attachment(partial: Partial<ComposerAttachmentDraft>): ComposerAttachmentDraft {
@@ -29,16 +29,5 @@ describe('pasted-text capsules', () => {
   it('are sent as file receipts if one ever reaches the receipt list', async () => {
     const [receipt] = await prepareSentAttachments([capsule]);
     expect(receipt).toMatchObject({ kind: 'file', name: '粘贴的文本', textContent: 'line one\nline two' });
-  });
-});
-
-describe('uploaded attachments on the local Codex path', () => {
-  it('are named by their path on the backend', () => {
-    const image = attachment({ id: 'i1', kind: 'image', name: 'shot.png', mimeType: 'image/png', uploadedPath: '/tmp/todex/file/u2/shot.png' });
-    const file = attachment({ id: 'f1', name: 'report.pdf', mimeType: 'application/pdf', uploadedPath: '/tmp/todex/file/u1/report.pdf' });
-    expect(codexInputFromComposer('look', [image, file]).slice(1)).toEqual([
-      { type: 'localImage', path: '/tmp/todex/file/u2/shot.png' },
-      { type: 'text', text: '[附件: report.pdf]\nPath: /tmp/todex/file/u1/report.pdf' },
-    ]);
   });
 });

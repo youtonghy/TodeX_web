@@ -175,3 +175,45 @@ it('renders the session at most twice per streamed delta', async () => {
   // Measured before the store split (20); later steps must not exceed it.
   expect(renders).toBeLessThanOrEqual(20);
 });
+
+const draft = { id: 'cd', workspaceId: 'wa', title: 'New conversation', sessionId: 'cdxs_draft', threadId: '',
+  mode: 'implement' as const, preview: '', createdAt: 1, updatedAt: 1 };
+const storedWith = (extra: object[], active = 'cd') => vi.mocked(loadJson).mockImplementation(async (key, fallback) => ({
+  [SETTINGS_STORAGE_KEY]: { ...defaultSettings, serverUrl: 'http://127.0.0.1' },
+  [BACKEND_CONNECTIONS_STORAGE_KEY]: [profile],
+  [WORKSPACES_STORAGE_KEY]: [workspace],
+  [CONVERSATIONS_STORAGE_KEY]: [conversation('ca'), ...extra],
+  [ACTIVE_SELECTION_STORAGE_KEY]: { workspaceId: 'wa', conversationId: active },
+}[key] ?? fallback) as never);
+
+it('gives a draft without an agent the backend\'s agent, in place', async () => {
+  storedWith([draft]);
+  const fetchImpl = vi.mocked(fetch).getMockImplementation()!;
+  vi.mocked(fetch).mockImplementation(async (input, init) => {
+    if (new URL(String(input)).pathname === '/v2/providers') {
+      return new Response(JSON.stringify({ providers: [{ id: 'codex', displayName: 'Codex', available: true, profiles: ['default'],
+        capabilities: { nativeResume: true, cancel: true, permissions: true, toolEvents: true, nativeSkills: true, nativeMcp: true,
+          managedMcp: true, modelSelection: true, permissionConfig: { modes: ['ask'], defaultMode: 'ask', supportsPlan: true } },
+        models: [] }] }), { status: 200 });
+    }
+    return fetchImpl(input, init);
+  });
+  function Harness() { session = useTodeXSession(() => {}); return null; }
+  container = document.createElement('div'); document.body.append(container); root = createRoot(container);
+  await act(async () => { root.render(createElement(Harness)); });
+  await act(async () => { session.connect(); });
+  await act(async () => { TestSocket.instances.at(-1)!.open(); await vi.advanceTimersByTimeAsync(200); });
+  const adopted = session.conversations.find((item) => item.id === 'cd');
+  expect(adopted?.provider).toBe('codex');
+  expect(adopted?.legacyCodex).toBeUndefined();
+});
+
+it('keeps the draft and sends nothing legacy when no agent is available', async () => {
+  storedWith([draft], 'ca');
+  const socket = await mount();
+  await act(async () => { session.selectConversation('wa', 'cd'); await vi.advanceTimersByTimeAsync(0); });
+  await act(async () => { session.setConversationChatDraft('cd', 'hello'); await vi.advanceTimersByTimeAsync(0); });
+  await act(async () => { session.submitChat('cd'); await vi.advanceTimersByTimeAsync(50); });
+  expect(session.chatDrafts.cd).toBe('hello');
+  expect(sentTypes(socket).filter((type) => type.startsWith('codex.'))).toEqual([]);
+});

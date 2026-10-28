@@ -128,7 +128,7 @@ function render(input: Profile = { serverUrl: 'https://backend.test', encryption
 async function connect() { await act(async () => { session.connect(); }); }
 const requestedPaths = () => fetchMock.mock.calls.map(([url]) => new URL(String(url)).pathname);
 
-it('a pinned key opens a tv=2 socket, verifies it with a sealed ping and only then resumes', async () => {
+it('a pinned key opens a tv=2 socket and verifies it with a sealed ping before it counts as open', async () => {
   render(); await connect();
   expect(requestedPaths()).toEqual(['/v2/transport-policy']);
   expect(vi.mocked(fetchMock).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(probeBackendConnection).mock.invocationCallOrder[0]);
@@ -150,7 +150,8 @@ it('a pinned key opens a tv=2 socket, verifies it with a sealed ping and only th
   expect(session.connectionState).toBe('connecting');
   await act(async () => socket.pong());
   expect(session.connectionState).toBe('open');
-  expect(socket.texts.some((text) => text.includes('session.resume'))).toBe(true);
+  // The legacy Codex session resume is gone.
+  expect(socket.texts.some((text) => text.includes('session.resume'))).toBe(false);
   expect(socket.raw.every((frame) => frame instanceof Uint8Array)).toBe(true);
 });
 
@@ -281,7 +282,7 @@ it('a loopback backend without a key stays plaintext and skips the encrypted cha
   await act(async () => socket.open());
   expect(session.connectionState).toBe('open');
   expect(socket.texts.some((text) => text.includes('server.ping'))).toBe(false);
-  expect(socket.texts.some((text) => text.includes('session.resume'))).toBe(true);
+  expect(socket.texts.some((text) => text.includes('session.resume'))).toBe(false);
 });
 
 it('keeps every backend connected in parallel', async () => {

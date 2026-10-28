@@ -246,7 +246,7 @@ it('never starts the legacy Codex adapter for v2 conversations', async () => {
   expect(sentTypes(socket)).not.toContain('codex.local.start');
 });
 
-it('starts a legacy thread adapter once per connection, even when the start fails', async () => {
+it('keeps stored local Codex history read-only and never starts the old adapter', async () => {
   const legacy = { id: 'cl', workspaceId: 'wa', title: 'legacy', sessionId: 'cdxs_legacy', threadId: 'thread-1',
     mode: 'implement' as const, preview: 'native history', createdAt: 1, updatedAt: 1 };
   vi.mocked(loadJson).mockImplementation(async (key, fallback) => ({
@@ -257,20 +257,13 @@ it('starts a legacy thread adapter once per connection, even when the start fail
     [ACTIVE_SELECTION_STORAGE_KEY]: { workspaceId: 'wa', conversationId: 'ca' },
   }[key] ?? fallback) as never);
   const socket = await mount();
-  // Answer liveness pings so the watchdog keeps this connection.
-  socket.send.mockImplementation((text: string) => {
-    const message = JSON.parse(text) as { id: string; type: string };
-    if (message.type === 'server.ping') {
-      queueMicrotask(() => socket.onmessage?.({ data: JSON.stringify({ type: 'server.result', id: message.id, payload: {} }) }));
-    }
-  });
   await act(async () => { session.selectConversation('wa', 'cl'); await vi.advanceTimersByTimeAsync(50); });
-  expect(sentTypes(socket).filter((type) => type === 'codex.local.start')).toHaveLength(1);
-  // The start times out (state 'error'); that must not trigger another one.
-  const sockets = TestSocket.instances.length;
-  await act(async () => { await vi.advanceTimersByTimeAsync(16_000); });
-  expect(session.lastError).toBe('本地会话启动超时，请先确认 Codex 本地 adapter 可用。');
-  expect(TestSocket.instances).toHaveLength(sockets);
-  expect(session.conversations.find((item) => item.id === 'cl')?.localAdapterState).toBe('error');
-  expect(sentTypes(socket).filter((type) => type === 'codex.local.start')).toHaveLength(1);
+  expect(session.conversations.find((item) => item.id === 'cl')?.legacyCodex).toBe(true);
+  await act(async () => {
+    session.setConversationChatDraft('cl', 'hello');
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  await act(async () => { session.submitChat('cl'); await vi.advanceTimersByTimeAsync(50); });
+  expect(session.lastError).toBe('此本地 Codex 会话为只读，请新建会话继续。');
+  expect(sentTypes(socket).filter((type) => type.startsWith('codex.'))).toEqual([]);
 });
