@@ -33,9 +33,17 @@ COPY package.json pnpm-lock.yaml ./
 # the @zowe keyring helper it pulls in has no credential store here. pnpm 11
 # errors on unlisted build scripts, so both must be denied explicitly.
 RUN printf "allowBuilds:\n  esbuild: true\n  '@heroui-pro/react': false\n  '@zowe/secrets-for-zowe-sdk': false\n" > pnpm-workspace.yaml
+# hpsetup upgrades @heroui-pro/react to @latest unless package.json pins an
+# exact version. Pin the locked one (in both manifests, so the frozen install
+# still matches) to keep image builds reproducible; bump it with the lockfile.
+ARG HEROUI_PRO_VERSION=1.0.0-beta.8
+RUN sed -i "s|\"@heroui-pro/react\": \"\\^$HEROUI_PRO_VERSION\"|\"@heroui-pro/react\": \"$HEROUI_PRO_VERSION\"|" package.json \
+    && sed -i "/^      '@heroui-pro\/react':\$/{n;s|specifier: \\^$HEROUI_PRO_VERSION\$|specifier: $HEROUI_PRO_VERSION|}" pnpm-lock.yaml \
+    && grep -q "\"@heroui-pro/react\": \"$HEROUI_PRO_VERSION\"" package.json \
+    && grep -q "specifier: $HEROUI_PRO_VERSION\$" pnpm-lock.yaml
 RUN --mount=type=cache,id=todex-web-pnpm,target=/pnpm/store \
     pnpm install --frozen-lockfile --store-dir /pnpm/store
-ARG HPSETUP_VERSION=latest
+ARG HPSETUP_VERSION=4.7.4
 RUN --mount=type=secret,id=HEROUI_KEY,env=HEROUI_KEY \
     pnpm dlx "hpsetup@$HPSETUP_VERSION" "$HEROUI_KEY"
 # Protocol sources resolve their @noble/* imports through this node_modules.
@@ -45,8 +53,8 @@ COPY --from=todexprotocol src /build/TodeX_protocol/src
 
 FROM deps AS build
 COPY . .
-# hpsetup rewrites these manifests (it installs @heroui-pro/react@latest plus
-# the peer deps the licensed bundle needs). Keep the deps-stage copies so they
+# hpsetup rewrites these manifests (it installs the pinned @heroui-pro/react
+# plus the peer deps the licensed bundle needs). Keep the deps-stage copies so they
 # stay in sync with node_modules — with the repo copies restored, pnpm's
 # verifyDepsBeforeRun (default: install) would reinstall the unlicensed npm
 # stub over the licensed package contents before lint/typecheck.
