@@ -190,6 +190,49 @@ describe('GET /api/releases', () => {
     }, { releasesHandler });
   });
 
+  it('backs off after a failed refresh while serving the stale catalog', async () => {
+    let failing = false;
+    const mockFetch = vi.fn(async (input: unknown) => {
+      if (failing) throw new Error('rate limited');
+      const repository = String(input).includes('TodeX_desktop') ? 'youtonghy/TodeX_desktop' : 'youtonghy/TodeX_backend';
+      return githubResponse([githubRelease(repository, 'v1.0.0')]);
+    });
+    let now = 0;
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const releasesHandler = createReleaseCatalogHandler({ fetch: mockFetch as unknown as typeof fetch, now: () => now, ttlMs: 1_000 });
+    try {
+      await withServer(async (origin) => {
+        expect((await fetch(`${origin}/api/releases`)).status).toBe(200);
+        expect(mockFetch).toHaveBeenCalledTimes(2);
+
+        failing = true;
+        now = 2_000;
+        expect((await (await fetch(`${origin}/api/releases`)).json()).stale).toBe(true);
+        const afterFailure = mockFetch.mock.calls.length;
+
+        // Inside the 60 s backoff: no new GitHub request, still the stale catalog.
+        now = 30_000;
+        expect((await (await fetch(`${origin}/api/releases`)).json()).stale).toBe(true);
+        expect(mockFetch).toHaveBeenCalledTimes(afterFailure);
+
+        // After it: one retry, which fails again and doubles the wait.
+        now = 63_000;
+        await fetch(`${origin}/api/releases`);
+        expect(mockFetch).toHaveBeenCalledTimes(afterFailure + 1);
+        now = 63_000 + 100_000;
+        await fetch(`${origin}/api/releases`);
+        expect(mockFetch).toHaveBeenCalledTimes(afterFailure + 1);
+
+        failing = false;
+        now = 63_000 + 121_000;
+        const recovered = await fetch(`${origin}/api/releases`);
+        expect((await recovered.json()).stale).toBe(false);
+      }, { releasesHandler });
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it('returns 503 RELEASES_UNAVAILABLE when the first fetch fails', async () => {
     const mockFetch = vi.fn(async () => { throw new Error('network down'); });
     const releasesHandler = createReleaseCatalogHandler({ fetch: mockFetch as unknown as typeof fetch });

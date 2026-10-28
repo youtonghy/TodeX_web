@@ -19,6 +19,11 @@ const repositories: Record<(typeof products)[number], string> = {
 
 const DEFAULT_TTL_MS = 10 * 60 * 1000;
 const DEFAULT_TIMEOUT_MS = 10_000;
+// After a failed refresh, GitHub is not asked again for this long, doubling
+// per consecutive failure up to the cap (keeps an outage or a rate limit from
+// turning every page view into an outbound request).
+const FAILURE_BACKOFF_MS = 60_000;
+const MAX_FAILURE_BACKOFF_MS = 10 * 60 * 1000;
 const STABLE_TAG = /^v\d+\.\d+\.\d+$/;
 
 type GitHubAsset = { name: string; browser_download_url: string; size: number };
@@ -92,7 +97,8 @@ export async function fetchReleaseCatalog(options: ReleaseCatalogOptions = {}): 
 
 // Serves GET /api/releases with an in-memory cache. Cold or expired requests
 // share one in-flight GitHub fetch; a failed refresh falls back to the last
-// good catalog flagged as stale, or to 503 when nothing was ever fetched.
+// good catalog flagged as stale, or to 503 when nothing was ever fetched, and
+// further refreshes wait out an exponential backoff.
 export function createReleaseCatalogHandler(options: ReleaseCatalogOptions = {}) {
   const ttlMs = options.ttlMs ?? DEFAULT_TTL_MS;
   const now = options.now ?? Date.now;
@@ -104,9 +110,22 @@ export function createReleaseCatalogHandler(options: ReleaseCatalogOptions = {})
   };
   let cache: { catalog: ReleaseCatalog; expiresAt: number } | null = null;
   let inFlight: Promise<ReleaseCatalog> | null = null;
+  let failure: { error: unknown; retryAt: number; count: number } | null = null;
 
   const refresh = (): Promise<ReleaseCatalog> => {
-    inFlight ??= fetchReleaseCatalog(fetchOptions).finally(() => { inFlight = null; });
+    if (failure && failure.retryAt > now()) return Promise.reject(failure.error);
+    inFlight ??= fetchReleaseCatalog(fetchOptions)
+      .then((catalog) => {
+        failure = null;
+        return catalog;
+      }, (error: unknown) => {
+        const count = (failure?.count ?? 0) + 1;
+        const backoff = Math.min(FAILURE_BACKOFF_MS * 2 ** (count - 1), MAX_FAILURE_BACKOFF_MS);
+        failure = { error, retryAt: now() + backoff, count };
+        console.warn(`[releases] refresh failed, retrying in ${Math.round(backoff / 1000)}s:`, error instanceof Error ? error.message : error);
+        throw error;
+      })
+      .finally(() => { inFlight = null; });
     return inFlight;
   };
 
@@ -136,7 +155,6 @@ export function createReleaseCatalogHandler(options: ReleaseCatalogOptions = {})
       send(response, 200, { ...catalog, stale: false }, 'public, max-age=300', head);
     }).catch((error: unknown) => {
       if (cached) {
-        console.warn('[releases] refresh failed, serving the last good catalog:', error instanceof Error ? error.message : error);
         send(response, 200, { ...cached.catalog, stale: true }, 'no-store', head);
         return;
       }
