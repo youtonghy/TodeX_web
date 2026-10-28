@@ -4,6 +4,7 @@ import { motion, useReducedMotion } from 'motion/react';
 import { Dialog, Modal as AriaModal, ModalOverlay } from 'react-aria-components';
 import { Input } from '@/components/base/input/input';
 import { Button } from '@/components/base/buttons/button';
+import { SegmentedControl, SegmentedControlItem } from '@/components/base/segmented-control/segmented-control';
 import { Select, SelectItem } from '@/components/base/select/select';
 import { useDirection } from '@/components/foundations/direction/direction';
 import { Alert } from '@/components/ui/alert';
@@ -30,7 +31,12 @@ import { ChatPanel } from './screens/ChatPanel';
 import { HistoryRecoveryNotice } from './components/HistoryRecoveryNotice';
 import { Field } from './components/Field';
 import { connectionStateLabel, conversationDisplayTitle, createWorkspaceDirectory, fetchWorkspaceDirectorySnapshot, isUnmountedPathError } from './session/helpers';
+import { pickedHostPathToBackend } from './session/hostPaths';
 import { WorkspaceMountHint } from './components/WorkspaceMountHint';
+import { platform } from './platform';
+import { slots } from './platform/slots';
+import { isLocalBackendUrl } from '@todex/protocol/mobileParity';
+import { mapHostPathToBackend } from '@todex/protocol/pathMapping';
 import { isWorkbenchTab, panelFromRoute, type DesktopPanel, type OpenPanelOptions, type WorkbenchItem, type WorkbenchRequest, type WorkbenchTab } from './lib/panels';
 import type { RemoteFilesBinding } from './session/fileSources';
 import { ShortcutHint, useAppShortcuts, useShortcutHintTracking } from './lib/shortcuts';
@@ -113,8 +119,9 @@ function AsideSheet({ isOpen, onOpenChange, label, children }: {
   );
 }
 
-const LAYOUT_AUTO_SAVE_ID = 'todex.web.appLayout.v1';
-const LAYOUT_OPEN_STORAGE_KEY = 'todex.web.layoutOpen.v3';
+// Names kept from before the shared platform interface, so layouts survive.
+const LAYOUT_AUTO_SAVE_ID = platform.kind === 'desktop' ? 'todex-desktop-app-layout' : 'todex.web.appLayout.v1';
+const LAYOUT_OPEN_STORAGE_KEY = `${platform.storagePrefix}.layoutOpen.v3`;
 
 type LayoutOpenState = {
   sidebarOpen: boolean;
@@ -127,18 +134,18 @@ function applyTheme(dark: boolean) {
 }
 
 function readLayoutOpen(): LayoutOpenState {
-  // A first visit on a wide screen starts with the right panel open.
-  const desktopDefault = typeof window !== 'undefined' && window.matchMedia('(min-width: 1025px)').matches;
+  // A first web visit on a wide screen starts with the right panel open.
+  const wideDefault = platform.kind === 'web' && typeof window !== 'undefined' && window.matchMedia('(min-width: 1025px)').matches;
   try {
     const raw = window.localStorage.getItem(LAYOUT_OPEN_STORAGE_KEY);
-    if (!raw) return { sidebarOpen: true, asideOpen: desktopDefault };
+    if (!raw) return { sidebarOpen: true, asideOpen: wideDefault };
     const parsed = JSON.parse(raw) as Partial<LayoutOpenState>;
     return {
       sidebarOpen: parsed.sidebarOpen !== false,
       asideOpen: parsed.asideOpen === true,
     };
   } catch {
-    return { sidebarOpen: true, asideOpen: desktopDefault };
+    return { sidebarOpen: true, asideOpen: wideDefault };
   }
 }
 
@@ -185,6 +192,8 @@ export function App() {
   const openPanelHandlerRef = useRef<(name: string, params?: OpenPanelOptions) => void>(() => {});
   const forwardOpenPanel = useCallback((name: string, params?: OpenPanelOptions) => openPanelHandlerRef.current(name, params), []);
   const session = useTodeXSession(forwardOpenPanel);
+  const { AppOverlays } = slots;
+  slots.useSessionEffects(session);
   // The SSH view swaps the main content but keeps sidebar and Workbench; its
   // Workbench tabs (SSH terminals, remote files) live in a per-backend scope.
   const sshActive = panel === 'ssh';
@@ -274,7 +283,7 @@ export function App() {
     }
     panelScopeRef.current = scopeKey;
     setSlashCommand(params?.command);
-    setPanelTarget({ filePath: params?.filePath });
+    setPanelTarget({ url: params?.url, filePath: params?.filePath });
     setPanel(next);
     if (isWorkbenchTab(next)) {
       setWorkbenchTab(next);
@@ -309,6 +318,10 @@ export function App() {
   }, [persistAsideOpen, queueWorkbenchRequest]);
   const openRemoteFiles = useCallback((remote: RemoteFilesBinding) => {
     queueWorkbenchRequest(id => ({ id, kind: 'remote-files', remote }));
+    persistAsideOpen(true);
+  }, [persistAsideOpen, queueWorkbenchRequest]);
+  const openBrowserTab = useCallback((url: string) => {
+    queueWorkbenchRequest(id => ({ id, kind: 'browser', url }));
     persistAsideOpen(true);
   }, [persistAsideOpen, queueWorkbenchRequest]);
   const closeWorkbenchItem = useCallback((itemId: string) => queueWorkbenchRequest(id => ({ id, kind: 'close', itemId })), [queueWorkbenchRequest]);
@@ -370,6 +383,18 @@ export function App() {
     setPanelTarget({});
   }, [setWorkbenchTab, setPanelTarget]);
 
+  // Cmd+W closes the active workbench tab when the aside is showing (the
+  // desktop otherwise closes the window, as the platform shortcut does).
+  const workbenchCloseRef = useRef<() => boolean>(() => false);
+  const asideOpenRef = useRef(asideOpen);
+  asideOpenRef.current = asideOpen;
+  useEffect(() => platform.app.onCloseShortcut(() => asideOpenRef.current && workbenchCloseRef.current()), []);
+
+  slots.useAppEffects((section) => {
+    setSettingsSectionRequest({ section, at: Date.now() });
+    setPanel('settings');
+  });
+
   useEffect(() => {
     const reportStorageFailure = () => toast.danger(t('app.storageQuota'));
     window.addEventListener('todex-storage-error', reportStorageFailure);
@@ -410,13 +435,13 @@ export function App() {
     },
   });
 
-  useEffect(() => window.todexWeb.theme.onUpdated(applyTheme), []);
+  useEffect(() => platform.theme.onUpdated(applyTheme), []);
 
   // Hand the light/dark/system choice to the platform, then read the result
   // (`onUpdated` covers later system changes while following the system).
   useEffect(() => {
-    window.todexWeb.theme.setSource(themeSource);
-    void window.todexWeb.theme.shouldUseDark().then(applyTheme);
+    platform.theme.setSource(themeSource);
+    void platform.theme.shouldUseDark().then(applyTheme);
   }, [themeSource]);
 
   // The same title the sidebar shows (not the raw provider-name default).
@@ -426,7 +451,7 @@ export function App() {
     document.title = windowConversationTitle ? `TodeX · ${windowConversationTitle} · ${status}` : `TodeX · ${status}`;
   }, [windowConversationTitle, session.connectionState]);
 
-  const insetChrome = window.todexWeb.app.windowChrome === 'hidden-inset';
+  const insetChrome = platform.windowChrome === 'hidden-inset';
   const settingsOpen = panel === 'settings';
   // The "no recovery key" notice opened settings to set one up.
   const [historyRecoverySetup, setHistoryRecoverySetup] = useState(false);
@@ -434,7 +459,7 @@ export function App() {
   // A refused connection's re-pair action opened settings to pair again.
   const [repairPairing, setRepairPairing] = useState(false);
   useEffect(() => { if (!settingsOpen) setRepairPairing(false); }, [settingsOpen]);
-  // A category to show (About, from the About route).
+  // A category to show (About, from the update menu or the About route).
   useEffect(() => { if (!settingsOpen) setSettingsSectionRequest(undefined); }, [settingsOpen]);
   const modalPanel = settingsOpen;
   const overlayPanel = panelScopeRef.current === scopeKey && panel && panel !== 'kanban' && panel !== 'profile' && panel !== 'ssh' && !modalPanel && !isWorkbenchTab(panel) ? panel : null;
@@ -450,7 +475,7 @@ export function App() {
             onBack={() => setPanel(workbenchTab)}
           />
         ) : (
-          <WorkbenchPanel key={scopeKey} scopeKey={scopeKey} shown={asideShown} session={session} tab={workbenchTab} target={panelTarget} onTabChange={changeWorkbenchTab} onTargetConsumed={consumePanelTarget}
+          <WorkbenchPanel key={scopeKey} scopeKey={scopeKey} shown={asideShown} session={session} tab={workbenchTab} target={panelTarget} onTabChange={changeWorkbenchTab} onTargetConsumed={consumePanelTarget} closeRequestRef={workbenchCloseRef}
             sshMode={sshActive} sshBackendId={sshActive ? sshBackendId : undefined} requests={workbenchRequests} onRequestsHandled={workbenchRequestsHandled} onItemsChange={sshActive ? setWorkbenchItems : undefined} />
         )}
       </PanelBoundary>
@@ -512,6 +537,7 @@ export function App() {
           onOpenSshTerminal={openSshTerminal}
           onOpenRemoteFiles={openRemoteFiles}
           onCloseWorkbenchItem={closeWorkbenchItem}
+          onOpenBrowser={slots.BrowserPane ? openBrowserTab : undefined}
         />
       </PanelBoundary>
     ) : session.historyEncryption.recoveryNoticeVisible ? (
@@ -661,6 +687,7 @@ export function App() {
         onRepair={() => { setRepairPairing(true); setPanel('settings'); }} />
       <DesktopAlertHost />
       {session.hydrated ? <SshLoginPrompter session={session} /> : null}
+      {AppOverlays ? <AppOverlays session={session} /> : null}
       {session.hydrated ? (
         shell
       ) : (
@@ -682,6 +709,11 @@ export function App() {
         workspace={session.workspaces.find((workspace) => workspace.id === editingWorkspaceId)}
         isOpen={createOpen}
         onOpenChange={setCreateOpen}
+        onOpenContainerSettings={() => {
+          setCreateOpen(false);
+          setSettingsSectionRequest({ section: 'container', at: Date.now() });
+          setPanel('settings');
+        }}
       /> : null}
     </div>
   );
@@ -692,14 +724,28 @@ function CreateWorkspaceModal({
   workspace,
   isOpen,
   onOpenChange,
+  onOpenContainerSettings,
 }: {
   session: TodeXSession;
   workspace?: TodeXSession['workspaces'][number];
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
+  onOpenContainerSettings: () => void;
 }) {
   const t = useT();
   const [name, setName] = useState(workspace?.name ?? '');
+  // Container workspaces need Docker on this machine (desktop only) and are created, not edited.
+  const containerAvailable = slots.containerWorkspaces && !workspace;
+  const [mode, setMode] = useState<'local' | 'container'>('local');
+  const containerFlow = slots.useContainerWorkspaceFlow({
+    session,
+    enabled: containerAvailable && mode === 'container',
+    name,
+    setName,
+    deviceName: platform.productName,
+    onDone: () => onOpenChange(false),
+    onOpenSettings: onOpenContainerSettings,
+  });
   const [path, setPath] = useState(workspace?.path ?? session.settings.defaultWorkspacePath);
   const [backendId, setBackendId] = useState(workspace?.backendConnectionId ?? session.activeBackendConnectionId);
   const [entries, setEntries] = useState<string[]>([]);
@@ -707,7 +753,10 @@ function CreateWorkspaceModal({
   const [activeRoot, setActiveRoot] = useState('');
   const [newFolderName, setNewFolderName] = useState<string | null>(null);
   const [creatingFolder, setCreatingFolder] = useState(false);
-  // Folder a container backend cannot see ('' hides the hint).
+  // The folder last picked on this machine and the backend path it became,
+  // so the mount hint names the host folder rather than the mapped path.
+  const [localPick, setLocalPick] = useState<{ host: string; backend: string } | null>(null);
+  // Host folder a container backend cannot see ('' hides the hint).
   const [mountHint, setMountHint] = useState('');
   const settingsForBackend = (id: string) => {
     const profile = session.backendConnections.find((candidate) => candidate.id === id);
@@ -761,7 +810,7 @@ function CreateWorkspaceModal({
   const serverVersion = session.backendLinkStatus[workspace?.backendConnectionId ?? backendId]?.serverVersion;
   // A container backend that cannot see the folder gets the mount hint instead of the raw error.
   const pathFailed = (error: unknown) => {
-    if (isUnmountedPathError(serverVersion?.deployment, error)) setMountHint(path);
+    if (isUnmountedPathError(serverVersion?.deployment, error)) setMountHint(localPick?.backend === path ? localPick.host : path);
     else readFailed(error);
   };
 
@@ -788,7 +837,7 @@ function CreateWorkspaceModal({
       title={workspace ? t('app.workspaceEditTitle') : t('app.workspaceCreateTitle')}
       size="lg"
       bodyClassName="flex flex-col gap-4"
-      footer={(
+      footer={mode === 'container' ? containerFlow.footer : (
         <>
           {workspace ? null : (
             <Button variant="secondary" className="me-auto" leadingIcon={RiFolderAddLine} onClick={() => setNewFolderName('')}>
@@ -822,7 +871,22 @@ function CreateWorkspaceModal({
         </>
       )}
     >
+      {containerAvailable ? (
+        <SegmentedControl
+          aria-label={t('app.workspaceKind')}
+          className="self-start"
+          selectedKeys={new Set([mode])}
+          onSelectionChange={(keys) => {
+            const next = [...keys][0];
+            if (next === 'local' || next === 'container') setMode(next);
+          }}
+        >
+          <SegmentedControlItem id="local">{t('app.workspaceKindLocal')}</SegmentedControlItem>
+          <SegmentedControlItem id="container">{t('app.workspaceKindContainer')}</SegmentedControlItem>
+        </SegmentedControl>
+      ) : null}
       <Field label={t('app.workspaceName')} value={name} onChange={setName} />
+      {mode === 'container' ? containerFlow.body : <>
       <Select
         label={t('app.workspaceBackend')}
         className="w-full"
@@ -856,6 +920,25 @@ function CreateWorkspaceModal({
         </Select>
       ) : null}
       <div className="flex gap-2">
+        {platform.files ? <Button
+          variant="secondary"
+          onClick={async () => {
+            const selected = await platform.files?.pickDirectory();
+            if (!selected) return;
+            // A container backend sees host folders at its own paths.
+            const picked = pickedHostPathToBackend({
+              loopback: isLocalBackendUrl(directorySettings.serverUrl),
+              deployment: serverVersion?.deployment ?? 'host',
+              pathMappings: serverVersion?.pathMappings ?? [],
+              windows: platform.os === 'win32',
+            }, selected, mapHostPathToBackend);
+            setPath(picked.path);
+            setLocalPick({ host: selected, backend: picked.path });
+            setMountHint(picked.unmounted ? selected : '');
+          }}
+        >
+          {t('app.workspacePickLocal')}
+        </Button> : null}
         <Button
           variant="secondary"
           onClick={async () => {
@@ -883,6 +966,7 @@ function CreateWorkspaceModal({
           ))}
         </ScrollArea>
       ) : null}
+      </>}
       <Modal
         isOpen={newFolderName !== null}
         onOpenChange={(open) => { if (!open) setNewFolderName(null); }}

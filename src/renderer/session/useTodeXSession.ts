@@ -1,5 +1,5 @@
 import { normalizeBackendLabelColor, type BackendConnectionProfile } from './backendColors';
-import { ownerBackendId, resolveNoWorkspaceBackendId, tagLegacyBackendRecords } from './backendRouting';
+import { ipcDaemonConflicts, moveBackendRecords, ownerBackendId, resolveNoWorkspaceBackendId, tagLegacyBackendRecords } from './backendRouting';
 import { useWorkbenchSharing } from './useWorkbenchSharing';
 import {
   completionNotificationBody,
@@ -12,15 +12,14 @@ import { addNotification } from './notificationFeed';
 import { bindSentAttachmentEvents, prepareSentAttachments, projectSentAttachments, pruneSentAttachmentRecords, type SentAttachmentRecord } from './sentAttachments';
 import { uploadPromptFile } from './promptUploads';
 import { uploadedPromptContent } from '@todex/protocol/promptUploads';
+import { isIpcServerUrl } from '@todex/protocol/ipcServerUrl';
 import { configureKanbanRouting, configureKanbanSync, syncKanbanTasksFromBackend, type KanbanTaskSchedule } from './kanbanTasks';
 import { t } from '../i18n';
 import { toast } from '../components/ui/toast';
+import { piExtensionPlainText } from '../components/piExtensionPresentation';
 import { PiExtensionEffects, canApplyPluginDraft } from './piExtensionEffects';
 import { commandContextKey, routePiSlashCommand, type ProviderCommandCatalog } from './providerCommands';
-import { piExtensionPlainText } from '../components/piExtensionPresentation';
-import { insecureBackendReason } from '../lib/webPlatform';
-import { managedBackendProfiles } from '../lib/webDeployment';
-import type { ExtensionEditorRequest } from '@todex/protocol/conversationRuntime';
+import { platform } from '../platform';
 import { migrateLegacyFollowUps, restoreQueuedFollowUps, type LegacyAddResult, type LegacyFollowUps, type LegacyQueueTarget } from './queuedFollowUps';
 import { backendRateLimitState } from './sessionRateLimit';
 import { LegacyEventRecovery } from './legacyEventRecovery';
@@ -33,7 +32,7 @@ import {
   type AgentBrowserFrame,
 } from '@todex/protocol/agentDesktop';
 import type { AgentCallSession } from '@todex/protocol/agentCalling';
-import { parseFollowUpQueue, type ConversationRuntime, type FollowUpQueueState } from '@todex/protocol/conversationRuntime';
+import { parseFollowUpQueue, type ConversationRuntime, type ExtensionEditorRequest, type FollowUpQueueState } from '@todex/protocol/conversationRuntime';
 import { conversationScheduleFrame, followUpQueueFrame } from '@todex/protocol/conversationCommands';
 import { conversationTranscriptMarkdown, fetchConversationTranscriptTail, transcriptEntries } from '@todex/protocol/conversationExport';
 import { canonicalConversationEventType, type ConversationEvent } from '@todex/protocol/v2';
@@ -512,6 +511,13 @@ export type TodeXSession = ReturnType<typeof useTodeXSession>;
 
 
 export type { CatalogState };
+/** Lets the desktop wake a backend it froze (see setBackendWakeGate). */
+export type BackendWakeGate = {
+  isFrozen: (backendId: string) => boolean;
+  /** Resolves once the backend is reachable again; the held action then runs. */
+  wake: (backendId: string) => Promise<void>;
+};
+
 export function useTodeXSession(openPanel: OpenPanelFn) {
   const workbenchSharingState = useWorkbenchSharing();
   const completionNotificationsState = useCompletionNotifications();
@@ -696,12 +702,19 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const [activeConversationId, setActiveConversationId] = useState('');
   const activeConversationRecord = conversations.find((item) => item.id === activeConversationId);
   // The None backend in view: the backend of the open None conversation,
-  // else the None row last picked, else the first backend added. New None
-  // conversations and untagged None drafts belong to it.
+  // else the None row last picked, else the first backend added that is not
+  // a container (containers get no None row). New None conversations and
+  // untagged None drafts belong to it.
+  const enabledBackendConnections = useMemo(() => backendConnections.filter((profile) => !profile.disabled), [backendConnections]);
+  const containerProfileIds = platform.containers.useProfileIds();
+  const firstHostBackendId = useMemo(() => resolveNoWorkspaceBackendId(
+    enabledBackendConnections.filter((profile) => !platform.containers.isContainerProfile(profile, containerProfileIds)),
+  ), [containerProfileIds, enabledBackendConnections]);
   const noWorkspaceBackendId = resolveNoWorkspaceBackendId(
-    backendConnections,
+    enabledBackendConnections,
     isNoneWorkspaceId(activeConversationRecord?.workspaceId) ? activeConversationRecord?.backendConnectionId : null,
     noneBackendSelection,
+    firstHostBackendId,
   );
   noWorkspaceBackendIdRef.current = noWorkspaceBackendId;
   // The focused backend serves the visible conversation (or workspace). It
@@ -711,7 +724,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     activeConversationRecord,
     workspaces.find((item) => item.id === activeWorkspaceId),
     noWorkspaceBackendId,
-  ) || (window.todexWeb?.deployment ? backendConnections[0]?.id : '') || 'default-backend';
+  ) || (platform.deployment ? backendConnections[0]?.id : '') || 'default-backend';
   const activeBackendConnectionIdRef = useRef(activeBackendConnectionId);
   activeBackendConnectionIdRef.current = activeBackendConnectionId;
   const focusProfile = backendConnections.find((item) => item.id === activeBackendConnectionId);
@@ -1460,9 +1473,9 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       const unmanagedProfiles = hydratedProfiles.length ? hydratedProfiles : [profileFromSettings(nextSettings)];
       // A self-hosted deployment pins the backend list; keys of the profiles
       // it drops are forgotten.
-      const deployment = window.todexWeb?.deployment;
+      const deployment = platform.deployment;
       const profiles = deployment
-        ? managedBackendProfiles(deployment, hydratedProfiles, profileFromSettings(nextSettings))
+        ? deployment.profiles(hydratedProfiles, profileFromSettings(nextSettings))
         : unmanagedProfiles;
       if (deployment) {
         const kept = new Set(profiles.map((profile) => profile.id));
@@ -1547,12 +1560,27 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         conversations: normalizedConversations,
         tombstones: loadedTombstones,
       }, legacyProfile?.id ?? '');
-      workspaceTombstonesRef.current = tagged.tombstones;
+      // Profiles saved while an IPC profile and a TCP profile of the same
+      // daemon were both enabled list its records twice: the IPC profile
+      // takes over before the first render (useIpcDaemonConflicts covers
+      // later changes, and loopback profiles matched by address).
+      let resolvedProfiles = profiles;
+      let records: Pick<typeof tagged, 'workspaces' | 'conversations' | 'tombstones'> = tagged;
+      let restoredConversationId = firstConversationId;
+      let restoredNoneBackendId = typeof storedActiveSelection?.noneBackendId === 'string' ? storedActiveSelection.noneBackendId : '';
+      for (const { loserId, winnerId } of ipcDaemonConflicts(profiles, isIpcServerUrl)) {
+        const moved = moveBackendRecords(records, loserId, winnerId);
+        records = moved;
+        restoredConversationId = moved.conversationIds.get(restoredConversationId) ?? restoredConversationId;
+        if (restoredNoneBackendId === loserId) restoredNoneBackendId = winnerId;
+        resolvedProfiles = resolvedProfiles.map((profile) => (profile.id === loserId ? { ...profile, disabled: true } : profile));
+      }
+      workspaceTombstonesRef.current = records.tombstones;
       setPreferences(nextSettings);
-      setBackendConnections(profiles);
-      setWorkspaces(tagged.workspaces);
-      setWorkspaceTombstones(tagged.tombstones);
-      setConversations(tagged.conversations);
+      setBackendConnections(resolvedProfiles);
+      setWorkspaces(records.workspaces);
+      setWorkspaceTombstones(records.tombstones);
+      setConversations(records.conversations);
       setTimeline(storedTimeline.slice(0, MAX_TIMELINE_ITEMS));
       const attachmentRecords = pruneSentAttachmentRecords(Array.isArray(storedSentAttachments) ? storedSentAttachments : []);
       sentAttachmentRecordsRef.current = attachmentRecords;
@@ -1564,8 +1592,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       providerModelPreferencesRef.current = normalizedProviderModelPreferences;
       setProviderModelPreferences(normalizedProviderModelPreferences);
       setActiveWorkspaceId(firstWorkspaceId);
-      setActiveConversationId(firstConversationId);
-      setNoneBackendSelection(typeof storedActiveSelection?.noneBackendId === 'string' ? storedActiveSelection.noneBackendId : '');
+      setActiveConversationId(restoredConversationId);
+      setNoneBackendSelection(restoredNoneBackendId);
       setAutoConnectEnabled(hydratedProfiles.length > 0 || Boolean(storedSettings?.serverUrl?.trim()));
       setHydrated(true);
     })();
@@ -2117,6 +2145,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     () => conversations.find((item) => item.id === activeConversationId) ?? null,
     [activeConversationId, conversations],
   );
+
 
   // A conversation's command catalog depends on its backend, workspace,
   // provider, native session and runtime (Pi extensions add commands).
@@ -4224,6 +4253,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     const profile = profileFor(backendId);
     const link = linksRef.current.get(backendId);
     if (!profile?.serverUrl.trim() || !link || link.transportFailure || link.readyWait) return;
+    // A frozen (paused) daemon cannot answer; it is woken on demand instead.
+    if (backendWakeGateRef.current?.isFrozen(backendId)) return;
     const probeId = link.healthProbeSeq + 1;
     link.healthProbeSeq = probeId;
     const stale = () => link.healthProbeSeq !== probeId || link.transportFailure || Boolean(link.readyWait)
@@ -4290,6 +4321,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
 
   /** Open (or reopen) one backend's socket. */
   const connectBackend = useCallback((backendId: string) => {
+    // A disabled profile's backend is served by another profile.
+    if (profileFor(backendId)?.disabled) return;
     const link = linkFor(backendId);
     link.manualDisconnect = false;
     setAutoConnectEnabled(true);
@@ -4333,7 +4366,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
         return;
       }
 
-      const insecureReason = insecureBackendReason(inspected.origin);
+      const insecureReason = platform.backendUrlProblem(inspected.origin);
       if (insecureReason) {
         const error = ConnectionError.invalidServerUrl(insecureReason);
         link.lastFailureRetryable = false;
@@ -4698,7 +4731,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     }
     autoConnectStartedRef.current = true;
     for (const profile of backendConnectionsRef.current) {
-      if (profile.serverUrl.trim() && !linksRef.current.has(profile.id)) connectBackend(profile.id);
+      if (profile.serverUrl.trim() && !profile.disabled && !linksRef.current.has(profile.id)) connectBackend(profile.id);
     }
   }, [autoConnectEnabled, connectBackend, hydrated]);
 
@@ -5020,12 +5053,27 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   }, [attachTerminal]);
   reattachTerminalsRef.current = reattachTerminals;
 
+  /** Wakes backends frozen for idleness (paused TodeX containers, see the
+   * desktop's ContainerFreezer) before a send or terminal open reaches them. */
+  const backendWakeGateRef = useRef<BackendWakeGate | null>(null);
+  const setBackendWakeGate = useCallback((gate: BackendWakeGate | null) => {
+    backendWakeGateRef.current = gate;
+  }, []);
+
   /**
    * Shows the terminal `options.terminalId`: joins it when the backend still
    * runs it, otherwise starts it (unless `autoStart` is false, which leaves
    * it idle). Backends without replay get the older status-then-start check.
    */
   const openTerminalSession = useCallback((target: TerminalTarget, options: TerminalStartOptions & { autoStart: boolean }) => {
+    const frozenBackend = terminalBackendId(target);
+    if (backendWakeGateRef.current?.isFrozen(frozenBackend)) {
+      void backendWakeGateRef.current.wake(frozenBackend).then(
+        () => openTerminalSessionRef.current(target, options),
+        (error: unknown) => setLastError(error instanceof Error ? error.message : String(error)),
+      );
+      return;
+    }
     const terminalId = seedTerminalState(target, { terminalId: options.terminalId, rows: options.rows, cols: options.cols });
     const backendId = terminalBackendId(target);
     const replay = terminalReplayFor(backendId);
@@ -5200,7 +5248,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const updateBackendConnection = useCallback((id: string, requested: Partial<BackendConnectionProfile>) => {
     // A self-hosted deployment fixes each backend's address.
     const { serverUrl: _pinned, ...unpinned } = requested;
-    const patch: Partial<BackendConnectionProfile> = window.todexWeb?.deployment ? unpinned : requested;
+    const patch: Partial<BackendConnectionProfile> = platform.deployment ? unpinned : requested;
     setBackendConnections((current) => current.map((profile) => {
       if (profile.id !== id) return profile;
       const originChanged = patch.serverUrl !== undefined
@@ -5247,7 +5295,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
   const addBackendConnection = useCallback((profile?: Partial<BackendConnectionProfile>) => {
     // A self-hosted deployment fixes the backend list (its settings hide
     // the add button); stay on the first backend instead.
-    if (window.todexWeb?.deployment) return backendConnectionsRef.current[0];
+    if (platform.deployment) return backendConnectionsRef.current[0];
     const id = createRequestId('backend');
     // A new backend never inherits the current device key or transport pin.
     const next: BackendConnectionProfile = { ...profileFromSettings(connectionRoutingRef.current, t('session.newBackend'), id), ...UNPAIRED_TRANSPORT, ...profile, id, createdAt: Date.now(), updatedAt: Date.now() };
@@ -5259,7 +5307,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
    * and history keys are forgotten. The last backend cannot be removed. */
   const removeBackendConnection = useCallback((id: string) => {
     const profiles = backendConnectionsRef.current;
-    if (window.todexWeb?.deployment || profiles.length <= 1 || !profiles.some((profile) => profile.id === id)) return;
+    if (platform.deployment || profiles.length <= 1 || !profiles.some((profile) => profile.id === id)) return;
     closeSocket(id, true);
     linksRef.current.get(id)?.commands.dispose();
     linksRef.current.delete(id);
@@ -5274,6 +5322,50 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       setLastError(error instanceof Error ? error.message : t('history.keyFailed'));
     });
     setBackendConnections((current) => current.filter((profile) => profile.id !== id));
+  }, [closeSocket]);
+
+  /** Hands backend `loserId` over to `winnerId`, a profile of the same
+   * daemon (its IPC connection, say): the loser disconnects and stays
+   * disabled, the winner is enabled and connects, and the loser's workspaces
+   * and conversations move to the winner, so the ids the daemon issued are
+   * listed once. The loser keeps its device key and history key, so the
+   * swap can be undone the same way. */
+  const replaceBackendConnection = useCallback((loserId: string, winnerId: string) => {
+    const profiles = backendConnectionsRef.current;
+    const winner = profiles.find((profile) => profile.id === winnerId);
+    if (loserId === winnerId || !winner || !profiles.some((profile) => profile.id === loserId)) return;
+    // Drop the loser's link first: workspace saves only reach linked
+    // backends, so its emptied scope is never pushed to the daemon.
+    closeSocket(loserId, true);
+    linksRef.current.get(loserId)?.commands.dispose();
+    linksRef.current.delete(loserId);
+    configureKanbanSync(loserId, null);
+    setLinkStatusByBackend(({ [loserId]: _removed, ...rest }) => rest);
+    setV2ConversationsByBackend(({ [loserId]: _removed, ...rest }) => rest);
+    setDirectorySyncByBackend(({ [loserId]: _removed, ...rest }) => rest);
+    const moved = moveBackendRecords({
+      workspaces: workspacesRef.current,
+      conversations: conversationsRef.current,
+      tombstones: workspaceTombstonesRef.current,
+    }, loserId, winnerId);
+    workspacesRef.current = moved.workspaces;
+    conversationsRef.current = moved.conversations;
+    workspaceTombstonesRef.current = moved.tombstones;
+    setWorkspaces(moved.workspaces);
+    setConversations(moved.conversations);
+    setWorkspaceTombstones(moved.tombstones);
+    const keptConversationId = moved.conversationIds.get(activeConversationRef.current);
+    if (keptConversationId) setActiveConversationId(keptConversationId);
+    setNoneBackendSelection((current) => (current === loserId ? winnerId : current));
+    setBackendConnections((current) => current.map((profile) => {
+      if (profile.id === loserId) return { ...profile, disabled: true, updatedAt: Date.now() };
+      if (profile.id === winnerId && profile.disabled) {
+        const { disabled: _disabled, ...enabled } = profile;
+        return { ...enabled, updatedAt: Date.now() };
+      }
+      return profile;
+    }));
+    if (winner.disabled) pairingConnectPendingRef.current.add(winnerId);
   }, [closeSocket]);
 
   /** Opens a workspace. None is listed once per backend: `noneBackendId`
@@ -8667,6 +8759,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
           return;
         }
       }
+
       const addCommandNotice = (title: string, detail: string) => {
         appendTimeline(makeSystemEntry(title, detail, workspace.id, conversation.id));
       };
@@ -9361,6 +9454,15 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
       toast.danger(pendingUpload.uploadState === 'uploading' ? t('chat.uploadPending') : t('chat.uploadFailedBlocking', { name: pendingUpload.name }));
       return;
     }
+    // The draft stays in the composer while a frozen backend wakes, then this runs again.
+    const frozenBackend = backendIdForConversation(conversationId);
+    if (backendWakeGateRef.current?.isFrozen(frozenBackend)) {
+      void backendWakeGateRef.current.wake(frozenBackend).then(
+        () => submitChatRef.current(conversationId),
+        (error: unknown) => setLastError(error instanceof Error ? error.message : String(error)),
+      );
+      return;
+    }
     // Pasted-text capsules are sent as the text they stand for.
     const { text: expandedText, attachments } = expandTextCapsules(draftText, draftAttachments);
     const text = expandedText.trim();
@@ -9436,6 +9538,8 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     }
     sendSlashCommand(text, conversationId);
   }, [appendTimeline, chatDrafts, composerAttachments, controlConversation, getConversationContext, queueWhileBusy, rememberMentionReferences, selectedSkills, sendLocalTurn, sendSlashCommand, sendV2Prompt, setConversationAttachments, setConversationChatDraft, setConversationComposerSelection, setConversationSelectedSkills, thinkingConversations, getProviderCommandCatalog]);
+  const submitChatRef = useRef(submitChat);
+  submitChatRef.current = submitChat;
 
   const runWorkspaceCommand = useCallback((workspace: WorkspaceRecord, conversation: ConversationRecord, command: 'start' | 'status' | 'attach' | 'stop' | 'interrupt') => {
     if (command === 'start') {
@@ -9756,6 +9860,7 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     updateBackendConnection,
     addBackendConnection,
     removeBackendConnection,
+    replaceBackendConnection,
     workspaces,
     conversations,
     activeWorkspaceId,
@@ -9824,10 +9929,6 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     providerCommands,
     getProviderCommandCatalog,
     refreshProviderCommands,
-    pendingPluginDrafts,
-    handlePluginDraft,
-    stoppingProviderRuntimes,
-    stopProviderRuntime,
     contextUsageByConversation,
     compactionByConversation,
     subagentsByConversation,
@@ -9872,8 +9973,13 @@ export function useTodeXSession(openPanel: OpenPanelFn) {
     setConversationLabelColor,
     requestNativeThreadList,
     submitChat,
+    setBackendWakeGate,
     sendAgentMessage,
     setConversationChatDraft,
+    pendingPluginDrafts,
+    handlePluginDraft,
+    stoppingProviderRuntimes,
+    stopProviderRuntime,
     setConversationAttachments,
     setConversationSelectedSkills,
     setConversationComposerSelection,

@@ -3744,4 +3744,15 @@ export const zhCN = {
   // local backend (container approval from the desktop)
   'localBackend.dockerApproving': "正在通过 docker exec 批准…",
   'localBackend.dockerApproveFailed': "自动批准失败：{error}。请手动运行下面的命令。",
+  // shared screens: desktop features, labels referenced but hidden on the web
+  'app.workspaceKind': "工作区类型",
+  'app.workspaceKindLocal': "本地工作区",
+  'app.workspaceKindContainer': "容器工作区",
+  'settings.backendDisabled': "已停用",
+  'settings.backendUseThis': "改用此连接",
+  'settings.backendDisabledBy': "「{name}」连接到同一个 backend，此连接已停用。",
+  'settings.backendDisabledHint': "另一个连接连到同一个 backend，此连接已停用。",
+  'localBackend.title': "本机 Backend",
+  'container.title': "TodeX Container",
+  'workbench.tabBrowser': '浏览器',
 } satisfies Record<string, string>;

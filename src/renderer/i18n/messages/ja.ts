@@ -3744,4 +3744,15 @@ export const ja: Messages = {
   // local backend (container approval from the desktop)
   'localBackend.dockerApproving': "docker exec で承認中…",
   'localBackend.dockerApproveFailed': "自動承認に失敗しました: {error}。代わりに下のコマンドを実行してください。",
+  // shared screens: desktop features, labels referenced but hidden on the web
+  'app.workspaceKind': "ワークスペースの種類",
+  'app.workspaceKindLocal': "ローカルワークスペース",
+  'app.workspaceKindContainer': "コンテナワークスペース",
+  'settings.backendDisabled': "無効",
+  'settings.backendUseThis': "この接続を使う",
+  'settings.backendDisabledBy': "「{name}」が同じバックエンドに接続しているため、この接続は無効です。",
+  'settings.backendDisabledHint': "別の接続が同じバックエンドに接続しているため、この接続は無効です。",
+  'localBackend.title': "ローカルバックエンド",
+  'container.title': "TodeX Container",
+  'workbench.tabBrowser': 'ブラウザー',
 };

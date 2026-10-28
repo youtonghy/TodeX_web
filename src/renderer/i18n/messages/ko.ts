@@ -3744,4 +3744,15 @@ export const ko: Messages = {
   // local backend (container approval from the desktop)
   'localBackend.dockerApproving': "docker exec로 승인 중…",
   'localBackend.dockerApproveFailed': "자동 승인 실패: {error}. 대신 아래 명령을 실행하세요.",
+  // shared screens: desktop features, labels referenced but hidden on the web
+  'app.workspaceKind': "워크스페이스 유형",
+  'app.workspaceKindLocal': "로컬 워크스페이스",
+  'app.workspaceKindContainer': "컨테이너 워크스페이스",
+  'settings.backendDisabled': "비활성화됨",
+  'settings.backendUseThis': "이 연결 사용",
+  'settings.backendDisabledBy': "「{name}」이(가) 같은 백엔드에 연결되어 있어 이 연결은 비활성화되었습니다.",
+  'settings.backendDisabledHint': "다른 연결이 같은 백엔드에 연결되어 있어 이 연결은 비활성화되었습니다.",
+  'localBackend.title': "로컬 백엔드",
+  'container.title': "TodeX Container",
+  'workbench.tabBrowser': '브라우저',
 };

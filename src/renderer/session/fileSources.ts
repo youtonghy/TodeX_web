@@ -28,6 +28,8 @@ export type FileSource = {
   rootPath: string;
   /** "Add to chat" references only make sense for workspace files. */
   canAddReference: boolean;
+  /** Open / Open With / Reveal act on this machine's filesystem. */
+  canUseSystemShell: boolean;
   list: (directory: string) => Promise<FileSourceEntry[]>;
   /** Most entries one listing returns, when the source caps it. */
   listLimit?: number;
@@ -56,13 +58,14 @@ export function sortFileEntries<T extends FileSourceEntry>(entries: T[]): T[] {
 /** Entries a workspace listing returns at most; a full page may be cut off. */
 export const WORKSPACE_LIST_LIMIT = 100;
 
-export function workspaceFileSource(api: () => V2ApiClient, rootPath: string): FileSource {
+export function workspaceFileSource(api: () => V2ApiClient, rootPath: string, canUseSystemShell = false): FileSource {
   return {
     key: `workspace:${rootPath}`,
     label: rootPath.split(/[/\\]/).filter(Boolean).pop() || rootPath || 'workspace',
     rootPath,
     canAddReference: true,
     listLimit: WORKSPACE_LIST_LIMIT,
+    canUseSystemShell,
     list: async (directory) => {
       const snapshot = await api().listWorkspaceEntries(directory, '', WORKSPACE_LIST_LIMIT);
       return sortFileEntries(snapshot.entries.map((entry) => ({ ...entry, path: absoluteEntryPath(directory, entry.path) })));
@@ -159,6 +162,7 @@ export function remoteFileSource(api: () => V2ApiClient, binding: RemoteFilesBin
     label: binding.label,
     rootPath: binding.homeDirectory || '/',
     canAddReference: false,
+    canUseSystemShell: false,
     list: async (directory) => (await api().listRemoteEntries(id, directory)).entries,
     read: (path) => api().readRemoteFile(id, path),
     save: (path, text, expectedText) => api().saveRemoteFile(id, path, text, expectedText),

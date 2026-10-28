@@ -3744,4 +3744,16 @@ export const en: Messages = {
   // local backend (container approval from the desktop)
   'localBackend.dockerApproving': "Approving with docker exec…",
   'localBackend.dockerApproveFailed': "Automatic approval failed: {error}. Run one of the commands below instead.",
+
+  // shared screens: desktop features, labels referenced but hidden on the web
+  'app.workspaceKind': "Workspace type",
+  'app.workspaceKindLocal': "Local workspace",
+  'app.workspaceKindContainer': "Container workspace",
+  'settings.backendDisabled': "Disabled",
+  'settings.backendUseThis': "Use this connection",
+  'settings.backendDisabledBy': "「{name}」 reaches the same backend, so this connection is disabled.",
+  'settings.backendDisabledHint': "Another connection reaches the same backend, so this one is disabled.",
+  'localBackend.title': "Local backend",
+  'container.title': "TodeX Container",
+  'workbench.tabBrowser': 'Browser',
 };

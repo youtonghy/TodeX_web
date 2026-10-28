@@ -8,6 +8,7 @@ import type { AgentDesktopSettings as Settings } from '@todex/protocol/agentDesk
 import { ConnectionError } from '@todex/protocol/connectionError';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { useT } from '../i18n';
+import { platform } from '../platform';
 import { backendApi } from '../session/helpers';
 import { usePanelBackend, type PanelBackend } from '../session/panelBackend';
 import { BackendScopeRow } from './settings/BackendScopeRow';
@@ -62,6 +63,7 @@ function BackendDesktopSettings({ session, backend, page, onPageChange }: {
   // `null`: the backend predates desktop tools.
   const [settings, setSettings] = useState<Settings | null | undefined>(undefined);
   const [saving, setSaving] = useState(false);
+  const [legacyData, setLegacyData] = useState(false);
   // The entry a page was opened from takes focus again on the way back.
   const lastPage = useRef<AgentDesktopPage | null>(null);
   const overview = useRef<HTMLDivElement>(null);
@@ -79,6 +81,7 @@ function BackendDesktopSettings({ session, backend, page, onPageChange }: {
     // Settings of another backend must not stand in while this one loads.
     setSettings(undefined);
     void refresh();
+    void platform.legacyAgentBrowser?.hasData().then(setLegacyData);
     // Chromium downloads and host permissions change outside this screen.
     const timer = setInterval(() => {
       if (document.visibilityState === 'visible') void refresh();
@@ -109,6 +112,16 @@ function BackendDesktopSettings({ session, backend, page, onPageChange }: {
       toast.danger(error instanceof Error ? error.message : t('agentDesktop.saveFailed'));
     } finally {
       setSaving(false);
+    }
+  };
+
+  const clearLegacyData = async () => {
+    if (!window.confirm(t('agentDesktop.legacyDataConfirm'))) return;
+    try {
+      await platform.legacyAgentBrowser?.clear();
+      setLegacyData(false);
+    } catch (error) {
+      toast.danger(error instanceof Error ? error.message : t('agentDesktop.saveFailed'));
     }
   };
 
@@ -181,6 +194,13 @@ function BackendDesktopSettings({ session, backend, page, onPageChange }: {
           onPress={() => onPageChange('computer')}
         />
       </SettingsCard>
+      {legacyData ? (
+        <SettingsCard>
+          <SettingsRow description={t('agentDesktop.legacyData')}>
+            <Button size="small" variant="secondary" onClick={() => { void clearLegacyData(); }}>{t('agentDesktop.legacyDataClear')}</Button>
+          </SettingsRow>
+        </SettingsCard>
+      ) : null}
     </div>
   );
 }

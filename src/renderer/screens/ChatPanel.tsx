@@ -1116,18 +1116,23 @@ export function ChatPanel({ session }: Props) {
     ...baseMarkdownComponents,
     a: ({ href, children, node: _node, ref: _ref, ...props }) => {
       const target = workspaceLinkTarget(href, workspacePath);
-      // The web Workbench has no browser tab: http(s) links open in a new
-      // browser tab, workspace files (HTML included) in the Files preview.
-      const external = isHttpUrl(href);
+      // Loopback pages open in the Workbench browser tab (where the host has
+      // one) and workspace files in the Files preview; other http(s) links
+      // open outside the app (a new browser tab, or the system browser).
+      const external = !target && isHttpUrl(href);
       return (
         <a
           {...props}
           href={href}
           {...(external ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
           onClick={(event) => {
-            if (external || !target || target.kind === 'browser-url') return;
+            if (!target) return;
             event.preventDefault();
-            session.openPanel('Files', { filePath: target.filePath });
+            if (target.kind === 'browser-url') {
+              session.openPanel('Browser', { url: target.url });
+            } else {
+              session.openPanel('Files', { filePath: target.filePath });
+            }
           }}
         >
           {children}

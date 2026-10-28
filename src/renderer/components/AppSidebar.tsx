@@ -39,6 +39,7 @@ import { cx } from '@/utils/cx';
 import { useSidebarPins } from '../session/useSidebarPins';
 import { searchConversations } from '../session/conversationSearch';
 import { useSidebarGroupCollapse } from '../session/useSidebarGroupCollapse';
+import { platform } from '../platform';
 import { useKanbanTasks } from '../session/kanbanTasks';
 import { setFeaturesMoreOpen, useFeatureModes, useFeaturesMoreOpen, type FeatureId } from '../session/featureToggles';
 import { BACKEND_LABEL_COLORS, backendLabelColor } from '../session/backendColors';
@@ -403,7 +404,7 @@ export function AppSidebar({
   const allKanbanTasks = useKanbanTasks();
   // A disabled task board leaves no trace in the conversation list either.
   const kanbanTasks = features.kanban === 'off' ? [] : allKanbanTasks;
-  const insetChrome = window.todexWeb.app.windowChrome === 'hidden-inset';
+  const insetChrome = platform.windowChrome === 'hidden-inset';
 
   const conversationTaskMetaMap = useMemo(() => {
     const map: Record<string, { count: number; pending: number }> = {};
@@ -431,17 +432,30 @@ export function AppSidebar({
     )
   ), [activeRowId, rowIdOf, session.conversations]);
 
+  // Containers get no None row unless they already hold None conversations.
+  const containerProfileIds = platform.containers.useProfileIds();
+  const noneBackendsInUse = useMemo(() => new Set(session.conversations
+    .filter((conversation) => isNoneWorkspaceId(conversation.workspaceId) && !conversation.archived && isListedConversation(conversation))
+    .map((conversation) => ownerBackendId(conversation, null, session.noWorkspaceBackendId))), [session.conversations, session.noWorkspaceBackendId]);
+
   // Workspaces of every configured backend are live and editable here; only
   // those left behind by a removed backend profile render read-only below.
-  // None becomes one row per backend, in the order they were added.
+  // None becomes one row per backend, in the order they were added; several
+  // of them form the built-in None group, each row named by its backend.
   const ownWorkspaces = useMemo(() => {
+    // A disabled profile's backend is listed under the profile serving it.
+    const enabled = session.backendConnections.filter((profile) => !profile.disabled);
+    // Row ids are collection keys: a workspace id listed twice (two
+    // profiles of one daemon) keeps its first record rather than crash.
+    const seen = new Set<string>();
     const listed = session.workspaces.filter((workspace) => !isNoneWorkspaceId(workspace.id) && (
-      !workspace.backendConnectionId || session.backendConnections.some((profile) => profile.id === workspace.backendConnectionId)
-    ));
+      !workspace.backendConnectionId || enabled.some((profile) => profile.id === workspace.backendConnectionId)
+    ) && !seen.has(workspace.id) && Boolean(seen.add(workspace.id)));
     const none = session.workspaces.find((workspace) => isNoneWorkspaceId(workspace.id));
     if (!none) return listed;
-    const profiles = [...session.backendConnections].sort((a, b) => a.createdAt - b.createdAt);
-    // Several Nones form the built-in None group, each row named by its backend.
+    const profiles = enabled
+      .filter((profile) => !platform.containers.isContainerProfile(profile, containerProfileIds) || noneBackendsInUse.has(profile.id))
+      .sort((a, b) => a.createdAt - b.createdAt);
     const grouped = profiles.length > 1;
     const rows = profiles.map((profile, index): WorkspaceRecord => ({
       ...none,
@@ -453,7 +467,7 @@ export function AppSidebar({
       sortOrder: index,
     }));
     return [...rows, ...listed];
-  }, [session.workspaces, session.backendConnections, t]);
+  }, [session.workspaces, session.backendConnections, containerProfileIds, noneBackendsInUse, t]);
   const openWorkspaceRow = (rowId: string) => {
     const noneBackendId = noneWorkspaceRowBackendId(rowId);
     if (noneBackendId === null) session.selectWorkspace(rowId);

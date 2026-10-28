@@ -1,8 +1,9 @@
 import { useEffect, useRef } from 'react';
 import { Kbd } from '@/components/base/kbd/kbd';
 import { cx } from '@/utils/cx';
+import { platform } from '../platform';
 
-export const isMacLike = navigator.userAgent.includes('Mac');
+export const isMacLike = platform.os === 'darwin' || navigator.userAgent.includes('Mac');
 
 export type ShortcutId =
   | 'newConversation'
@@ -34,17 +35,18 @@ type ShortcutCombo = {
 };
 
 // Browsers reserve ⌘N / ⇧⌘N (new window / incognito), so "new" actions use the
-// Option modifier on the web. ⌘⇧T / Ctrl+Shift+T reopens a closed tab and can't
-// be intercepted, so the Terminal view also uses Option. Everything else matches
-// the desktop client.
+// Option modifier there. ⌘⇧T / Ctrl+Shift+T reopens a closed tab and can't be
+// intercepted, so the Terminal view also uses Option. Everything else matches.
+const newMod = platform.reservedNewShortcuts ? { alt: true } : { mod: true };
+
 const COMBOS: Record<ShortcutId, ShortcutCombo> = {
   toggleSidebar: { code: 'KeyB', label: 'B', mod: true },
   toggleAside: { code: 'KeyB', label: 'B', mod: true, alt: true },
   gitActions: { code: 'KeyG', label: 'G', mod: true, shift: true },
-  newConversation: { code: 'KeyN', label: 'N', alt: true },
-  newWorkspace: { code: 'KeyN', label: 'N', alt: true, shift: true },
+  newConversation: { code: 'KeyN', label: 'N', ...newMod },
+  newWorkspace: { code: 'KeyN', label: 'N', ...newMod, shift: true },
   kanban: { code: 'KeyK', label: 'K', mod: true, shift: true },
-  sshTerminal: { code: 'KeyT', label: 'T', alt: true, shift: true },
+  sshTerminal: { code: 'KeyT', label: 'T', ...newMod, shift: true },
   quickSearch: { code: 'KeyL', label: 'L', mod: true, outsideEditors: true },
   newWorkbenchTab: { code: 'KeyN', label: 'N', mod: true, alt: true },
   // ⌘1…⌘9 / Ctrl+1…Ctrl+9 select the right panel's tabs by position; browsers

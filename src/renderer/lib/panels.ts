@@ -8,6 +8,7 @@ export type DesktopPanel =
   | 'slash-action'
   | 'git-diff'
   | 'terminal'
+  | 'browser'
   | 'files'
   | 'experimental'
   | 'v2'
@@ -23,17 +24,18 @@ export type DesktopPanel =
   /** SSH hosts, keys and connections; renders as the main content inside AppLayout. */
   | 'ssh';
 
-export type WorkbenchTab = 'terminal' | 'files' | 'git-diff' | 'ssh-exec' | 'subagents' | 'agent-calls' | 'agent-browser';
+export type WorkbenchTab = 'terminal' | 'browser' | 'files' | 'git-diff' | 'ssh-exec' | 'subagents' | 'agent-calls' | 'agent-browser';
 
 export type OpenPanelOptions = {
   workspaceId?: string;
   conversationId?: string;
   command?: string;
+  url?: string;
   filePath?: string;
 };
 
 export function isWorkbenchTab(panel: DesktopPanel | null): panel is WorkbenchTab {
-  return panel === 'terminal' || panel === 'files' || panel === 'git-diff' || panel === 'ssh-exec' || panel === 'subagents' || panel === 'agent-calls' || panel === 'agent-browser';
+  return panel === 'terminal' || panel === 'browser' || panel === 'files' || panel === 'git-diff' || panel === 'ssh-exec' || panel === 'subagents' || panel === 'agent-calls' || panel === 'agent-browser';
 }
 
 /** Agent SSH, Subagents and Agent calls tabs are opened by the agent's own
@@ -59,6 +61,8 @@ export function panelFromRoute(name: string): DesktopPanel | null {
       return 'git-diff';
     case 'Terminal':
       return 'terminal';
+    case 'Browser':
+      return 'browser';
     case 'Files':
       return 'files';
     case 'Experimental':
@@ -100,6 +104,8 @@ export type WorkbenchItem = {
 export type WorkbenchRequest =
   | { id: number; kind: 'ssh-terminal'; host: string }
   | { id: number; kind: 'remote-files'; remote: RemoteFilesBinding }
+  /** A new browser tab on a loopback URL (the SSH view's running forwards). */
+  | { id: number; kind: 'browser'; url: string }
   | { id: number; kind: 'ssh-exec'; conversationId: string }
   | { id: number; kind: 'subagents'; conversationId: string }
   | { id: number; kind: 'agent-calls'; conversationId: string }

@@ -8,6 +8,7 @@ import { Button } from '@/components/base/buttons/button';
 import { Input } from '@/components/base/input/input';
 import { cx } from '@/utils/cx';
 import { BACKEND_LABEL_COLORS, backendLabelColor, type BackendConnectionProfile } from '../../session/backendColors';
+import { daemonPeer } from '../../session/daemonPeers';
 import { UNPAIRED_TRANSPORT, backendApi, connectionStateLabel, healthLabelOf, isVersionMismatch } from '../../session/helpers';
 import type { ConfigSyncPreset } from '../../session/useConfigSync';
 import type { BackendLinkStatus, TodeXSession } from '../../session/useTodeXSession';
@@ -23,7 +24,7 @@ export const CONFIG_SYNC_PAGE = '__config-sync__';
 
 /** What "sync agent config to a new backend" preselects; SSH hosts are
  * left out because the target rarely holds the matching private keys. */
-const AGENT_CONFIG_CATEGORIES: ConfigSyncPreset['categories'] = ['accounts', 'settings', 'mcp', 'skills'];
+export const AGENT_CONFIG_CATEGORIES: ConfigSyncPreset['categories'] = ['accounts', 'settings', 'mcp', 'skills'];
 
 const STATE_COLORS = { open: 'lime', connecting: 'yellow', error: 'rose', closed: 'neutral', idle: 'neutral' } as const;
 
@@ -106,7 +107,9 @@ export function BackendConnectionSettings({ session, page, onPageChange, deviceN
                     <Chip variant="caption" color={item.deviceSecret ? 'neutral' : 'yellow'}>
                       {item.deviceSecret ? t('settings.backendPaired') : t('settings.backendUnpaired')}
                     </Chip>
-                    <Chip variant="caption" color={STATE_COLORS[state]}>{connectionStateLabel(state)}</Chip>
+                    {item.disabled
+                      ? <Chip variant="caption" color="neutral">{t('settings.backendDisabled')}</Chip>
+                      : <Chip variant="caption" color={STATE_COLORS[state]}>{connectionStateLabel(state)}</Chip>}
                   </>
                 )}
                 onPress={() => onPageChange(item.id)}
@@ -131,7 +134,7 @@ export function BackendConnectionSettings({ session, page, onPageChange, deviceN
 
 /** The backend to copy agent config from: the paired backend other than
  * `targetId` that connected most recently, else the first paired one. */
-function agentConfigSource(session: TodeXSession, targetId: string): BackendConnectionProfile | undefined {
+export function agentConfigSource(session: TodeXSession, targetId: string): BackendConnectionProfile | undefined {
   const candidates = session.backendConnections.filter(item => item.id !== targetId && item.deviceSecret);
   const openedAt = (item: BackendConnectionProfile) => linkOf(session, item.id)?.openedAt ?? 0;
   return candidates.reduce<BackendConnectionProfile | undefined>(
@@ -204,6 +207,8 @@ function BackendDetail({ session, profile, deviceName, pairingAutoStart, history
   const serverVersion = link?.serverVersion;
   const mismatch = isVersionMismatch(__TODEX_BUILD_VERSION__, serverVersion?.version);
   const canRemove = session.backendConnections.length > 1;
+  // Disabled: another profile serves this backend (its IPC connection).
+  const peer = profile.disabled ? daemonPeer(session.backendConnections, profile) : undefined;
   // A different backend never keeps the old device key or transport pin.
   const updateServerUrl = (serverUrl: string) => {
     const changed = normalizeServerUrl(profile.serverUrl) !== normalizeServerUrl(serverUrl);
@@ -268,11 +273,22 @@ function BackendDetail({ session, profile, deviceName, pairingAutoStart, history
             <Input aria-label="Tenant" name="Tenant" size="small" className="w-64" value={profile.tenantId} onChange={(tenantId) => session.updateBackendConnection(profile.id, { tenantId })} />
           </SettingsRow>
         </SettingsCard>
-        <div className="flex gap-2 px-3">
-          <Button size="small" disabled={!profile.serverUrl.trim()} onClick={() => (connected ? session.disconnect(profile.id) : session.connect(profile.id))}>
-            {connected ? t('settings.disconnect') : state === 'error' ? t('settings.retry') : t('settings.connect')}
-          </Button>
-        </div>
+        {profile.disabled ? (
+          <div className="flex flex-wrap items-center gap-3 px-3">
+            <Button size="small" disabled={!peer} onClick={() => peer && session.replaceBackendConnection(peer.id, profile.id)}>
+              {t('settings.backendUseThis')}
+            </Button>
+            <p className="text-body-2-regular text-text-secondary">
+              {peer ? t('settings.backendDisabledBy', { name: peer.name }) : t('settings.backendDisabledHint')}
+            </p>
+          </div>
+        ) : (
+          <div className="flex gap-2 px-3">
+            <Button size="small" disabled={!profile.serverUrl.trim()} onClick={() => (connected ? session.disconnect(profile.id) : session.connect(profile.id))}>
+              {connected ? t('settings.disconnect') : state === 'error' ? t('settings.retry') : t('settings.connect')}
+            </Button>
+          </div>
+        )}
       </SettingsGroup>
       <DevicePairingPanel session={session} backendId={profile.id} deviceName={deviceName} autoStartNonce={pairingAutoStart} />
       <HistoryEncryptionPanel history={session.historyEncryption.forBackend(profile.id)} autoStartRecovery={historyRecoverySetup} />

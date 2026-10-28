@@ -24,6 +24,7 @@ import { GitDiffText } from '../components/GitDiffText';
 import { XtermTerminal, type XtermTerminalHandlers } from '../components/XtermTerminal';
 import { SshExecPane } from '../components/ssh/SshExecPane';
 import { AgentBrowserLiveView } from '../components/AgentBrowserLiveView';
+import { ExpandableAction } from '../components/ExpandableAction';
 import { rememberSessionSshExecTabs, sessionSshExecTabsFor, useSshExecClear, visibleSshExecs } from '../session/sshExecTabs';
 import type { TodeXSession } from '../session/useTodeXSession';
 import { useRemoteConnector } from '../components/ssh/useRemoteConnector';
@@ -46,12 +47,17 @@ import type { SubagentRun } from '@todex/protocol/v2';
 import { SubagentsPanel } from './SubagentsPanel';
 import { AgentCallsPanel } from './AgentCallsPanel';
 import { isActiveAgentCallStatus, type AgentCallSession } from '@todex/protocol/agentCalling';
-import { t, useT, type MessageKey } from '../i18n';
-
+import { isLocalBackendUrl } from '@todex/protocol/mobileParity';
+import { mapBackendPathToHost } from '@todex/protocol/pathMapping';
+import { systemShellPathResolver } from '../session/hostPaths';
 import { resolveTerminalPath } from '@todex/protocol/terminalText';
 import { patchTerminalActivity, forgetTerminalActivity, terminalActivity, useTerminalActivity } from '../session/terminalActivity';
 import { postCompletionNotification } from '../session/completionNotifications';
 import { uploadTerminalImages } from '../session/terminalImagePaste';
+import { t, useT, type MessageKey } from '../i18n';
+import { platform } from '../platform';
+import { slots } from '../platform/slots';
+
 type Props = {
   scopeKey?: string;
   /** The panel is on screen (the aside is open); live views pause while it is not. */
@@ -61,6 +67,7 @@ type Props = {
   tab: WorkbenchTab;
   target?: OpenPanelOptions;
   onTabChange: (tab: WorkbenchTab) => void;
+  closeRequestRef?: RefObject<() => boolean>;
   /** SSH view scope: tabs are opened from the SSH view, not the + menu. */
   sshMode?: boolean;
   /** Backend the SSH terminals and remote file tabs run on (default: the
@@ -78,13 +85,12 @@ type StoredWorkbenchState = {
   activeId: string;
 };
 
-/** Types written to the tab store; 'ssh-exec', 'subagents', 'agent-calls' and 'agent-browser'
- * tabs are session-only. Stored tabs of any other type (such as the removed 'browser'
- * tab) are dropped on restore. */
-const WORKBENCH_TYPES = new Set<WorkbenchTab>(['terminal', 'files', 'git-diff']);
+/** Types written to the tab store; 'ssh-exec', 'subagents', 'agent-calls' and 'agent-browser' tabs are session-only. */
+const WORKBENCH_TYPES = new Set<WorkbenchTab>(['terminal', ...(slots.BrowserPane ? ['browser' as const] : []), 'files', 'git-diff']);
 
 const WORKBENCH_LABEL_KEYS: Record<WorkbenchTab, MessageKey> = {
   terminal: 'workbench.tabTerminal',
+  browser: 'workbench.tabBrowser',
   files: 'workbench.tabFiles',
   'git-diff': 'workbench.tabGitDiff',
   'ssh-exec': 'workbench.tabSshExec',
@@ -97,6 +103,7 @@ const workbenchLabel = (tab: WorkbenchTab) => t(WORKBENCH_LABEL_KEYS[tab]);
 
 const WORKBENCH_ICONS = {
   terminal: RiTerminalBoxLine,
+  browser: RiGlobalLine,
   files: RiFileTextLine,
   'git-diff': RiGitBranchLine,
   'ssh-exec': RiTerminalWindowLine,
@@ -113,49 +120,6 @@ const REMOTE_ICONS = {
 type WorkbenchTabAxis = 'horizontal' | 'vertical';
 
 type IconComponent = ComponentType<{ className?: string; 'aria-hidden'?: boolean | 'true' | 'false' }>;
-
-const EXPANDABLE_TONES = {
-  secondary: 'border-border-button-default bg-background-primary-default text-text-primary shadow-xs enabled:hover:border-border-button-hover enabled:hover:bg-background-primary-hover enabled:active:bg-background-primary-active',
-  primary: 'border-transparent bg-accent-500 text-text-white shadow-xs enabled:hover:bg-accent-600 enabled:active:bg-accent-700',
-  danger: 'border-transparent bg-background-tertiary-error text-text-error-primary enabled:hover:bg-background-quaternary-error enabled:active:bg-background-quaternary-error',
-} as const;
-
-/** Toolbar pill that shows its icon and slides its label open on hover or
- * keyboard focus. */
-function ExpandableAction({ icon: Icon, label, tone = 'secondary', iconClassName, className, type = 'button', ...props }: Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'children'> & {
-  icon: IconComponent;
-  label: string;
-  tone?: keyof typeof EXPANDABLE_TONES;
-  iconClassName?: string;
-}) {
-  return (
-    <button
-      type={type}
-      {...props}
-      className={cx(
-        'group/expand inline-flex h-8 shrink-0 cursor-pointer items-center overflow-hidden rounded-full border',
-        'outline-none transition-colors duration-150 ease focus-visible:ring-2 focus-visible:ring-border-focus-ring',
-        'disabled:cursor-not-allowed disabled:opacity-50',
-        EXPANDABLE_TONES[tone],
-        className,
-      )}
-    >
-      <span className="inline-flex size-[30px] shrink-0 items-center justify-center">
-        <Icon aria-hidden className={cx('size-4', iconClassName)} />
-      </span>
-      <span
-        className={cx(
-          'max-w-0 overflow-hidden whitespace-nowrap text-caption-1-medium opacity-0',
-          'transition-[max-width,opacity,padding] duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:transition-none',
-          'group-hover/expand:max-w-24 group-hover/expand:pe-2.5 group-hover/expand:opacity-100',
-          'group-focus-visible/expand:max-w-24 group-focus-visible/expand:pe-2.5 group-focus-visible/expand:opacity-100',
-        )}
-      >
-        {label}
-      </span>
-    </button>
-  );
-}
 
 const WORKBENCH_TAB_AXIS_KEY = `${SETTINGS_STORAGE_KEY}.workbenchTabAxis.v1`;
 
@@ -219,8 +183,9 @@ function placeholderFiles(): Record<string, { title: string; language: string; b
   };
 }
 
-export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = session.activeConversation?.id || '', shown = true, onTargetConsumed, sshMode = false, sshBackendId: sshBackendProp, requests, onRequestsHandled, onItemsChange }: Props) {
+export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = session.activeConversation?.id || '', shown = true, onTargetConsumed, closeRequestRef, sshMode = false, sshBackendId: sshBackendProp, requests, onRequestsHandled, onItemsChange }: Props) {
   const t = useT();
+  const { BrowserPane } = slots;
   const storageKey = `${SETTINGS_STORAGE_KEY}.workbenchTabs.v1:${scopeKey}`;
   const [items, setItems] = useState<WorkbenchItem[]>([]);
   const [activeId, setActiveId] = useState('');
@@ -234,14 +199,14 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
 
   useEffect(() => {
     let cancelled = false;
-    void window.todexWeb.store.get(storageKey)
+    void platform.store.get(storageKey)
       .then((value) => {
         if (cancelled) return;
         const stored = parseStoredWorkbenchState(value, sessionSshExecTabsFor(storageKey));
         setItems(stored.items);
         setActiveId(stored.activeId);
         const active = stored.items.find((item) => item.id === stored.activeId);
-        if (active && !requestedTargetRef.current?.filePath) onTabChange(active.type);
+        if (active && !requestedTargetRef.current?.filePath && !requestedTargetRef.current?.url) onTabChange(active.type);
       })
       .catch((reason) => {
         console.error('Failed to restore workbench tabs', reason);
@@ -256,7 +221,7 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
     if (!restored) return;
     rememberSessionSshExecTabs(storageKey, items);
     const persisted = items.filter(item => WORKBENCH_TYPES.has(item.type)).map(normalizeWorkbenchItem);
-    void window.todexWeb.store.set(storageKey, { items: persisted, activeId } satisfies StoredWorkbenchState)
+    void platform.store.set(storageKey, { items: persisted, activeId } satisfies StoredWorkbenchState)
       .catch((reason) => {
         console.error('Failed to persist workbench tabs', reason);
       });
@@ -272,7 +237,8 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
   }, [activeId, items, restored, tab]);
 
   useEffect(() => {
-    if (!restored || !target || !(tab === 'files' && target.filePath)) return;
+    if (!restored || !target || !(tab === 'files' && target.filePath
+      || tab === 'browser' && (target.url || target.filePath))) return;
     if (openedTargetRef.current?.target === target && openedTargetRef.current.tab === tab) return;
     openedTargetRef.current = { target, tab };
     const existing = items.find(item => item.id === activeId && item.type === tab) ?? items.find(item => item.type === tab);
@@ -384,6 +350,13 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
         opened = item;
         continue;
       }
+      if (request.kind === 'browser') {
+        const count = [...items, ...added].filter(item => item.type === 'browser').length + 1;
+        const item: WorkbenchItem = { id: `browser-${Date.now()}-${request.id}`, type: 'browser', title: `${workbenchLabel('browser')} ${count}`, target: { url: request.url } };
+        added.push(item);
+        opened = item;
+        continue;
+      }
       if (request.kind === 'ssh-exec' || request.kind === 'subagents' || request.kind === 'agent-calls') {
         // One tab per conversation and kind: reuse it, or create it.
         const { kind, conversationId } = request;
@@ -421,21 +394,14 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
   }, [activeId, closeTab]);
 
   useEffect(() => {
-    // Browsers reserve Cmd+W for closing the browser tab, so this only runs
-    // in hosts that deliver the key (e.g. embedded webviews).
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (!event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-      if (event.key.toLowerCase() !== 'w') return;
-      if (!closeActiveTab()) return;
-      event.preventDefault();
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [closeActiveTab]);
+    if (!closeRequestRef) return undefined;
+    closeRequestRef.current = closeActiveTab;
+    return () => { closeRequestRef.current = () => false; };
+  }, [closeRequestRef, closeActiveTab]);
 
   useEffect(() => {
     let cancelled = false;
-    void window.todexWeb.store.get(WORKBENCH_TAB_AXIS_KEY)
+    void platform.store.get(WORKBENCH_TAB_AXIS_KEY)
       .then((value) => {
         if (!cancelled && (value === 'horizontal' || value === 'vertical')) setAxis(value);
       })
@@ -450,7 +416,7 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
   const toggleAxis = () => {
     const next: WorkbenchTabAxis = vertical ? 'horizontal' : 'vertical';
     setAxis(next);
-    void window.todexWeb.store.set(WORKBENCH_TAB_AXIS_KEY, next)
+    void platform.store.set(WORKBENCH_TAB_AXIS_KEY, next)
       .catch((reason) => {
         console.error('Failed to persist workbench tab axis', reason);
       });
@@ -485,7 +451,9 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
         ? `${item.remote.label}${item.target?.filePath ? ` ${item.target.filePath}` : ''}`
         : item.type === 'terminal'
           ? session.terminalById[terminalIdForConversation(scopeKey, item.id)]?.cwd || workspacePath
-          : item.target?.filePath || workspacePath;
+          : item.type === 'browser'
+            ? item.target?.url || item.target?.filePath || ''
+            : item.target?.filePath || workspacePath;
     const title = isSystemWorkbenchTab(item.type) ? workbenchLabel(item.type) : location ? `${workbenchLabel(item.type)} ${location}` : item.title;
     const isActive = item.id === activeId;
     const closable = !isSystemWorkbenchTab(item.type);
@@ -550,6 +518,7 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
       <MenuPopover placement={vertical ? 'right top' : 'bottom end'}>
         <Menu aria-label={t('workbench.newTab')} onAction={(key) => addTab(String(key) as WorkbenchTab)}>
           <MenuItem id="terminal" icon={WORKBENCH_ICONS.terminal} textValue={t('workbench.tabTerminal')}>{t('workbench.tabTerminal')}</MenuItem>
+          {slots.BrowserPane ? <MenuItem id="browser" icon={WORKBENCH_ICONS.browser} textValue={t('workbench.tabBrowser')}>{t('workbench.tabBrowser')}</MenuItem> : null}
           <MenuItem id="files" icon={WORKBENCH_ICONS.files} textValue={t('workbench.tabFiles')}>{t('workbench.tabFiles')}</MenuItem>
           <MenuItem id="git-diff" icon={WORKBENCH_ICONS['git-diff']} textValue="Git Diff">Git Diff</MenuItem>
         </Menu>
@@ -615,7 +584,8 @@ export function WorkbenchPanel({ session, tab, target, onTabChange, scopeKey = s
                 autoConnect={!item.ssh || freshSshTabsRef.current.has(item.id)}
               />
             ) : null}
-            {item.type === 'files' ? <FilesPane session={session} remote={item.remote} remoteBackendId={sshBackendId} onRemoteRebind={next => updateRemoteBinding(item.id, next)} target={item.type === tab && item.id === active?.id && target?.filePath ? target : item.target} onTargetChange={next => updateTabTarget(item.id, next)} /> : null}
+            {item.type === 'browser' && BrowserPane ? <BrowserPane itemId={item.id} isActive={item.id === active?.id} workspacePath={session.activeWorkspace?.path} session={session} target={item.type === tab && item.id === active?.id && (target?.filePath || target?.url) ? target : item.target} onTargetChange={next => updateTabTarget(item.id, next)} /> : null}
+            {item.type === 'files' ? <FilesPane session={session} remote={item.remote} remoteBackendId={sshBackendId} onRemoteRebind={next => updateRemoteBinding(item.id, next)} target={item.type === tab && item.id === active?.id && (target?.filePath || target?.url) ? target : item.target} onTargetChange={next => updateTabTarget(item.id, next)} /> : null}
             {item.type === 'git-diff' ? <GitDiffPane session={session} /> : null}
             {item.type === 'ssh-exec' && item.sshExec ? <SshExecPane conversationId={item.sshExec.conversationId} runs={session.conversationRuntimeById[item.sshExec.conversationId]?.sshExecs ?? NO_SSH_EXECS} isActive={item.id === active?.id} /> : null}
             {item.type === 'subagents' && item.subagents ? <SubagentsPanel session={session} conversationId={item.subagents.conversationId} /> : null}
@@ -1231,10 +1201,21 @@ function FilesPane({ session, target, onTargetChange, remote, remoteBackendId, o
   const api = useCallback(() => backendApi({ serverUrl, deviceSecret, encryptionProtocol, encryptionPublicKey, transportVerified }), [deviceSecret, encryptionProtocol, encryptionPublicKey, serverUrl, transportVerified]);
   const workspacePath = session.activeWorkspace?.path || '';
   // shell.openPath/showItemInFolder act on the desktop's own filesystem, so
-  // the menu only makes sense when the backend runs on this machine.
+  // the menu only makes sense when the backend runs on this machine; a
+  // container backend's paths go through its published mappings, and
+  // without any the menu stays hidden.
+  const filesServerVersion = session.backendLinkStatus[filesBackendId]?.serverVersion;
+  const filesDeployment = filesServerVersion?.deployment ?? 'host';
+  const filesPathMappings = filesServerVersion?.pathMappings;
+  const hostPathFor = useMemo(() => (platform.files ? systemShellPathResolver({
+    loopback: isLocalBackendUrl(serverUrl),
+    deployment: filesDeployment,
+    pathMappings: filesPathMappings ?? [],
+    windows: platform.os === 'win32',
+  }, mapBackendPathToHost) : null), [filesDeployment, filesPathMappings, serverUrl]);
   const source: FileSource = useMemo(
-    () => (remote ? remoteFileSource(api, remote) : workspaceFileSource(api, workspacePath)),
-    [api, remote, workspacePath],
+    () => (remote ? remoteFileSource(api, remote) : workspaceFileSource(api, workspacePath, Boolean(hostPathFor))),
+    [api, hostPathFor, remote, workspacePath],
   );
   const remoteConnector = useRemoteConnector(api, filesBackendId);
   const [entries, setEntries] = useState<FileTreeEntry[]>([]);
@@ -1395,6 +1376,25 @@ function FilesPane({ session, target, onTargetChange, remote, remoteBackendId, o
     setCurrentPath(trimmed);
   };
 
+  const [contextMenu, setContextMenu] = useState<{ hostPath: string; x: number; y: number } | null>(null);
+  const closeContextMenu = useCallback(() => setContextMenu(null), []);
+  const canUseSystemShell = source.canUseSystemShell;
+  const revealInManagerLabel = platform.os === 'darwin'
+    ? t('workbench.revealInFinder')
+    : platform.os === 'win32'
+      ? t('workbench.revealInExplorer')
+      : t('workbench.revealInFileManager');
+
+  useEffect(() => {
+    const close = () => setContextMenu(null);
+    window.addEventListener('click', close);
+    window.addEventListener('blur', close);
+    return () => {
+      window.removeEventListener('click', close);
+      window.removeEventListener('blur', close);
+    };
+  }, []);
+
   useEffect(() => {
     if (!target?.filePath || target === appliedTargetRef.current) return;
     appliedTargetRef.current = target;
@@ -1412,6 +1412,33 @@ function FilesPane({ session, target, onTargetChange, remote, remoteBackendId, o
       if (!(await loadDirectory(entry.path, true))) await readFile(entry.path);
     } else {
       await readFile(entry.path);
+    }
+  };
+
+  const openEntryContextMenu = (event: ReactMouseEvent, path: string) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (findFileTreeEntry(entries, path)) void handleAction(path);
+    else setSelected(path);
+    // A container path no mapping covers does not exist on this machine.
+    const hostPath = hostPathFor?.(path);
+    if (hostPath) setContextMenu({ hostPath, x: event.clientX, y: event.clientY });
+  };
+
+  const runFileContextAction = async (action: 'open' | 'open-with' | 'reveal') => {
+    const path = contextMenu?.hostPath;
+    setContextMenu(null);
+    const files = platform.files;
+    if (!path || !files) return;
+    try {
+      if (action === 'open') await files.openPath(path);
+      else if (action === 'open-with') await files.openWith(path);
+      else await files.reveal(path);
+    } catch (reason) {
+      const message = reason instanceof Error
+        ? reason.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '')
+        : '';
+      toast.danger(message || t('workbench.openFailed'));
     }
   };
 
@@ -1543,6 +1570,7 @@ function FilesPane({ session, target, onTargetChange, remote, remoteBackendId, o
         label={entry.name}
         // Dotfiles recede, as in most file managers.
         className={entry.name.startsWith('.') ? 'text-text-secondary' : undefined}
+        onContextMenu={canUseSystemShell ? (event) => openEntryContextMenu(event, entry.path) : undefined}
       >
         {directory ? directoryChildren(entry.path, entry.children) : null}
       </TreeViewItem>
@@ -1689,6 +1717,7 @@ function FilesPane({ session, target, onTargetChange, remote, remoteBackendId, o
                 expandedIcon={RiFolderOpenLine}
                 id={currentPath || 'root'}
                 label={rootName}
+                onContextMenu={canUseSystemShell && currentPath ? (event) => openEntryContextMenu(event, currentPath) : undefined}
               >
                 {currentPath ? directoryChildren(currentPath, loadingDirs.has(currentPath) && entries.length === 0 ? undefined : entries) : null}
               </TreeViewItem>
@@ -1708,6 +1737,14 @@ function FilesPane({ session, target, onTargetChange, remote, remoteBackendId, o
         </Resizable.Panel>
       </Resizable>
       </div>
+      <ContextMenu position={contextMenu} onClose={closeContextMenu}>
+        <Menu aria-label={t('workbench.fileMenu')}>
+          <MenuItem id="open" icon={RiExternalLinkLine} textValue={t('workbench.open')} onAction={() => void runFileContextAction('open')}>{t('workbench.open')}</MenuItem>
+          <MenuItem id="open-with" icon={RiAppsLine} textValue={t('workbench.openWith')} onAction={() => void runFileContextAction('open-with')}>{t('workbench.openWith')}</MenuItem>
+          <MenuSeparator />
+          <MenuItem id="reveal" icon={RiFolderOpenLine} textValue={revealInManagerLabel} onAction={() => void runFileContextAction('reveal')}>{revealInManagerLabel}</MenuItem>
+        </Menu>
+      </ContextMenu>
       <Modal
         isOpen={operation?.kind === 'mkdir' || operation?.kind === 'rename'}
         onOpenChange={(open) => { if (!open) setOperation(null); }}

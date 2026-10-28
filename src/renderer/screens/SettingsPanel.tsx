@@ -20,11 +20,11 @@ import { CliManagerPanel } from './CliManagerPanel';
 import { ScrollArea } from '../components/ui/scroll-area';
 import { toast } from '../components/ui/toast';
 import type { TodeXSession } from '../session/useTodeXSession';
-import { clearWebStorage } from '../lib/webPlatform';
-import { clearHistoryKeyStore } from '../lib/historyKeyStore';
+import { platform } from '../platform';
+import { slots } from '../platform/slots';
 import { LOCALE_LABELS, SUPPORTED_LOCALES, getLocalePreference, isLocale, setLocalePreference, useT, type LocalePreference } from '../i18n';
 
-export type SettingsSection = 'general' | 'features' | 'appearance' | 'connection' | 'cli' | 'ssh' | 'notifications' | 'agent' | 'agent-calling' | 'about';
+export type SettingsSection = 'general' | 'features' | 'appearance' | 'connection' | 'local-backend' | 'container' | 'cli' | 'ssh' | 'notifications' | 'agent' | 'agent-calling' | 'about';
 /** Show a category on open or while open; `at` makes a repeat request distinct. */
 export type SettingsSectionRequest = { section: SettingsSection; at: number };
 
@@ -61,6 +61,12 @@ export function SettingsPanel({ session, historyRecoverySetup = false, repairPai
   const [cliVisited, setCliVisited] = useState(section === 'cli');
   useEffect(() => {
     if (section === 'cli') setCliVisited(true);
+  }, [section]);
+  // Host sections (local backend discovery, Docker checks) run CLI commands,
+  // so they too wait for a visit.
+  const [hostVisited, setHostVisited] = useState<ReadonlySet<SettingsSection>>(() => new Set([section]));
+  useEffect(() => {
+    setHostVisited((current) => (current.has(section) ? current : new Set([...current, section])));
   }, [section]);
   const agentPanel = useRef<HTMLDivElement>(null);
   const backendPanel = useRef<HTMLDivElement>(null);
@@ -102,6 +108,7 @@ export function SettingsPanel({ session, historyRecoverySetup = false, repairPai
     { id: 'features', label: t('settings.features'), icon: RiApps2Line },
     { id: 'appearance', label: t('settings.appearance'), icon: RiPaletteLine },
     { id: 'connection', label: t('settings.backendConnections'), icon: RiServerLine },
+    ...slots.settingsSections.map((item) => ({ id: item.id, label: t(item.labelKey), icon: item.icon })),
     { id: 'cli', label: t('app.cliManager'), icon: RiCodeBoxLine },
     { id: 'ssh', label: t('settings.ssh'), icon: RiTerminalBoxLine },
     { id: 'notifications', label: t('settings.notifications'), icon: RiNotification3Line },
@@ -211,33 +218,19 @@ export function SettingsPanel({ session, historyRecoverySetup = false, repairPai
             session={session}
             page={backendPage}
             onPageChange={setBackendPage}
-            deviceName="TodeX Web"
+            deviceName={platform.productName}
             pairingAutoStart={pairingAutoStart}
             historyRecoverySetup={historyRecoverySetup}
-            managed={Boolean(window.todexWeb?.deployment)}
-            footer={(
-              <SettingsCard>
-                <SettingsRow label={t('settings.localData')} description={t('settings.localDataHint')}>
-                  <Button
-                    size="small"
-                    variant="danger"
-                    onClick={() => {
-                      if (!window.confirm(t('settings.localDataConfirm'))) return;
-                      for (const profile of session.backendConnections) session.disconnect(profile.id);
-                      clearWebStorage();
-                      // History keys live in IndexedDB; reload only once they are gone.
-                      void clearHistoryKeyStore().catch((error: unknown) => {
-                        toast.danger(error instanceof Error ? error.message : t('history.keyFailed'));
-                      }).finally(() => window.location.reload());
-                    }}
-                  >
-                    {t('settings.localDataClear')}
-                  </Button>
-                </SettingsRow>
-              </SettingsCard>
-            )}
+            managed={Boolean(platform.deployment)}
+            footer={platform.clearLocalData ? <ClearLocalData session={session} clear={platform.clearLocalData} /> : undefined}
           />
         </SettingsPage>
+
+        {slots.settingsSections.map(({ id, Component }) => (hostVisited.has(id) ? (
+          <SettingsPage key={id} id={id} title={titleOf(id)}>
+            <Component session={session} deviceName={platform.productName} />
+          </SettingsPage>
+        ) : null))}
 
         <SettingsPage id="cli" title={titleOf('cli')} viewportRef={cliPanel}>
           {cliVisited ? <CliManagerPanel session={session} page={cliPage} onPageChange={setCliPage} /> : null}
@@ -294,5 +287,29 @@ function SettingsPage({ id, title, viewportRef, children }: { id: SettingsSectio
         <div className="flex flex-col gap-6 pt-1">{children}</div>
       </ScrollArea>
     </TabPanel>
+  );
+}
+
+/** Web: forgets every key and secret this browser stored, then reloads. */
+function ClearLocalData({ session, clear }: { session: TodeXSession; clear: () => Promise<void> }) {
+  const t = useT();
+  return (
+    <SettingsCard>
+      <SettingsRow label={t('settings.localData')} description={t('settings.localDataHint')}>
+        <Button
+          size="small"
+          variant="danger"
+          onClick={() => {
+            if (!window.confirm(t('settings.localDataConfirm'))) return;
+            for (const profile of session.backendConnections) session.disconnect(profile.id);
+            void clear().catch((error: unknown) => {
+              toast.danger(error instanceof Error ? error.message : t('history.keyFailed'));
+            }).finally(() => window.location.reload());
+          }}
+        >
+          {t('settings.localDataClear')}
+        </Button>
+      </SettingsRow>
+    </SettingsCard>
   );
 }

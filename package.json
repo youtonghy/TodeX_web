@@ -16,6 +16,7 @@
     "start": "node dist-server/server/index.js",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.server.json",
+    "check:sync": "node ./scripts/check-shared-sync.mjs",
     "test": "vitest run",
     "test:e2e": "playwright test"
   },
