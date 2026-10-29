@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { commandContextKey, piCommandCompatibility, routePiSlashCommand, type ProviderCommandCatalog } from '../../src/renderer/session/providerCommands';
+import { commandContextKey, findPromptCommand, piCommandCompatibility, routePiSlashCommand, type ProviderCommandCatalog } from '../../src/renderer/session/providerCommands';
 
 const catalog: ProviderCommandCatalog = { contextKey: 'test', status: 'ready', commands:
   ['compact', 'memory', 'model', 'status', 'review', 'permissions', 'MixedCase'].map(name => ({ name, source: 'extension', description: '', invocation: 'prompt' })) };
@@ -32,5 +32,17 @@ describe('Pi command routing', () => {
     expect(piCommandCompatibility({ ...cache, packageVersion: '9.0.0' }, 'graph')).toEqual({ label: '兼容性未验证' });
     expect(piCommandCompatibility({ ...cache, packageName: undefined }, 'graph').blocked).toBeUndefined();
     expect(routePiSlashCommand('/cache stats', { ...catalog, commands: [cache] }).kind).toBe('blocked');
+  });
+});
+
+describe('agent prompt commands', () => {
+  const command = (name: string, invocation: string) => ({ name, source: 'builtin', description: '', invocation });
+  it('sends ACP agents\' provider-prompt commands as prompts, like Claude and Pi prompt commands', () => {
+    const commands = [command('compact', 'provider-prompt'), command('init', 'prompt'), command('model', 'desktop')];
+    expect(findPromptCommand(commands, 'compact')?.name).toBe('compact');
+    expect(findPromptCommand(commands, 'INIT')?.name).toBe('init');
+    expect(findPromptCommand(commands, 'model')).toBeUndefined();
+    expect(findPromptCommand(commands, 'goal')).toBeUndefined();
+    expect(findPromptCommand(undefined, 'compact')).toBeUndefined();
   });
 });
