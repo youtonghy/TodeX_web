@@ -68,6 +68,39 @@ describe('shared conversation recovery', () => {
     expect(recovery.hasEarlierHistory('c')).toBe(true);
   });
 
+  it('trims a loaded conversation to its newest rows, which reopen without a fetch and page the rest back in', async () => {
+    const rowEvent = (sequence: number) => event(sequence, 'message.delta', { turnId: `t${sequence}`, content: 'x' });
+    const rows = Array.from({ length: 50 }, (_, index) => rowEvent(index + 1));
+    const replayBefore = pagesBefore(rows);
+    const replay = vi.fn(async () => page([]));
+    const update = vi.fn();
+    const recovery = new ConversationRecovery(replay, update, () => {}, replayBefore);
+    await recovery.open('c', 'w', { highWater: 50 });
+    expect(recovery.hasEarlierHistory('c')).toBe(false);
+    expect(recovery.trim('c', 10)).toBe(true);
+    const state = recovery.get('c')!;
+    expect(state.timeline).toHaveLength(10);
+    expect(state.timeline.at(-1)?.firstSequence).toBe(41);
+    expect(update.mock.lastCall?.[0]).toBe(state);
+    expect(recovery.hasEarlierHistory('c')).toBe(true);
+    // Reopening keeps the tail: it only catches up past its cursor.
+    await recovery.open('c', 'w', { highWater: 50 });
+    expect(replayBefore).toHaveBeenCalledTimes(1);
+    expect(recovery.get('c')?.timeline).toHaveLength(10);
+    await recovery.loadEarlier('c', 'w');
+    expect(replayBefore).toHaveBeenLastCalledWith('c', 40, expect.any(Number));
+    expect(recovery.get('c')?.timeline).toHaveLength(50);
+  });
+
+  it('refuses to trim without reverse paging or while history is loading', () => {
+    const forwardOnly = new ConversationRecovery(async () => page([]), () => {}, () => {});
+    forwardOnly.receive('c', 'w', [start]);
+    expect(forwardOnly.trim('c', 1)).toBe(false);
+    const loading = new ConversationRecovery(() => new Promise<ConversationReplay>(() => {}), () => {}, () => {}, pagesBefore([]));
+    void loading.recover('c', 'w');
+    expect(loading.trim('c', 1)).toBe(false);
+  });
+
   it('refuses to release a conversation while its history is loading', () => {
     const recovery = new ConversationRecovery(() => new Promise<ConversationReplay>(() => {}), () => {}, () => {});
     void recovery.recover('c', 'w');
