@@ -104,6 +104,31 @@ describe('pi model entries', () => {
   });
 });
 
+describe('omp model entries', () => {
+  it('reads Pi-shaped models.yml nodes and writes entries without a thinking-level map', () => {
+    const existing = { name: 'Acme', settingsConfig: {
+      baseUrl: 'https://acme.test/v1',
+      apiKey: 'ACME_KEY',
+      api: 'anthropic-messages',
+      models: [{ id: 'm', reasoning: true, cost: { input: 1, output: 2 } }],
+    } };
+    const form = extractFormValues('omp', existing);
+    expect(form).toMatchObject({ baseUrl: 'https://acme.test/v1', apiKind: 'anthropic-messages' });
+    expect(form.models[0]).toMatchObject({ id: 'm', reasoning: true });
+    const next = buildSettingsConfig('omp', {
+      ...form,
+      models: [{ ...form.models[0], maxTokens: '8192' }, emptyModelEntry('n')],
+    }, existing);
+    expect(next.api).toBe('anthropic-messages');
+    expect(next.models).toEqual([
+      { id: 'm', reasoning: true, cost: { input: 1, output: 2 }, maxTokens: 8192 },
+      { id: 'n' },
+    ]);
+    expect(providerModelIds('omp', next)).toEqual(['m', 'n']);
+    expect(providerBaseUrl('omp', next)).toBe('https://acme.test/v1');
+  });
+});
+
 describe('opencode model entries', () => {
   it('extracts limit and variants into the normalized row', () => {
     const form = extractFormValues('opencode', {
