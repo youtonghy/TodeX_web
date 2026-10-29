@@ -8,9 +8,12 @@ describe('Pi command routing', () => {
     expect(routePiSlashCommand(`/${name} unchanged  args`, catalog)).toEqual({ kind: 'native', input: `/${name} unchanged  args` });
   });
   it('keeps explicit Todex actions available with an empty or failed catalog', () => {
-    expect(routePiSlashCommand('/todex compact')).toEqual({ kind: 'todex', command: 'compact' });
-    expect(routePiSlashCommand('/todex commands', { ...catalog, status: 'error' })).toEqual({ kind: 'todex', command: 'commands' });
+    expect(routePiSlashCommand('/todex compact')).toEqual({ kind: 'todex', command: 'compact', args: '' });
+    expect(routePiSlashCommand('/todex commands', { ...catalog, status: 'error' })).toEqual({ kind: 'todex', command: 'commands', args: '' });
     expect(routePiSlashCommand('/todex model', catalog).kind).toBe('blocked');
+    // Only compact takes text: the instructions for its summary.
+    expect(routePiSlashCommand('/todex compact keep  the API notes')).toEqual({ kind: 'todex', command: 'compact', args: 'keep  the API notes' });
+    expect(routePiSlashCommand('/todex retry now').kind).toBe('blocked');
   });
   it('does not invent native commands or reuse Codex actions when discovery is empty or fails', () => {
     expect(routePiSlashCommand('/compact', { ...catalog, commands: [] }).kind).toBe('blocked');
