@@ -101,6 +101,71 @@ describe('shared conversation recovery', () => {
     expect(loading.trim('c', 1)).toBe(false);
   });
 
+  describe('opening from the cached tail', () => {
+    const rowEvent = (sequence: number) => event(sequence, 'message.delta', { turnId: `t${sequence}`, content: 'x' });
+    const journalRows = Array.from({ length: 40 }, (_, index) => rowEvent(index + 1));
+    const forward = (events: ConversationEvent[]) => vi.fn(async (_id: string, after: number, limit: number) => {
+      const slice = events.filter((item) => item.sequence > after).slice(0, limit);
+      return page(slice, events.some((item) => item.sequence > (slice.at(-1)?.sequence ?? after)));
+    });
+
+    it('renders the tail before any request, then checks it and catches up forward', async () => {
+      const replay = forward(journalRows);
+      const replayBefore = pagesBefore(journalRows);
+      const shown: number[] = [];
+      let resolveCheck!: () => void;
+      const gate = new Promise<void>((resolve) => { resolveCheck = resolve; });
+      const gated = vi.fn(async (id: string, after: number, limit: number) => { await gate; return replay(id, after, limit); });
+      const update = vi.fn((state: { appliedSequence: number }) => { shown.push(state.appliedSequence); });
+      const recovery = new ConversationRecovery(gated, update, () => {}, replayBefore, undefined, undefined, {
+        read: async () => journalRows.slice(20, 30), discard: vi.fn(),
+      });
+      const opening = recovery.open('c', 'w', { highWater: 40 });
+      await vi.waitFor(() => expect(shown).toContain(30));
+      expect(recovery.openStatus('c')).toBeUndefined();
+      resolveCheck();
+      await opening;
+      expect(gated).toHaveBeenCalledWith('c', 29, expect.any(Number));
+      expect(replayBefore).not.toHaveBeenCalled();
+      expect(recovery.get('c')?.appliedSequence).toBe(40);
+      expect(recovery.get('c')?.timeline).toHaveLength(20);
+      expect(recovery.hasEarlierHistory('c')).toBe(true);
+    });
+
+    it('drops a tail the journal disagrees with and opens from the journal tail', async () => {
+      const rewritten = journalRows.map((item) => (item.sequence === 30 ? { ...item, eventId: 'other' } : item));
+      const discard = vi.fn();
+      const replayBefore = pagesBefore(rewritten);
+      const recovery = new ConversationRecovery(forward(rewritten), () => {}, () => {}, replayBefore, undefined, undefined, {
+        read: async () => journalRows.slice(20, 30), discard,
+      });
+      await recovery.open('c', 'w', { highWater: 40 });
+      expect(discard).toHaveBeenCalledWith('c');
+      expect(replayBefore).toHaveBeenCalledTimes(1);
+      expect(recovery.get('c')?.appliedSequence).toBe(40);
+      expect(recovery.get('c')?.timeline).toHaveLength(40);
+    });
+
+    it('keeps the tail on screen when the catch-up fails offline', async () => {
+      const errors: string[] = [];
+      const recovery = new ConversationRecovery(async () => { throw new Error('offline'); }, () => {}, (message) => errors.push(message),
+        pagesBefore(journalRows), undefined, undefined, { read: async () => journalRows.slice(20, 30), discard: vi.fn() });
+      await recovery.open('c', 'w', { highWater: 40 });
+      expect(recovery.get('c')?.timeline).toHaveLength(10);
+      expect(recovery.openStatus('c')).toBe('failed');
+      expect(errors).toEqual(['offline']);
+    });
+
+    it('ignores a tail that lags the journal by more than the reopen gap', async () => {
+      const read = vi.fn(async () => journalRows.slice(0, 5));
+      const replayBefore = vi.fn(async () => page([event(REOPEN_GAP_EVENTS + 10, 'message.delta', { turnId: 't', content: 'x' })], true));
+      const recovery = new ConversationRecovery(async () => page([]), () => {}, () => {}, replayBefore, undefined, undefined, { read, discard: vi.fn() });
+      await recovery.open('c', 'w', { highWater: REOPEN_GAP_EVENTS + 10 });
+      expect(read).toHaveBeenCalled();
+      expect(replayBefore).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it('refuses to release a conversation while its history is loading', () => {
     const recovery = new ConversationRecovery(() => new Promise<ConversationReplay>(() => {}), () => {}, () => {});
     void recovery.recover('c', 'w');
