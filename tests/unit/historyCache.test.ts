@@ -69,6 +69,14 @@ describe('history tail cache', () => {
     expect(storedSequences(tails)).toEqual([1, 2, 3, 4]);
   });
 
+  it('starts a tail from live events that begin the journal', async () => {
+    const { cache, tails } = setup();
+    cache.capture('b', 'c', [encrypted(1)], undefined);
+    cache.capture('b', 'c', [encrypted(2)], undefined);
+    await cache.flushAll();
+    expect(storedSequences(tails)).toEqual([1, 2]);
+  });
+
   it('writes after the quiet delay, keeping only summary ciphertext and referenced frames', async () => {
     const { cache, tails } = setup();
     const framed = encrypted(2, { fr: { s: 'frame-a' } });
