@@ -9,7 +9,7 @@ import { loadJson, saveJson } from '../../src/renderer/lib/storage';
 import { t } from '../../src/renderer/i18n';
 import {
   ACTIVE_SELECTION_STORAGE_KEY, BACKEND_CONNECTIONS_STORAGE_KEY, CONVERSATIONS_STORAGE_KEY, defaultSettings,
-  mergeManifestConversations, SETTINGS_STORAGE_KEY, WORKSPACES_STORAGE_KEY, type ConversationRecord,
+  mergeManifestConversations, SETTINGS_STORAGE_KEY, TIMELINE_STORAGE_KEY, WORKSPACES_STORAGE_KEY, type ConversationRecord,
 } from '../../src/renderer/session/helpers';
 import {
   persistableConversations, privateConversationIds, providerPrivateMode, vanishedPrivateConversations, withoutPrivateEntries,
@@ -227,6 +227,21 @@ describe('private conversations in the session', () => {
     expect(session.conversations.some((item) => item.v2ConversationId === 'v2-new' || item.ephemeral)).toBe(false);
     await flushSaves();
     for (const list of savedConversations()) expect(list.some((item) => item.ephemeral || item.v2ConversationId === 'v2-new')).toBe(false);
+  });
+
+  it('never writes the timeline of a deleted conversation', async () => {
+    await mount();
+    let created: ConversationRecord | null = null;
+    await act(async () => { created = await session.createPrivateConversation('wa', { provider: 'codex' }); });
+    const row = { id: 'row-private', kind: 'outgoing', title: 'user', subtitle: 'PRIVCANARY', raw: 'PRIVCANARY', at: 1, workspaceId: 'wa', conversationId: created!.id };
+    act(() => { session.stores.timeline.set([row as never, ...session.stores.timeline.get()]); });
+    // Deleting drops the record (forgetDeletedConversations) but not its rows.
+    act(() => { session.stores.conversations.set(session.stores.conversations.get().filter((item) => item.id !== created!.id)); });
+    // Rows can linger in memory after the record is gone; they still must not be saved.
+    act(() => { session.stores.timeline.set([...session.stores.timeline.get(), { ...row, id: 'row-after' } as never]); });
+    await flushSaves();
+    const savedTimelines = vi.mocked(saveJson).mock.calls.filter(([key]) => key === TIMELINE_STORAGE_KEY).map(([, value]) => value as Array<{ conversationId?: string }>);
+    for (const list of savedTimelines) expect(list.some((entry) => entry.conversationId === created!.id)).toBe(false);
   });
 
   it('refuses a private conversation in the None workspace', async () => {
