@@ -198,3 +198,22 @@ describe('history tail cache', () => {
     expect(restarted.isEnabled()).toBe(false);
   });
 });
+
+describe('history tail cache and private conversations', () => {
+  beforeEach(() => { vi.useFakeTimers(); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  it('never stores an excluded conversation and drops what it already held', async () => {
+    const { cache, tails } = setup();
+    cache.capture('b', 'c', range(1, 2), undefined, { start: true });
+    await cache.flushAll();
+    expect(tails.size).toBe(1);
+    cache.exclude('b', 'c');
+    await vi.runAllTimersAsync();
+    expect(tails.size).toBe(0);
+    cache.capture('b', 'c', range(3, 4), undefined, { start: true });
+    await cache.flushAll();
+    expect(tails.size).toBe(0);
+    expect(await cache.read('b', 'c')).toBeNull();
+  });
+});
