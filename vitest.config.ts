@@ -13,6 +13,12 @@ export default defineConfig({
       '@': resolve(webRoot, 'src/renderer'),
       '@renderer': resolve(webRoot, 'src/renderer'),
       '@todex/protocol': resolve(webRoot, '../TodeX_protocol/src'),
+      // Protocol sources import @noble/*: resolve them from this app (as the
+      // desktop does), never a second copy under ../TodeX_protocol/node_modules.
+      '@noble/ciphers': resolve(webRoot, 'node_modules/@noble/ciphers'),
+      '@noble/curves': resolve(webRoot, 'node_modules/@noble/curves'),
+      '@noble/hashes': resolve(webRoot, 'node_modules/@noble/hashes'),
+      '@noble/post-quantum': resolve(webRoot, 'node_modules/@noble/post-quantum'),
       '@react-native-community/netinfo': resolve(webRoot, 'src/renderer/stubs/netinfo.ts'),
     },
   },

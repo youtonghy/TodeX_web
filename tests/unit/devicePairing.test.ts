@@ -164,12 +164,12 @@ it.each([[404, '不支持'], [401, '未被接受']] as const)('a poll answered %
 });
 
 it('backs off transient poll failures by doubling, honouring Retry-After, up to 5 s', () => {
-  const transient = new DevicePairingRetryableError('x');
+  const transient = new DevicePairingRetryableError('x', 'network');
   expect(nextPairingPollDelayMs(PAIRING_POLL_INTERVAL_MS, transient)).toBe(4000);
   expect(nextPairingPollDelayMs(4000, transient)).toBe(5000);
   expect(nextPairingPollDelayMs(5000, transient)).toBe(5000);
-  expect(nextPairingPollDelayMs(PAIRING_POLL_INTERVAL_MS, new DevicePairingRetryableError('x', 4500))).toBe(4500);
-  expect(nextPairingPollDelayMs(PAIRING_POLL_INTERVAL_MS, new DevicePairingRetryableError('x', 60_000))).toBe(5000);
+  expect(nextPairingPollDelayMs(PAIRING_POLL_INTERVAL_MS, new DevicePairingRetryableError('x', 'tooMany', 4500))).toBe(4500);
+  expect(nextPairingPollDelayMs(PAIRING_POLL_INTERVAL_MS, new DevicePairingRetryableError('x', 'tooMany', 60_000))).toBe(5000);
 });
 
 it.each(['rejected', 'expired'] as const)('closes a %s request without enrolling a device', async status => {

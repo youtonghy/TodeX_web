@@ -273,9 +273,9 @@ it('shows a safe error instead of applying a malformed approval', async () => {
 it('keeps polling with backoff after transient failures and pins on a later approval', async () => {
   const req = request();
   req.poll
-    .mockRejectedValueOnce(new DevicePairingRetryableError('busy', 1000))
-    .mockRejectedValueOnce(new DevicePairingRetryableError('offline'))
-    .mockRejectedValueOnce(new DevicePairingRetryableError('offline'))
+    .mockRejectedValueOnce(new DevicePairingRetryableError('busy', 'tooMany', 1000))
+    .mockRejectedValueOnce(new DevicePairingRetryableError('offline', 'network'))
+    .mockRejectedValueOnce(new DevicePairingRetryableError('offline', 'network'))
     .mockResolvedValueOnce({ status: 'pending' })
     .mockResolvedValue({ status: 'approved', deviceId: 'dev_test1234567890', pin: PIN });
   vi.mocked(beginDevicePairing).mockResolvedValue(req);
@@ -303,7 +303,7 @@ it('keeps polling with backoff after transient failures and pins on a later appr
 it('a transient failure after the deadline ends the attempt as expired', async () => {
   const req = request();
   req.expiresAt = Date.now() + 3000;
-  req.poll.mockRejectedValue(new DevicePairingRetryableError('offline'));
+  req.poll.mockRejectedValue(new DevicePairingRetryableError('offline', 'network'));
   vi.mocked(beginDevicePairing).mockResolvedValue(req);
   render();
   await press('设备验证');
