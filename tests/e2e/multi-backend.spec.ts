@@ -43,8 +43,8 @@ async function pairOnPage(settings: Locator, backend: Backend) {
 
 async function openSettings(page: Page) {
   await page.getByRole('button', { name: '设置', exact: true }).click();
-  const settings = page.getByRole('tabpanel', { name: '后端连接' });
-  await page.getByRole('tab', { name: '后端连接' }).click();
+  const settings = page.getByRole('region', { name: '后端连接' });
+  await page.getByRole('button', { name: '后端连接', exact: true }).click();
   return settings;
 }
 

@@ -40,7 +40,7 @@ test('a self-hosted deployment pins its backend, proxies every call and still re
 
   await page.getByRole('button', { name: '设置', exact: true }).click();
   const settings = page.getByRole('dialog');
-  await settings.getByRole('tab', { name: '后端连接' }).click();
+  await settings.getByRole('button', { name: '后端连接', exact: true }).click();
   await expect(settings.locator('[data-backend-id]')).toHaveCount(1);
   await expect(settings.getByRole('button', { name: '添加后端' })).toHaveCount(0);
   await settings.locator('[data-backend-id="deploy-e2e"]').click();

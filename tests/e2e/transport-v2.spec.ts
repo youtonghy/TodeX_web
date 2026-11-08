@@ -57,7 +57,7 @@ test('pairs with only the server URL, pins the verified key, chats and reads his
   const settings = page.getByRole('dialog');
   // Backend connections lists every backend; its page holds the address,
   // the connection and the device pairing.
-  await settings.getByRole('tab', { name: '后端连接' }).click();
+  await settings.getByRole('button', { name: '后端连接', exact: true }).click();
   await settings.locator('[data-backend-id]').first().click();
   await expect(settings.getByRole('textbox', { name: '后端地址' })).toBeVisible();
   await expect(settings.getByRole('textbox', { name: '加密公钥' })).toHaveCount(0);
