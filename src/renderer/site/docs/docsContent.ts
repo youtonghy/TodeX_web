@@ -46,6 +46,7 @@ const docNavSeed: DocNavSeed[] = [
     id: 'section-introduction',
     children: [
       { id: 'introduction', page: 'introduction' },
+      { id: 'introduction/whats-new', page: 'introduction/whats-new' },
       { id: 'introduction/quick-start', page: 'introduction/quick-start' },
       { id: 'introduction/concepts', page: 'introduction/concepts' },
     ],
@@ -68,6 +69,9 @@ const docNavSeed: DocNavSeed[] = [
       { id: 'desktop/setup', page: 'desktop/setup' },
       { id: 'desktop/connect', page: 'desktop/connect' },
       { id: 'desktop/workbench', page: 'desktop/workbench' },
+      { id: 'desktop/settings', page: 'desktop/settings' },
+      { id: 'desktop/local-backend', page: 'desktop/local-backend' },
+      { id: 'desktop/containers', page: 'desktop/containers' },
     ],
   },
   {

@@ -23,7 +23,7 @@ export const enDocs: DocsLocalePack = {
       body: body(`
 TodeX is a **self-hostable multi-agent coding workbench**. One Rust backend —
 \`todex-agentd\` — orchestrates the coding agents you already use (Codex,
-Claude Code, Pi, Devin, OpenCode, Grok Build, Antigravity, and any ACP-compatible agent)
+Claude Code, Pi, Devin, OpenCode, Grok Build, Antigravity, omp, and any ACP-compatible agent)
 behind a single authenticated API. Desktop, web, and mobile clients connect
 to it over an encrypted channel.
 
@@ -72,10 +72,89 @@ TodeX Web client ──────┐                 │
 
 | Goal | Doc |
 | --- | --- |
+| See what changed in 2.4, with a live walkthrough | [What's new in 2.4](/docs/introduction/whats-new) |
 | Get running in ten minutes | [Quick start](/docs/introduction/quick-start) |
 | Learn the vocabulary | [Concepts](/docs/introduction/concepts) |
 | Run the backend | [Backend overview](/docs/backend) |
 | Use the desktop app | [Desktop overview](/docs/desktop) |
+`),
+    },
+
+    'introduction/whats-new': {
+      slug: 'introduction/whats-new',
+      title: "What's new in 2.4",
+      description: "Private conversations, forks from any reply, local and container backends, signed releases — with a live walkthrough.",
+      body: body(`
+TodeX 2.4.0 (November 2026) ships the desktop app, the backend and the web
+workbench together. The walkthrough below is the real workbench running on
+demo data: a script opens a conversation, sends a task and opens the work
+process while the agent reads, edits and tests. Pause it at any step to look
+around, or play it again from the start.
+
+:::demo
+
+## Conversations
+
+- **Private conversations** — start one from the sidebar (⌘⇧P / Ctrl Shift P,
+  ⌥⇧P on web). Its content lives only in the backend's memory: no journal,
+  no history cache, nothing left after a daemon restart. Claude Code, Codex
+  and Pi write no session files at all; omp, OpenCode and DeepSeek Harness
+  keep theirs in a temporary folder deleted with the conversation (Linux and
+  macOS).
+- **Fork from an earlier reply** — every reply has a fork button. The new
+  conversation keeps the history up to that reply; workspace files stay as
+  they are. Codex and Pi fork from any reply, other agents from the latest.
+- **Goals** — \`/goal <objective>\` hands Codex a native goal. A bar above the
+  prompt box shows its status, tokens and time, with Pause, Resume and Clear.
+- **Compaction instructions** — Pi takes \`/todex compact <instructions>\`.
+- **Accept edits** — a permission mode for Claude Code that approves file
+  edits and still asks for commands.
+- **Background work** — while an agent waits on background tasks, the prompt
+  box and the sidebar row keep showing it as working.
+
+## Sidebar and profile
+
+- **Unified layout** (Settings → Appearance → Sidebar layout) nests each
+  workspace's conversations under it.
+- **Tags** for workspaces and groups, and **Group by tags** to split the list
+  into one section per tag.
+- "None" is now **No workspace**.
+- The **Profile** page replaces the usage and quota dialogs — press the
+  identity card at the bottom of the sidebar.
+
+## Settings
+
+- **CLI management** moved into Settings, one page per agent CLI, with
+  **Update all**.
+- **Config sync** copies CLI accounts, settings, MCPs, skills and SSH
+  connections from one backend to another, side by side.
+- **History cache** (desktop) opens recently viewed conversations from this
+  device first; it stores only the encrypted content.
+- **Computer Use engine** — built-in, or the experimental agent-desktop.
+
+See [Settings](/docs/desktop/settings).
+
+## Backends and containers
+
+- **Local backend** — the desktop app deploys and runs this machine's
+  \`todex-agentd\` and talks to it over local IPC, with no network port. See
+  [Local backend](/docs/desktop/local-backend).
+- **TodeX containers** — run a backend inside Docker and create container
+  workspaces, with auto-freeze and setup commands. See
+  [Containers](/docs/desktop/containers).
+- **omp (oh-my-pi)** joins the supported agents.
+
+## Security
+
+- The install script, the backend updater and desktop updates install only
+  releases whose \`SHA256SUMS.sig\` verifies with the release key.
+- The backend answers cross-origin requests only from the desktop app,
+  loopback pages and the origins you list, and treats proxied requests as
+  remote. See [Security & pairing](/docs/backend/security).
+- The privacy filter recognizes ID and phone numbers of many countries and
+  has aggressive options; SSH output shown to you hides filtered values under
+  a scratch-off cover.
+- The terminal hosts list has a **Local** host that opens \`ssh localhost\`.
 `),
     },
 
@@ -272,8 +351,13 @@ install.sh uninstall --purge       # also remove the ~/.todex-agent data dir
 \`\`\`
 
 The script installs to \`~/.local/bin\` (override with \`--prefix\` or
-\`TODEX_INSTALL_DIR\`), verifies \`SHA256SUMS\`, keeps one rollback copy, and
-restarts a running managed daemon. The prebuilt Linux binary needs glibc
+\`TODEX_INSTALL_DIR\`), verifies \`SHA256SUMS\` and its signature
+\`SHA256SUMS.sig\` (with an installed \`todex-agentd\` or OpenSSL 3), keeps
+one rollback copy, and restarts a running managed daemon. When the signature
+cannot be checked it refuses to install unless you pass
+\`--allow-unverified\`; releases up to 2.3.6 were unsigned and get a warning
+and a checksum-only check. The backend's own updater likewise installs only
+releases signed by the release key. The prebuilt Linux binary needs glibc
 2.28+; musl distributions such as Alpine must build from source. WSL is
 detected automatically.
 
@@ -312,6 +396,23 @@ Quitting the TUI leaves the daemon running. The pairing QR code carries only
 the server address and renders as solid terminal cells; press \`b\` in the QR
 popup to open a square SVG version in the browser when the code doesn't fit
 the terminal. The credentials popup shows the transport key fingerprint.
+
+## Headless administration
+
+Without a TUI — in a container or over SSH — the same tasks have commands:
+
+\`\`\`bash
+todex-agentd pair list                    # pending pairing requests
+todex-agentd pair approve <code> [--yes]
+todex-agentd pair reject <code>
+todex-agentd devices list
+todex-agentd devices revoke <device>
+todex-agentd providers install codex claude --if-missing
+\`\`\`
+
+Exit code 2 means nothing matched; 3 means the command ran as a different
+user than the daemon. The desktop app can also deploy and manage a backend
+on its own machine — see [Local backend](/docs/desktop/local-backend).
 `),
     },
 
@@ -342,6 +443,17 @@ the terminal. The credentials popup shows the transport key fingerprint.
 | Device auth | — | \`TODEX_AGENTD_ENABLE_AUTH\` | \`true\` |
 | Pairing encryption | — | \`TODEX_AGENTD_PAIRING_ENCRYPTION\` | \`ml-kem-768\` |
 | External API | \`--enable-api\` / \`--api-port\` | \`TODEX_AGENTD_API_ENABLED\` / \`TODEX_AGENTD_API_PORT\` | off / \`7346\` |
+| Network listener | — | \`TODEX_AGENTD_NETWORK_ENABLED\` | \`true\` |
+| Local IPC | — | \`TODEX_AGENTD_IPC_ENABLED\` / \`TODEX_AGENTD_IPC_PATH\` | on / \`<data_dir>/agentd.sock\` |
+| Allowed browser origins | — | \`TODEX_AGENTD_CORS_ORIGINS\` | none |
+| Trusted proxies | — | \`TODEX_AGENTD_TRUSTED_PROXIES\` | none |
+| Pairing origins | — | \`TODEX_AGENTD_PAIRING_ORIGINS\` | none |
+| omp binary | — | \`omp_bin\` in \`[agent]\` | \`omp\` |
+
+\`network_enabled = false\` needs IPC on: the backend then serves clients
+only through the IPC socket (named pipe on Windows) and keeps a random
+loopback port for agent tools and \`/v2/version\`. Container deployments add
+their own variables — see [Containers](/docs/desktop/containers).
 
 ## Example \`config.toml\`
 
@@ -352,6 +464,12 @@ pairing_encryption = "ml-kem-768"
 data_dir = "~/.todex-agent"
 workspace_root = "~/projects"
 # workspace_roots = ["~/projects", "/srv/repos"]
+# Serve clients over local IPC only (needs [ipc] enabled).
+# network_enabled = false
+
+[ipc]
+enabled = true
+# path = "~/.todex-agent/agentd.sock"
 
 [agent]
 default_agent = "codex"
@@ -368,6 +486,10 @@ args = ["--stdio"]
 [security]
 enable_auth = true
 enable_tls = false
+# Browser origins allowed besides the desktop app and loopback pages.
+# cors_origins = ["https://todex.example.com"]
+# Proxies whose forwarded client address is trusted.
+# trusted_proxies = ["10.0.0.2"]
 
 [api]
 enabled = false
@@ -421,6 +543,54 @@ import. Settings shows the pinned protocol, key fingerprint, and verified
 state. Profiles holding a key that was saved without pairing verification
 are refused on every host, loopback included, until they are re-paired.
 Plaintext \`none\` is allowed only on loopback.
+
+## Browser origins and proxies
+
+The backend answers cross-origin requests only from the desktop app
+(\`todex-desktop://app\`), loopback pages and the exact origins listed in
+\`security.cors_origins\`. A request carrying \`Forwarded\`,
+\`X-Forwarded-For\` or \`X-Real-IP\` counts as remote even when it arrives on
+loopback, so a reverse proxy on the same host cannot reach loopback-only
+paths; list the proxy in \`security.trusted_proxies\` to use the client
+address it forwards. Pairing requests show the origin they came from.
+
+## Local IPC
+
+The IPC socket (named pipe on Windows) accepts only the user who runs the
+daemon. Over it, clients need no device signature and can use the local
+admin API. With \`network_enabled = false\` IPC is the only way in. See
+[Local backend](/docs/desktop/local-backend).
+
+## Signed releases
+
+Every release publishes \`SHA256SUMS.sig\`, an Ed25519 signature over the
+checksums. \`install.sh\`, the backend updater, the desktop app's backend
+deployment and desktop updates all refuse releases whose signature does not
+verify.
+
+## Private conversations
+
+A private conversation is kept only in the daemon's memory: no journal, no
+keyring entry, nothing counted in history storage, and gone after a restart.
+Claude Code, Codex and Pi write no session files; omp, OpenCode and DeepSeek
+Harness write theirs to a temporary folder (\`$XDG_RUNTIME_DIR/todex-private\`,
+then \`/dev/shm\`, then the system temp folder) that is deleted with the
+conversation, on Linux and macOS only. Grok Build, Devin, Antigravity and ACP
+profiles refuse them. Private conversations cannot be forked, scheduled,
+compacted or referenced from another conversation. Memory can still reach
+swap or a core dump, the agent's provider handles requests under its own
+policy, and edits to workspace files are kept as usual.
+
+## Privacy filter
+
+The output filter hides secrets from what the agent sees. It recognizes ID
+numbers (by check digit or shape for China, Hong Kong, Taiwan, US SSN, UK,
+Singapore, Korea, Spain and Brazil; next to a naming word for others such as
+passports) and phone numbers (international and the national formats of
+several countries). **Aggressive options**, off by default, also cover URL
+tokens, high-entropy strings, UUIDs, email, phone numbers and public IPs,
+and you can add up to 32 custom key names. In the Agent SSH output view,
+filtered values sit under a scratch-off cover you can wipe away.
 
 ## Workspace boundaries
 
@@ -667,6 +837,11 @@ is identical — the desktop app adds native integrations on top.
 
 ## Desktop-only extras
 
+- [Local backend](/docs/desktop/local-backend): deploy and run this
+  machine's backend and connect over IPC.
+- [Containers](/docs/desktop/containers): run backends in Docker and create
+  container workspaces.
+- An on-device history cache for recently viewed conversations.
 - Native file and directory pickers for loopback workspaces.
 - Electron \`userData\` persistence, secure IPC via \`contextBridge\`
   (\`nodeIntegration: false\`), and per-build diagnostics logs.
@@ -755,11 +930,17 @@ Settings shows the pinned protocol, key fingerprint, and verified state.
 Use **Re-pair** to run verification again; changing the backend address
 clears the pinned key.
 
+For a backend on the same machine, the desktop app can skip all of this and
+connect over local IPC — see [Local backend](/docs/desktop/local-backend).
+Container backends show the \`todexc\` / \`docker exec\` command that
+approves the device — see [Containers](/docs/desktop/containers).
+
 ## Managing providers from the client
 
-The pairing panel lists the backend's Codex, Pi, Claude Code, Grok Build, and
-ACP CLI inventory with installed vs latest versions, installs missing CLIs
-in one click, and starts managed upgrades. Provider accounts can be exported
+**Settings → CLI management** lists the backend's agent CLIs with installed
+vs latest versions, installs missing CLIs, and runs several upgrades at once
+(see [Settings](/docs/desktop/settings)). **Config sync** copies accounts,
+settings, MCPs, skills and SSH connections between two backends. Provider accounts can be exported
 and imported as a JSON file to sync agent credentials between hosts — the
 file contains keys in plain text, so handle it like a secret.
 
@@ -782,14 +963,32 @@ file contains keys in plain text, so handle it like a secret.
       description: 'Sidebar, chat panel, workbench tabs, and keyboard shortcuts.',
       body: body(`
 The workbench is the same on desktop and web. This page uses desktop terms;
-where the web differs it's noted.
+where the web differs it's noted. Watch it at work first — the walkthrough
+is the real UI on demo data, driven by a script:
+
+:::demo
 
 ## Left sidebar
 
-Workspaces on top, conversations below. Conversation rows show the active
-agent badge and run state; right-click actions cover New, Rename, Fork, and
-Delete. Workspaces can be added from any directory under a configured
-workspace root.
+Workspaces on top, conversations below — or, with **Sidebar layout →
+Unified** (Settings → Appearance), each workspace with its conversations
+nested under it, five per page. Conversation rows show the active agent badge
+and run state, and stay marked as working while the agent waits on
+background tasks; right-click actions cover New, Rename, Fork, and Delete.
+Workspaces can be added from any directory under a configured workspace
+root, or inside a [container](/docs/desktop/containers).
+
+- **Tags** — **Edit tags** on a workspace or **Edit group tags** on a group.
+  The tag button on the Workspaces header turns on **Group by tags**: one
+  section per tag, **Untagged** last.
+- **No workspace** (formerly "None") holds conversations without a
+  workspace; with several backends they form one built-in group.
+- **Private conversations** — **New private conversation** (⌘⇧P / Ctrl Shift
+  P) picks an agent and starts a conversation that lives only in the
+  backend's memory; it carries a badge and a notice. See
+  [Security & pairing](/docs/backend/security).
+- **Profile** — press the identity card at the bottom for the Profile page:
+  usage, plan quotas and activity.
 
 ## Scheduled conversations and optional features
 
@@ -820,6 +1019,14 @@ workspace root.
   control plus Codex Fast mode where the provider supports it.
 - Reasoning and tool details mount lazily on expansion; final answers stay
   isolated from context and execution noise.
+- **Fork from this reply** under a reply starts a new conversation with the
+  history up to there (workspace files are not rolled back). Codex and Pi
+  fork from any reply; other agents only from the latest.
+- **\`/goal <objective>\`** (Codex) sets a native goal; the goal bar above
+  the prompt box shows its status and usage, with Pause, Resume and Clear.
+  Pi accepts \`/todex compact <instructions>\`.
+- The permission picker offers **Accept edits** for Claude Code: file edits
+  are approved, commands still ask.
 
 ## Right — workbench tabs
 
@@ -840,6 +1047,9 @@ workspace root.
 | ⇧⌘G / Ctrl Shift G | Git actions |
 | ⌘N (⌥N on web) | New conversation |
 | ⇧⌘N (⌥⇧N on web) | Add a workspace |
+| ⇧⌘P (⌥⇧P on web) | New private conversation |
+| ⌘L / Ctrl L | Quick search (conversations and their content) |
+| ⌘1…⌘9 / Ctrl 1…9 | Select a workbench tab |
 | ⇧⌘K / Ctrl Shift K | Kanban task board |
 | ⇧⌘T (⌥⇧T on web) | Terminal view (SSH hosts, keys, remote files) |
 
@@ -885,6 +1095,220 @@ Holding the modifier briefly reveals shortcut hint badges in the UI.
     },
 
     // ------------------------------------------------------------------- Mobile
+
+    'desktop/settings': {
+      slug: 'desktop/settings',
+      title: "Settings",
+      description: "CLI management, config sync between backends, the history cache, and the Computer Use engine.",
+      body: body(`
+Settings are grouped in a rail on the left. This page covers the parts that
+changed in 2.4; the backend pages ([Local backend](/docs/desktop/local-backend),
+[Containers](/docs/desktop/containers)) have their own docs.
+
+## CLI management
+
+**Settings → CLI management** lists the backend's agent CLIs (Codex, Claude
+Code, Pi, Grok Build, omp and the ACP profiles) with installed and latest
+versions. Several CLIs can install or upgrade at once; **Update all** runs
+every pending upgrade. CLIs that ship inside a container image show
+"Updated with the image" instead.
+
+Each CLI opens its own page with tabs:
+
+| Tab | Contents |
+| --- | --- |
+| Settings | The CLI's own settings and provider profiles |
+| MCP / Skill | The MCP servers and skills of the picked backend |
+| Accounts | Provider accounts and API keys |
+| Cleanup | The CLI's native sessions on the backend |
+| Plugins | omp plugins: install, upgrade, remove, turn on or off |
+
+**Shared MCPs / Skills** at the top of the list manages the ones every agent
+sees. Activating or deleting a provider profile asks first and says what
+changes in the CLI's global config; Claude Code's config is backed up before
+the first activation. The Codex account form can fetch the model list from
+the base URL, and sets reasoning effort and context-window presets — clear a
+field to remove its key from \`config.toml\`.
+
+## Config sync
+
+**Settings → Backend connections → Config sync** puts two backends side by
+side: a **Source backend** to read from and a **Target backend** to write to,
+both shown live. Pick what to copy:
+
+- CLI accounts
+- Settings
+- MCP servers
+- Skills
+- SSH connections
+
+Only new and changed items are written; nothing on the target is deleted.
+Secrets are redacted on screen. SSH hosts that log in with a password, and
+private keys, are never synced — put the key on the target first.
+
+## Storage and the history cache
+
+**Settings → General → Storage** holds **Cache recent conversations on this
+device** (desktop, on by default). Recently viewed conversations open from
+this device first, catch up from the backend, and stay readable while
+disconnected.
+
+- Only the encrypted content the backend sent is stored, never plaintext.
+- The newest 300 events of up to 100 conversations, 200 MB at most; the
+  least recently used go first.
+- The cache of a conversation is dropped when it is deleted, and the whole
+  cache when the device is revoked or the backend removed.
+- **Clear cache** removes only this device's copy.
+
+Private conversations are never cached. The web client keeps no history
+cache.
+
+## Computer Use engine
+
+The Computer Use page has an **Engine** choice: **Built-in**, or
+**agent-desktop (experimental)**, which the backend downloads on first use
+and shows as Ready, Downloading, Install failed or Not installed.
+
+## Appearance
+
+**Sidebar layout** switches between **Split** (workspaces and conversations
+in separate lists, the default) and **Unified** (conversations nested under
+their workspace). The terminal's shell integration lives here too.
+`),
+    },
+
+    'desktop/local-backend': {
+      slug: 'desktop/local-backend',
+      title: "Local backend",
+      description: "Deploy this machine's backend from the desktop app and connect over local IPC.",
+      body: body(`
+The desktop app can run \`todex-agentd\` on the machine it is installed on and
+talk to it over **local IPC** — a Unix socket, or a named pipe on Windows,
+that only your user account can open. No network port and no device
+verification are needed for that connection.
+
+## Deploy and connect
+
+Open **Settings → Local backend**. The **This machine** card runs
+\`todex-agentd\` at the same version as TodeX Desktop:
+
+1. **Deploy and connect** downloads the backend, verifies its signature,
+   starts it, pairs this app and connects over IPC.
+2. Afterwards the card offers **Start and connect**, **Restart**, **Stop**,
+   **Pair again** and **Show log**.
+
+The desktop app installs only backend releases whose \`SHA256SUMS.sig\`
+verifies with the release key. Older, unsigned releases (up to 2.3.6) are
+accepted only when they are exactly the version this app pairs with.
+
+Startup options are **Start at login** and **Stop when TodeX quits** (off by
+default, so the backend keeps serving other devices). The listener section
+sets the listen address (default \`127.0.0.1\`), the port and the pairing
+encryption.
+
+The same page edits workspace roots, shows the pairing QR code and transport
+key fingerprint for remote access, approves or rejects pairing requests,
+revokes devices and resets the backend.
+
+## Switching existing connections to IPC
+
+When a loopback connection (\`http://127.0.0.1:7345\`) points at a backend
+that also serves IPC, the app suggests **Switch to IPC**. Once IPC serves
+that daemon, the matching TCP profile is turned off and its data moves to the
+IPC profile. Turn the hint off with **Suggest switching to IPC**.
+
+## Turning off the network listener
+
+If only this app uses the backend, switch **Network listener** off. It can
+only be turned off while the app is connected over IPC, asks for
+confirmation and takes effect after a restart. The backend then keeps just a
+random loopback port for agent tools and \`/v2/version\`. In the backend TUI
+the same switch is \`b\`; in \`config.toml\` it is \`network_enabled = false\`
+(see [Configuration](/docs/backend/configuration)).
+
+## Local admin API
+
+Over IPC only, the backend serves \`/v2/local-admin/*\` — status, config,
+pairing requests, devices and reset — without device signatures, because
+the socket already proves the caller is the same user. Over TCP these routes
+return 404.
+`),
+    },
+
+    'desktop/containers': {
+      slug: 'desktop/containers',
+      title: "Containers",
+      description: "Run backends in Docker, create container workspaces, and keep containers tidy.",
+      body: body(`
+A TodeX container is a Docker image with \`todex-agentd\` and the agent CLIs
+preinstalled. Each container is its own backend: agents run inside it, and
+your project folder is mounted in.
+
+## Requirements
+
+Docker with Compose v2 on the machine running TodeX Desktop. **Settings →
+TodeX Container** checks both, lists the image tags and every TodeX
+container, and offers start, stop, restart, upgrade, mounts, logs and delete.
+Deleting keeps the container's home volume unless you tick it. The page
+shares the \`~/.config/todex-container/<name>/\` layout with the \`todexc\`
+command-line tool.
+
+## Container workspaces
+
+**New workspace** offers **Local workspace** or **Container workspace**. For a
+container workspace, TodeX mounts the folder — at the same path on Linux and
+macOS, at \`/workspace/<folder>\` on Windows — pairs with the container's
+backend, installs the agent CLIs and offers to sync your agent config into it
+(see [Config sync](/docs/desktop/settings)).
+
+Container backends report \`deployment: container\`:
+
+- Pairing shows the \`todexc\` / \`docker exec\` command that approves this
+  device.
+- CLIs baked into the image show "Updated with the image"; upgrade the image
+  instead.
+- Path mappings translate between host and container paths, so **Choose
+  locally** and **Open** work on container files.
+
+## Setup commands
+
+A container workspace can run setup commands once, as the \`todex\` user, at
+the workspace path, through \`bash -c\`, stopping at the first failure.
+Templates are suggested for pnpm, npm, yarn, uv, \`requirements.txt\` and
+git submodules. A long setup can continue in the background.
+
+## Freezing idle containers
+
+**Freeze when idle** (off by default) pauses a container (\`docker pause\`)
+after an idle time between 15 minutes and 4 hours. Sending a message, opening
+a terminal or opening one of its workspaces resumes it; container cards also
+show **Freeze** and **Resume**.
+
+## Automatic cleanup
+
+Cleanup runs a minute after start and then every 6 hours:
+
+- remove old images;
+- remove containers stopped for 1, 7 or 30 days (or never);
+- unmount folders no workspace uses;
+- stop containers when TodeX quits.
+
+Home volumes are never deleted automatically.
+
+## Backend settings for containers
+
+| Setting | Effect |
+| --- | --- |
+| \`TODEX_AGENTD_DEPLOYMENT=container\` | Self-update is off; \`update\` exits 0 without changes |
+| \`TODEX_AGENTD_ADVERTISE_URL\` | Address the backend advertises to clients |
+| \`TODEX_AGENTD_IMAGE_CLI_DIR\` | CLIs managed by the image; installing them returns 409 |
+| \`TODEX_AGENTD_PATH_MAPPINGS\` | Host ↔ container path mappings (\`[[workspace.path_mappings]]\`) |
+
+Headless containers are administered with
+\`todex-agentd pair list|approve|reject\`, \`devices list|revoke\` and
+\`providers install <id>…\` (see [Install & run](/docs/backend/install)).
+`),
+    },
 
     'mobile': {
       slug: 'mobile',

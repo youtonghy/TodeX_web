@@ -22,7 +22,7 @@ export const zhCNDocs: DocsLocalePack = {
       body: body(`
 TodeX 是一个**可自托管的多智能体编程工作台**。一个 Rust 后端——
 \`todex-agentd\`——将你已经在使用的编程智能体（Codex、
-Claude Code、Pi、Devin、OpenCode、Grok Build、Antigravity，以及任何兼容 ACP 的智能体）
+Claude Code、Pi、Devin、OpenCode、Grok Build、Antigravity、omp，以及任何兼容 ACP 的智能体）
 统一编排到一个带认证的 API 之后。桌面端、Web 端和移动端客户端
 通过加密通道连接到它。
 
@@ -69,10 +69,72 @@ TodeX Web client ──────┐                 │
 
 | 目标 | 文档 |
 | --- | --- |
+| 了解 2.4 的变化，并观看实时演示 | [2.4 新功能](/docs/introduction/whats-new) |
 | 十分钟内跑起来 | [快速开始](/docs/introduction/quick-start) |
 | 了解术语 | [核心概念](/docs/introduction/concepts) |
 | 运行后端 | [后端概览](/docs/backend) |
 | 使用桌面应用 | [桌面端概览](/docs/desktop) |
+`),
+    },
+
+    'introduction/whats-new': {
+      slug: 'introduction/whats-new',
+      title: "2.4 新功能",
+      description: "隐私对话、从任意回复分叉、本机与容器后端、签名发布——附带可交互控制的实时演示。",
+      body: body(`
+TodeX 2.4.0（2026 年 11 月）同时发布了桌面端、后端和 Web 工作台。下面的演示
+就是真实的工作台，运行在演示数据上：脚本会新建对话、发送任务，并展开工作过程，
+让你看到智能体读取、修改代码并跑测试。可以在任意一步暂停细看，也可以从头播放。
+
+:::demo
+
+## 对话
+
+- **隐私对话** — 从侧边栏新建（⌘⇧P / Ctrl Shift P，Web 端为 ⌥⇧P）。内容只保存在
+  后端内存中：不写日志、不进历史缓存，守护进程重启后即消失。Claude Code、Codex
+  和 Pi 完全不写会话文件；omp、OpenCode 和 DeepSeek Harness 把会话文件放在随对话
+  一起删除的临时目录里（仅 Linux 和 macOS）。
+- **从更早的回复分叉** — 每条回复下都有分叉按钮。新对话保留到这条回复为止的历史，
+  工作区文件保持现状。Codex 和 Pi 可以从任意回复分叉，其他智能体只能从最新回复分叉。
+- **目标** — \`/goal <目标>\` 给 Codex 设定原生目标。输入框上方的目标栏显示状态、
+  Token 与耗时，并提供暂停、继续和清除。
+- **压缩指令** — Pi 支持 \`/todex compact <指令>\`。
+- **自动接受编辑** — Claude Code 的一种权限模式：文件修改自动通过，命令仍会询问。
+- **后台任务** — 智能体等待后台任务时，输入框和侧边栏行会持续显示为运行中。
+
+## 侧边栏与个人主页
+
+- **统一布局**（设置 → 外观 → 侧边栏布局）把每个工作区的对话收在它下面。
+- 工作区和分组可以加**标签**，**按标签分组**会按标签把列表分成几段。
+- “None”改名为**无工作区**。
+- **个人主页**取代了用量和额度弹窗——点击侧边栏底部的身份卡片即可打开。
+
+## 设置
+
+- **CLI 管理**移入设置，每个智能体 CLI 一个页面，并提供**全部更新**。
+- **配置同步**把 CLI 账户、设置、MCP、Skill 和 SSH 连接从一个后端复制到另一个，
+  两边并排实时显示。
+- **历史缓存**（桌面端）让最近看过的对话先从本机打开；只保存加密后的内容。
+- **Computer Use 引擎** — 内置，或实验性的 agent-desktop。
+
+详见[设置](/docs/desktop/settings)。
+
+## 后端与容器
+
+- **本机 Backend** — 桌面端可以部署并运行本机的 \`todex-agentd\`，通过本地 IPC
+  连接，无需开放网络端口。详见[本机 Backend](/docs/desktop/local-backend)。
+- **TodeX 容器** — 在 Docker 中运行后端并创建容器工作区，支持空闲冻结和初始化命令。
+  详见[容器](/docs/desktop/containers)。
+- 新增支持 **omp（oh-my-pi）** 智能体。
+
+## 安全
+
+- 安装脚本、后端自更新和桌面端更新只安装 \`SHA256SUMS.sig\` 能用发布密钥验证的版本。
+- 后端只响应来自桌面应用、回环页面和你列出的来源的跨域请求，并把经过代理的请求
+  视为远程请求。详见[安全与配对](/docs/backend/security)。
+- 隐私过滤器能识别多个国家/地区的证件号和电话号码，并新增激进选项；展示给你的
+  SSH 输出会把被过滤的值盖在可刮开的涂层下。
+- 终端主机列表新增 **本机** 主机，打开 \`ssh localhost\`。
 `),
     },
 
@@ -266,8 +328,11 @@ install.sh uninstall --purge       # also remove the ~/.todex-agent data dir
 \`\`\`
 
 脚本安装到 \`~/.local/bin\`（可用 \`--prefix\` 或
-\`TODEX_INSTALL_DIR\` 覆盖），校验 \`SHA256SUMS\`，保留一份回滚副本，
-并重启正在运行的受管守护进程。预编译的 Linux 二进制需要 glibc
+\`TODEX_INSTALL_DIR\` 覆盖），校验 \`SHA256SUMS\` 及其签名 \`SHA256SUMS.sig\`
+（使用已安装的 \`todex-agentd\` 或 OpenSSL 3），保留一份回滚副本，
+并重启正在运行的受管守护进程。无法校验签名时会拒绝安装，除非传入
+\`--allow-unverified\`；2.3.6 及之前的版本没有签名，会给出警告并只校验摘要。
+后端自带的更新程序同样只安装由发布密钥签名的版本。预编译的 Linux 二进制需要 glibc
 2.28+；Alpine 等 musl 发行版必须从源码构建。WSL 会被自动识别。
 
 固定的 \`--version\` 只有在 \`TODEX_AUTO_UPDATE=0\` 时才会保持——
@@ -306,6 +371,22 @@ todex-agentd daemon autostart enable
 以实心终端单元格渲染；当二维码超出终端宽度时，可在二维码弹窗中
 按 \`b\`，在浏览器里打开一个正方形 SVG 版本。凭据弹窗显示的是
 传输密钥指纹。
+
+## 无界面管理
+
+没有 TUI 时（在容器里或通过 SSH），同样的操作有对应命令：
+
+\`\`\`bash
+todex-agentd pair list                    # pending pairing requests
+todex-agentd pair approve <code> [--yes]
+todex-agentd pair reject <code>
+todex-agentd devices list
+todex-agentd devices revoke <device>
+todex-agentd providers install codex claude --if-missing
+\`\`\`
+
+退出码 2 表示没有匹配项；3 表示运行命令的用户与守护进程不同。桌面端也可以在
+本机部署并管理后端——见[本机 Backend](/docs/desktop/local-backend)。
 `),
     },
 
@@ -336,6 +417,16 @@ todex-agentd daemon autostart enable
 | 设备认证 | — | \`TODEX_AGENTD_ENABLE_AUTH\` | \`true\` |
 | 配对加密 | — | \`TODEX_AGENTD_PAIRING_ENCRYPTION\` | \`ml-kem-768\` |
 | 外部 API | \`--enable-api\` / \`--api-port\` | \`TODEX_AGENTD_API_ENABLED\` / \`TODEX_AGENTD_API_PORT\` | 关闭 / \`7346\` |
+| 网络接口 | — | \`TODEX_AGENTD_NETWORK_ENABLED\` | \`true\` |
+| 本地 IPC | — | \`TODEX_AGENTD_IPC_ENABLED\` / \`TODEX_AGENTD_IPC_PATH\` | 开启 / \`<data_dir>/agentd.sock\` |
+| 允许的浏览器来源 | — | \`TODEX_AGENTD_CORS_ORIGINS\` | 无 |
+| 受信任的代理 | — | \`TODEX_AGENTD_TRUSTED_PROXIES\` | 无 |
+| 配对来源 | — | \`TODEX_AGENTD_PAIRING_ORIGINS\` | 无 |
+| omp 二进制 | — | \`[agent]\` 中的 \`omp_bin\` | \`omp\` |
+
+\`network_enabled = false\` 需要开启 IPC：此时后端只通过 IPC 套接字（Windows 上为
+命名管道）为客户端服务，并保留一个随机回环端口供智能体工具和 \`/v2/version\` 使用。
+容器部署还有自己的变量——见[容器](/docs/desktop/containers)。
 
 ## 示例 \`config.toml\`
 
@@ -346,6 +437,12 @@ pairing_encryption = "ml-kem-768"
 data_dir = "~/.todex-agent"
 workspace_root = "~/projects"
 # workspace_roots = ["~/projects", "/srv/repos"]
+# Serve clients over local IPC only (needs [ipc] enabled).
+# network_enabled = false
+
+[ipc]
+enabled = true
+# path = "~/.todex-agent/agentd.sock"
 
 [agent]
 default_agent = "codex"
@@ -362,6 +459,10 @@ args = ["--stdio"]
 [security]
 enable_auth = true
 enable_tls = false
+# Browser origins allowed besides the desktop app and loopback pages.
+# cors_origins = ["https://todex.example.com"]
+# Proxies whose forwarded client address is trusted.
+# trusted_proxies = ["10.0.0.2"]
 
 [api]
 enabled = false
@@ -411,6 +512,43 @@ TodeX 采用 fail-closed 设计：设备被显式批准之前，没有任何东�
 密钥只能通过设备配对下发，不支持自行导入。设置中会显示已钉住的
 协议、密钥指纹与验证状态。未经配对验证就保存了密钥的档案，在任何
 主机上（包括回环）都会被拒绝，直到重新配对。明文 \`none\` 仅限回环。
+
+## 浏览器来源与代理
+
+后端只响应来自桌面应用（\`todex-desktop://app\`）、回环页面以及
+\`security.cors_origins\` 中精确列出的来源的跨域请求。带有 \`Forwarded\`、
+\`X-Forwarded-For\` 或 \`X-Real-IP\` 的请求即使从回环地址到达也视为远程请求，
+因此同一主机上的反向代理无法访问仅限回环的路径；把代理写进
+\`security.trusted_proxies\` 后才会采用它转发的客户端地址。配对请求会显示其来源。
+
+## 本地 IPC
+
+IPC 套接字（Windows 上为命名管道）只接受运行守护进程的那个用户。通过它连接的
+客户端不需要设备签名，并可使用本地管理 API。设置 \`network_enabled = false\`
+后，IPC 是唯一的入口。见[本机 Backend](/docs/desktop/local-backend)。
+
+## 签名发布
+
+每个版本都会发布 \`SHA256SUMS.sig\`——对摘要文件的 Ed25519 签名。\`install.sh\`、
+后端更新程序、桌面端的后端部署以及桌面端更新都会拒绝签名无法验证的版本。
+
+## 隐私对话
+
+隐私对话只保存在守护进程内存中：不写日志、不写密钥环、不计入历史存储，重启后即
+消失。Claude Code、Codex 和 Pi 不写会话文件；omp、OpenCode 和 DeepSeek Harness
+把会话文件写到临时目录（依次尝试 \`$XDG_RUNTIME_DIR/todex-private\`、\`/dev/shm\`、
+系统临时目录），随对话一起删除，且仅支持 Linux 和 macOS。Grok Build、Devin、
+Antigravity 和 ACP 配置不支持隐私对话。隐私对话不能分叉、定时、压缩，也不能被
+其他对话引用。内存仍可能进入交换分区或核心转储，智能体的服务商按其自身政策处理
+请求，对工作区文件的修改照常保留。
+
+## 隐私过滤器
+
+输出过滤器会把机密内容从智能体看到的输出中隐藏。它能识别证件号（中国大陆、香港、
+台湾、美国 SSN、英国、新加坡、韩国、西班牙和巴西按校验位或格式识别；护照等其他
+证件需紧邻名称词）和电话号码（国际格式及多个国家/地区的本地格式）。**激进选项**
+默认关闭，还会覆盖 URL Token、高熵字符串、UUID、邮箱、电话号码和公网 IP；另外最多
+可添加 32 个自定义键名。在智能体 SSH 输出视图中，被过滤的值盖在可刮开的涂层下。
 
 ## 工作区边界
 
@@ -647,6 +785,9 @@ React 19、Vite 7、Tailwind CSS v4 与 HeroUI Pro 构建。它与 Web
 
 ## 桌面端独有功能
 
+- [本机 Backend](/docs/desktop/local-backend)：部署并运行本机的后端，通过 IPC 连接。
+- [容器](/docs/desktop/containers)：在 Docker 中运行后端并创建容器工作区。
+- 最近看过的对话的本机历史缓存。
 - 面向回环工作区的原生文件与目录选择器。
 - Electron \`userData\` 持久化、经由 \`contextBridge\` 的安全 IPC
   （\`nodeIntegration: false\`），以及按构建划分的诊断日志。
@@ -735,11 +876,15 @@ WebSocket 及未捕获错误，令牌、Cookie、密钥与附件均已脱敏。
 设置中会显示已钉住的协议、密钥指纹与验证状态。使用**重新配对**
 可再次进行验证；修改后端地址会清除已钉住的密钥。
 
+对于同一台机器上的后端，桌面端可以跳过以上步骤，直接通过本地 IPC 连接——见
+[本机 Backend](/docs/desktop/local-backend)。容器后端会显示批准本设备的
+\`todexc\` / \`docker exec\` 命令——见[容器](/docs/desktop/containers)。
+
 ## 从客户端管理 Provider
 
-配对面板会列出后端上 Codex、Pi、Claude Code、Grok Build 与
-ACP 的 CLI 清单及已安装/最新版本，可一键安装缺失的 CLI 并启动
-受管升级。Provider 账户可导出/导入为 JSON 文件，用于在主机之间
+**设置 → CLI 管理**列出后端上智能体 CLI 的已安装与最新版本，可安装缺失的 CLI，
+并同时运行多个升级（见[设置](/docs/desktop/settings)）。**配置同步**可在两个后端
+之间复制账户、设置、MCP、Skill 和 SSH 连接。Provider 账户可导出/导入为 JSON 文件，用于在主机之间
 同步智能体凭据——文件内含明文密钥，请像对待机密一样保管。
 
 ## 诊断
@@ -761,13 +906,25 @@ ACP 的 CLI 清单及已安装/最新版本，可一键安装缺失的 CLI 并�
       description: '侧边栏、对话面板、工作台标签页与键盘快捷键。',
       body: body(`
 工作台在桌面端与 Web 端完全一致。本页使用桌面端术语；
-Web 端有差异之处会单独注明。
+Web 端有差异之处会单独注明。先看看它实际运行的样子——下面的演示是运行在演示数据上的
+真实界面，由脚本自动操作：
+
+:::demo
 
 ## 左侧边栏
 
-上方是工作区，下方是对话。对话行会显示当前智能体徽标和运行状态；
-右键操作包括新建、重命名、分叉和删除。工作区可从已配置工作区
-根目录下的任意目录添加。
+上方是工作区，下方是对话；或者在**设置 → 外观 → 侧边栏布局**中选择**统一**，让每个
+工作区下面直接列出它的对话（每页五条）。对话行会显示当前智能体徽标和运行状态，
+智能体等待后台任务时也保持“运行中”；右键操作包括新建、重命名、分叉和删除。工作区
+可从已配置工作区根目录下的任意目录添加，也可以建在[容器](/docs/desktop/containers)里。
+
+- **标签** — 在工作区上**编辑标签**，或在分组上**编辑分组标签**。工作区标题栏上的
+  标签按钮可开启**按标签分组**：每个标签一段，**未加标签**排在最后。
+- **无工作区**（原“None”）存放不属于任何工作区的对话；有多个后端时，它们合成一个
+  内置分组。
+- **隐私对话** — **新建隐私对话**（⌘⇧P / Ctrl Shift P）选择智能体后开始一段只保存在
+  后端内存中的对话，带有徽标和提示。见[安全与配对](/docs/backend/security)。
+- **个人主页** — 点击底部的身份卡片打开个人主页：用量、套餐额度和活跃情况。
 
 ## 定时对话与可选功能
 
@@ -791,6 +948,11 @@ Web 端有差异之处会单独注明。
   Codex Fast 模式。
 - 推理过程与工具详情在展开时才懒加载挂载；最终回答与上下文和
   执行噪声保持隔离。
+- 回复下方的**从这条回复分叉**会新建一个对话，保留到这里为止的历史（工作区文件不会
+  回滚）。Codex 和 Pi 可从任意回复分叉，其他智能体只能从最新回复分叉。
+- **\`/goal <目标>\`**（Codex）设定原生目标；输入框上方的目标栏显示状态与用量，并提供
+  暂停、继续和清除。Pi 支持 \`/todex compact <指令>\`。
+- 权限选择器为 Claude Code 提供**自动接受编辑**：文件修改自动通过，命令仍会询问。
 
 ## 右侧——工作台标签页
 
@@ -811,6 +973,9 @@ Web 端有差异之处会单独注明。
 | ⇧⌘G / Ctrl Shift G | Git 操作 |
 | ⌘N（Web 端为 ⌥N） | 新建对话 |
 | ⇧⌘N（Web 端为 ⌥⇧N） | 添加工作区 |
+| ⇧⌘P（Web 端为 ⌥⇧P） | 新建隐私对话 |
+| ⌘L / Ctrl L | 快速搜索（对话及其内容） |
+| ⌘1…⌘9 / Ctrl 1…9 | 切换工作台标签页 |
 | ⇧⌘K / Ctrl Shift K | 看板任务面板 |
 | ⇧⌘T（Web 端为 ⌥⇧T） | 终端视图（SSH 主机、密钥、远程文件） |
 
@@ -851,6 +1016,186 @@ OSC 9 / OSC 777 发送提醒。
     },
 
     // ------------------------------------------------------------------- 移动端
+
+    'desktop/settings': {
+      slug: 'desktop/settings',
+      title: "设置",
+      description: "CLI 管理、后端之间的配置同步、本机历史缓存与 Computer Use 引擎。",
+      body: body(`
+设置页左侧是分组导航。本页介绍 2.4 中有变化的部分；后端相关的内容另有专页
+（[本机 Backend](/docs/desktop/local-backend)、[容器](/docs/desktop/containers)）。
+
+## CLI 管理
+
+**设置 → CLI 管理**列出后端上的智能体 CLI（Codex、Claude Code、Pi、Grok Build、
+omp 以及 ACP 配置）的已安装与最新版本。可以同时安装或升级多个 CLI，**全部更新**
+会执行所有待升级项。随容器镜像提供的 CLI 显示为“随镜像更新”。
+
+每个 CLI 有自己的页面，包含以下标签页：
+
+| 标签页 | 内容 |
+| --- | --- |
+| 设置 | CLI 自身的设置和 Provider 配置 |
+| MCP / Skill | 所选后端上的 MCP 服务器和 Skill |
+| 账户 | Provider 账户与 API Key |
+| 清理 | 该 CLI 在后端上的原生会话 |
+| 插件 | omp 插件：安装、升级、删除、启用或停用 |
+
+列表顶部的**共享 MCP / Skill**管理所有智能体都能看到的那部分。启用或删除 Provider
+配置前会先确认，并说明 CLI 全局配置中会改变什么；Claude Code 的配置会在首次启用前
+备份。Codex 账户表单可以从 Base URL 拉取模型列表，设置思考强度和上下文窗口预设——
+清空某个字段即会从 \`config.toml\` 中删除对应的键。
+
+## 配置同步
+
+**设置 → 后端连接 → 配置同步**把两个后端并排实时显示：**源后端**（从这里读取）和
+**目标后端**（写入这里）。选择要复制的内容：
+
+- CLI 账户
+- 设置
+- MCP 服务器
+- Skill
+- SSH 连接
+
+只写入新增和变化的项，不会删除目标上的任何内容。界面上的密钥会被遮蔽。使用密码
+登录的 SSH 主机和私钥永远不会同步——请先把私钥放到目标机器上。
+
+## 存储与历史缓存
+
+**设置 → 通用 → 存储**中有**在本机缓存最近对话**（桌面端，默认开启）。最近看过的
+对话会先从本机打开，再从后端补齐，断开连接时也能阅读。
+
+- 只保存后端发来的加密内容，从不保存明文。
+- 最多 100 个对话、每个最新 300 条事件、总计 200 MB；超出时先淘汰最久未用的。
+- 删除对话会同时清掉它的缓存；吊销设备或移除后端会清掉整个缓存。
+- **清空缓存**只删除本机的副本。
+
+隐私对话永远不会被缓存。Web 客户端没有历史缓存。
+
+## Computer Use 引擎
+
+Computer Use 页面新增**引擎**选项：**内置**，或 **agent-desktop（实验）**——后者在
+首次使用时由后端下载，状态显示为就绪、下载中、安装失败或未安装。
+
+## 外观
+
+**侧边栏布局**可在**分开**（工作区和对话各占一栏，默认）与**统一**（对话收在所属
+工作区下）之间切换。终端的 Shell 集成也在这里设置。
+`),
+    },
+
+    'desktop/local-backend': {
+      slug: 'desktop/local-backend',
+      title: "本机 Backend",
+      description: "在桌面端部署本机的后端，并通过本地 IPC 连接。",
+      body: body(`
+桌面端可以在它所在的机器上运行 \`todex-agentd\`，并通过**本地 IPC** 与之通信——
+Unix 套接字（Windows 上为命名管道），只有你的用户账户能打开。这条连接不需要网络
+端口，也不需要设备验证。
+
+## 部署并连接
+
+打开**设置 → 本机 Backend**。**本机**卡片会运行与 TodeX Desktop 同版本的
+\`todex-agentd\`：
+
+1. **部署并连接**会下载后端、校验签名、启动它、为本应用配对并通过 IPC 连接。
+2. 之后卡片提供**启动并连接**、**重启**、**停止**、**重新配对**和**查看日志**。
+
+桌面端只安装 \`SHA256SUMS.sig\` 能用发布密钥验证的后端版本。较早的未签名版本（2.3.6
+及之前）只有在恰好是本应用配对的版本时才会被接受。
+
+启动选项有**登录时自动启动**和**退出 TodeX 时停止**（默认关闭，这样后端仍能为其他
+设备服务）。监听部分可设置监听地址（默认 \`127.0.0.1\`）、端口和配对加密方式。
+
+同一页面还可以编辑工作区根目录，显示远程访问用的配对二维码和传输密钥指纹，批准或
+拒绝配对请求，吊销设备，以及重置后端。
+
+## 把现有连接切换到 IPC
+
+如果某个回环连接（\`http://127.0.0.1:7345\`）指向的后端同时提供 IPC，应用会提示
+**切换到 IPC**。IPC 接管该守护进程后，对应的 TCP 配置会被停用，数据迁移到 IPC
+配置。可以用**提醒切换到 IPC 连接**关闭这个提示。
+
+## 关闭网络接口
+
+如果只有本应用使用这个后端，可以关闭**网络接口**。只有在应用通过 IPC 连接时才能
+关闭，关闭前会确认，重启后生效。之后后端只保留一个随机回环端口，供智能体工具和
+\`/v2/version\` 使用。后端 TUI 里对应的开关是 \`b\`；\`config.toml\` 中是
+\`network_enabled = false\`（见[配置](/docs/backend/configuration)）。
+
+## 本地管理 API
+
+后端只在 IPC 上提供 \`/v2/local-admin/*\`——状态、配置、配对请求、设备和重置——
+且不需要设备签名，因为套接字本身已经证明调用方是同一用户。通过 TCP 访问这些路由会
+返回 404。
+`),
+    },
+
+    'desktop/containers': {
+      slug: 'desktop/containers',
+      title: "容器",
+      description: "在 Docker 中运行后端、创建容器工作区，并让容器保持整洁。",
+      body: body(`
+TodeX 容器是预装了 \`todex-agentd\` 和各智能体 CLI 的 Docker 镜像。每个容器都是一个
+独立的后端：智能体在容器里运行，项目目录挂载进去。
+
+## 前提
+
+运行 TodeX Desktop 的机器上需要 Docker 和 Compose v2。**设置 → TodeX Container**
+会检查这两者，列出镜像标签和所有 TodeX 容器，并提供启动、停止、重启、升级、挂载、
+日志和删除操作。删除时默认保留容器的 home 卷，除非勾选。该页面与命令行工具
+\`todexc\` 共用 \`~/.config/todex-container/<name>/\` 目录结构。
+
+## 容器工作区
+
+**新建工作区**时可以选择**本地工作区**或**容器工作区**。对于容器工作区，TodeX 会
+挂载目录——Linux 和 macOS 上挂到相同路径，Windows 上挂到 \`/workspace/<目录名>\`——
+与容器内的后端配对、安装智能体 CLI，并提议把你的智能体配置同步进去（见
+[配置同步](/docs/desktop/settings)）。
+
+容器后端会报告 \`deployment: container\`：
+
+- 配对时会显示批准本设备的 \`todexc\` / \`docker exec\` 命令。
+- 镜像自带的 CLI 显示“随镜像更新”，请通过升级镜像来更新它们。
+- 路径映射在主机路径和容器路径之间转换，因此**在本地选择**和**打开**对容器内的
+  文件同样可用。
+
+## 初始化命令
+
+容器工作区可以运行一次初始化命令：以 \`todex\` 用户身份、在工作区路径下、通过
+\`bash -c\` 执行，遇到第一个失败即停止。会为 pnpm、npm、yarn、uv、
+\`requirements.txt\` 和 git 子模块推荐模板。耗时较长的初始化可以转到后台继续。
+
+## 空闲冻结
+
+**空闲时自动冻结**（默认关闭）会在容器空闲 15 分钟到 4 小时（可设置）后将其暂停
+（\`docker pause\`）。发送消息、打开终端或打开它的工作区都会让它恢复；容器卡片上
+也有**冻结**和**恢复**按钮。
+
+## 自动清理
+
+清理在启动一分钟后运行，此后每 6 小时一次：
+
+- 删除旧镜像；
+- 删除已停止 1、7 或 30 天的容器（或从不）；
+- 卸载没有工作区使用的目录；
+- 退出 TodeX 时停止容器。
+
+home 卷永远不会被自动删除。
+
+## 容器相关的后端设置
+
+| 设置 | 作用 |
+| --- | --- |
+| \`TODEX_AGENTD_DEPLOYMENT=container\` | 关闭自更新；\`update\` 不做任何改动并以 0 退出 |
+| \`TODEX_AGENTD_ADVERTISE_URL\` | 后端向客户端公布的地址 |
+| \`TODEX_AGENTD_IMAGE_CLI_DIR\` | 由镜像管理的 CLI；安装它们会返回 409 |
+| \`TODEX_AGENTD_PATH_MAPPINGS\` | 主机 ↔ 容器路径映射（\`[[workspace.path_mappings]]\`） |
+
+无界面的容器可以用 \`todex-agentd pair list|approve|reject\`、\`devices list|revoke\` 和
+\`providers install <id>…\` 管理（见[安装与运行](/docs/backend/install)）。
+`),
+    },
 
     'mobile': {
       slug: 'mobile',
