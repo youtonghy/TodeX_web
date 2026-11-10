@@ -233,3 +233,24 @@
   .docs-title { font-size: 32px; }
   .docs-open-app { display: none; }
 }
+
+/* ---------- Embedded walkthrough (DocsDemo) ---------- */
+
+.docs-demo { margin: 22px 0 26px; border: 1px solid #e3e8e2; border-radius: 12px; overflow: hidden; background: #fff; box-shadow: 0 14px 34px -22px #3d51654d; }
+.docs-demo-stage { position: relative; width: 100%; overflow: hidden; aspect-ratio: 1440 / 880; background: #edf1f4; }
+.docs-demo-stage iframe { position: absolute; top: 0; left: 0; border: 0; transform-origin: 0 0; opacity: 0; transition: opacity .4s ease; pointer-events: none; }
+.docs-demo-stage iframe.is-loaded { opacity: 1; }
+.docs-demo-controls { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-top: 1px solid #e9eeeb; background: #f7f9f6; color: #4a5560; font-size: 12px; }
+.docs-demo-restart { gap: 6px; font-size: 12px; }
+.docs-demo-progress { position: relative; flex: 1; min-width: 40px; height: 4px; border-radius: 4px; background: #e2e7e1; overflow: hidden; }
+.docs-demo-progress > span { position: absolute; inset: 0; background: #b24d32; transform-origin: 0 50%; transition: transform .2s linear; }
+.docs-demo-step { display: inline-flex; align-items: baseline; gap: 6px; min-width: 9.5em; justify-content: flex-end; white-space: nowrap; }
+.docs-demo-step small { font: 10px "SFMono-Regular", Consolas, monospace; color: #8a949a; }
+.docs-demo-note { margin: 0; padding: 0 12px 9px; background: #f7f9f6; color: #7a8590; font-size: 11.5px; line-height: 1.6; }
+@media (max-width: 640px) {
+  .docs-demo-restart { min-width: 0; padding-inline: 8px; }
+  .docs-demo-step { min-width: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .docs-demo-progress > span, .docs-demo-stage iframe { transition: none; }
+}

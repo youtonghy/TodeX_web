@@ -1165,15 +1165,27 @@ export type DemoTurnStep = [number, string, Record<string, unknown>];
 /** A step whose function payload is read when it fires (null skips it). */
 type DemoStep = [number, string, Record<string, unknown> | (() => Record<string, unknown> | null)];
 
-// Web only: the landing page's autoplay answers its own prompt with a richer
-// scripted turn; anything else typed in the preview gets the canned one below.
-let turnScript: ((text: string, turnId: string) => DemoTurnStep[] | null) | null = null;
+/** Runs `callback` after `ms`; returns a function that cancels it. */
+export type DemoTimer = (callback: () => void, ms: number) => () => void;
 
-export function setDemoTurnScript(script: typeof turnScript): void {
+const realTimer: DemoTimer = (callback, ms) => {
+  const id = setTimeout(callback, ms);
+  return () => clearTimeout(id);
+};
+
+// Web only: the site's autoplay answers its own prompt with a richer scripted
+// turn; anything else typed in the preview gets the canned one below. The
+// autoplay may also pass its own (pausable) clock, which every scripted turn
+// then runs on, so the docs player can hold a turn mid-stream.
+let turnScript: ((text: string, turnId: string) => DemoTurnStep[] | null) | null = null;
+let demoTimer: DemoTimer = realTimer;
+
+export function setDemoTurnScript(script: typeof turnScript, timer: DemoTimer = realTimer): void {
   turnScript = script;
+  demoTimer = timer;
 }
 
-type DemoRun = { turnId: string; timers: ReturnType<typeof setTimeout>[]; onCancel?: () => void };
+type DemoRun = { turnId: string; timers: (() => void)[]; onCancel?: () => void };
 /** Scripted turns still playing, by conversation id, so they can be cancelled. */
 const demoRuns = new Map<string, DemoRun>();
 
@@ -1202,7 +1214,7 @@ function scheduleDemoTurn(journal: Journal, turnId: string, steps: DemoStep[], o
   const run: DemoRun = { turnId, timers: [], onCancel };
   demoRuns.set(journal.manifest.id, run);
   for (const [delay, type, payload] of steps) {
-    run.timers.push(setTimeout(() => {
+    run.timers.push(demoTimer(() => {
       const body = typeof payload === 'function' ? payload() : payload;
       if (!body) return;
       appendDemoEvent(journal, turnId, type, body);
@@ -1214,7 +1226,7 @@ function scheduleDemoTurn(journal: Journal, turnId: string, steps: DemoStep[], o
 function cancelDemoTurn(journal: Journal, turnId?: string): boolean {
   const run = demoRuns.get(journal.manifest.id);
   if (!run || (turnId && run.turnId !== turnId)) return false;
-  run.timers.forEach(clearTimeout);
+  run.timers.forEach((cancel) => cancel());
   demoRuns.delete(journal.manifest.id);
   appendDemoEvent(journal, run.turnId, 'turn.cancelled', { status: 'cancelled' });
   run.onCancel?.();

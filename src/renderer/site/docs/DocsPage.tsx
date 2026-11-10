@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Button } from '@heroui/react';
 import { useTree } from '@headless-tree/react';
 import { hotkeysCoreFeature, selectionFeature, syncDataLoaderFeature } from '@headless-tree/core';
@@ -9,6 +9,7 @@ import { Tree, TreeItem, TreeItemLabel } from '../../components/reui/tree';
 import { useLocale, useT, type Locale } from '../../i18n';
 import brand from '../../assets/brand/t-icon-light.png';
 import { LanguageSwitcher } from '../LanguageSwitcher';
+import { DocsDemo } from './DocsDemo';
 import { ancestorsOf, defaultDocSlug, docPageOrder, docSectionIds, docsRootId, getDocsContent, isDocSlug, pageToItemId, type DocTreeItem } from './docsContent';
 import './docs.css';
 
@@ -34,6 +35,10 @@ function textOf(node: ReactNode): string {
   if (typeof node === 'object' && 'props' in node) return textOf((node.props as { children?: ReactNode }).children);
   return '';
 }
+
+// A line holding only `:::demo` in a page body embeds the workbench
+// walkthrough (DocsDemo) at that spot.
+const demoMarker = /^:::demo[ \t]*$/m;
 
 type TocEntry = { id: string; text: string; depth: 2 | 3 };
 
@@ -73,6 +78,7 @@ function DocsPageView({ locale }: { locale: Locale }) {
 
   const page = docs.pages[slug] ?? docs.pages[defaultDocSlug];
   const toc = useMemo(() => tocOf(page.body), [page.body]);
+  const segments = useMemo(() => page.body.split(demoMarker), [page.body]);
   const index = docPageOrder.indexOf(page.slug);
   const prev = index > 0 ? docs.pages[docPageOrder[index - 1]] : null;
   const next = index >= 0 && index < docPageOrder.length - 1 ? docs.pages[docPageOrder[index + 1]] : null;
@@ -249,7 +255,12 @@ function DocsPageView({ locale }: { locale: Locale }) {
           </nav>
           <h1 className="docs-title">{page.title}</h1>
           <p className="docs-description">{page.description}</p>
-          <Markdown id={page.slug} components={markdownComponents}>{page.body}</Markdown>
+          {segments.map((segment, part) => (
+            <Fragment key={part}>
+              {part > 0 ? <DocsDemo /> : null}
+              {segment.trim() ? <Markdown id={`${page.slug}#${part}`} components={markdownComponents}>{segment}</Markdown> : null}
+            </Fragment>
+          ))}
           <nav className="docs-prev-next" aria-label={t('docs.pagination.label')}>
             {prev ? (
               <a className="docs-pager prev" href={docsPath(prev.slug)} onClick={(event) => { event.preventDefault(); navigate(prev.slug); }}>

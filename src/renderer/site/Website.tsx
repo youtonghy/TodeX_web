@@ -5,7 +5,7 @@ import { RiArrowDownLine, RiArrowRightLine, RiArrowRightUpLine, RiCloseLine, RiC
 import { ProviderIcon } from '../components/ProviderIcon';
 import { useLocale, useT } from '../i18n';
 import brand from '../assets/brand/t-icon-light.png';
-import { DEMO_PATH, type DemoPlaybackMessage } from '../demo/playback';
+import { DEMO_PATH, demoFrameSize, type DemoPlaybackMessage } from '../demo/playback';
 import { CopyCommand } from './CopyCommand';
 import { Downloads } from './Downloads';
 import { LanguageSwitcher } from './LanguageSwitcher';
@@ -37,13 +37,6 @@ function Navigation() {
 
 // The preview is the real workbench (/demo) on the desktop's demo fixtures,
 // with a scripted walkthrough playing on top.
-// Wide pages get the desktop layout scaled down so the three panes keep their
-// real proportions; phones get the workbench's own phone layout at close to
-// 1:1, which stays readable instead of shrinking a desktop to ~6px text.
-function demoFrameSize(containerWidth: number) {
-  return containerWidth < 640 ? { width: 390, height: 700 } : { width: Math.max(containerWidth, 1440), height: 880 };
-}
-
 function DemoFrame({ width }: { width: number }) {
   const locale = useLocale();
   const frameRef = useRef<HTMLIFrameElement>(null);

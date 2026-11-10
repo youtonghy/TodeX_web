@@ -1,12 +1,18 @@
-// Landing-page autoplay for the demo (`/demo?autoplay`): a pointer drives the
-// real workbench — opens a new conversation, types a prompt and sends it —
-// and the in-memory backend answers with a scripted turn. The static `/demo`
-// (no `autoplay`) stays identical to the desktop's `?demo`.
+// Site autoplay for the demo (`/demo?autoplay`): a pointer drives the real
+// workbench — opens a new conversation, types a prompt and sends it — and the
+// in-memory backend answers with a scripted turn. The landing page loops it;
+// the docs player adds `&controls`, which plays it once, follows the host's
+// play/pause and reports progress back. The static `/demo` (no `autoplay`)
+// stays identical to the desktop's `?demo`.
 import { t } from '../i18n';
-import { isDemoPlaybackMessage } from './playback';
-import { setDemoTurnScript, type DemoTurnStep } from './transport';
+import { isDemoPlaybackMessage, type DemoStatusMessage, type DemoStep } from './playback';
+import { setDemoTurnScript, type DemoTimer, type DemoTurnStep } from './transport';
 
 const LOOP_PAUSE_MS = 8000;
+/** The docs player lets the finished answer sit this long before it ends. */
+const END_HOLD_MS = 1500;
+const CLICK_MS = 850 + 180 + 250;
+const TYPE_MS = 55;
 
 class Stopped extends Error {}
 
@@ -86,27 +92,71 @@ function visible(element: Element | null): element is HTMLElement {
   return rect.width > 0 && rect.height > 0;
 }
 
-export function startDemoAutoplay(): void {
-  if (!new URLSearchParams(window.location.search).has('autoplay')) return;
-  // Reduced motion keeps the still demo.
-  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-  const prompt = t('demo.autoplayPrompt');
-  setDemoTurnScript((text, turnId) => (text.trim() === prompt ? scriptedTurn(prompt, turnId) : null));
+/** Time that only passes while the walkthrough plays and the page is shown, so
+ * pausing holds the pointer, the typing and the streamed turn alike. */
+function createClock() {
+  let now = 0;
+  let running = true;
+  let last = performance.now();
+  const tasks = new Set<{ due: number; callback: () => void }>();
+  window.setInterval(() => {
+    const current = performance.now();
+    // Cap the step so a throttled background tab does not jump ahead.
+    if (running && document.visibilityState === 'visible') now += Math.min(current - last, 250);
+    last = current;
+    for (const task of [...tasks].sort((a, b) => a.due - b.due)) {
+      if (task.due > now) break;
+      tasks.delete(task);
+      task.callback();
+    }
+  }, 40);
+  const after: DemoTimer = (callback, ms) => {
+    const task = { due: now + ms, callback };
+    tasks.add(task);
+    return () => { tasks.delete(task); };
+  };
+  return {
+    after,
+    wait: (ms: number) => new Promise<void>((resolve) => { after(resolve, ms); }),
+    now: () => now,
+    setRunning(value: boolean) { running = value; },
+  };
+}
 
-  // The landing page pauses the walkthrough while it is scrolled away.
-  let hostVisible = true;
+export function startDemoAutoplay(): void {
+  const params = new URLSearchParams(window.location.search);
+  if (!params.has('autoplay')) return;
+  const controlled = params.has('controls');
+  // Reduced motion keeps the still demo on the landing page; the docs player
+  // only moves when the reader presses play.
+  if (!controlled && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const prompt = t('demo.autoplayPrompt');
+  const clock = createClock();
+  setDemoTurnScript((text, turnId) => (text.trim() === prompt ? scriptedTurn(prompt, turnId) : null), clock.after);
+
+  // The landing page pauses the walkthrough while it is scrolled away; the
+  // docs player also pauses it on request. The player starts it explicitly.
+  if (controlled) clock.setRunning(false);
   window.addEventListener('message', (event) => {
     if (event.origin !== window.location.origin || event.source !== window.parent) return;
-    if (isDemoPlaybackMessage(event.data)) hostVisible = event.data.playing;
+    if (isDemoPlaybackMessage(event.data)) clock.setRunning(event.data.playing);
   });
-  const wait = async (ms: number) => {
-    let remaining = ms;
-    while (remaining > 0) {
-      const slice = Math.min(remaining, 100);
-      await new Promise((resolve) => window.setTimeout(resolve, slice));
-      if (hostVisible && document.visibilityState === 'visible') remaining -= slice;
-    }
+
+  const turnMs = scriptedTurn(prompt, 'timing').at(-1)![0];
+  // Rough length of the walkthrough, for the docs player's progress bar.
+  const totalMs = 2600 + CLICK_MS * 4 + 700 + 400 + Array.from(prompt).length * TYPE_MS + turnMs + END_HOLD_MS;
+  let step: DemoStep = 'loading';
+  let ended = false;
+  const report = () => {
+    if (!controlled || window.parent === window) return;
+    const progress = ended ? 1 : Math.min(clock.now() / totalMs, 0.99);
+    const message: DemoStatusMessage = { type: 'todex-demo-status', step, progress, ended };
+    window.parent.postMessage(message, window.location.origin);
   };
+  const enter = (next: DemoStep) => { step = next; report(); };
+  if (controlled) window.setInterval(report, 200);
+
+  const wait = clock.wait;
   const find = async (lookup: () => Element | null | undefined, timeout = 8000) => {
     for (let waited = 0; waited < timeout; waited += 100) {
       const element = lookup();
@@ -130,7 +180,9 @@ export function startDemoAutoplay(): void {
   };
 
   const run = async () => {
+    enter('loading');
     await wait(2600);
+    enter('newConversation');
     // Phones keep the sidebar in a drawer: open it for the new conversation.
     const newConversation = byLabel(t('sidebar.newConversation'));
     if (!visible(newConversation() ?? null)) await click(await find(byLabel(t('app.openSidebar'))));
@@ -139,26 +191,39 @@ export function startDemoAutoplay(): void {
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
     await wait(700);
 
+    enter('typing');
     const composer = await find(() => document.querySelector('[role="textbox"][contenteditable="true"]'));
     await click(composer, true);
     composer.focus();
     for (const character of Array.from(prompt)) {
       document.execCommand('insertText', false, character);
-      await wait(55);
+      await wait(TYPE_MS);
     }
     await wait(400);
+    enter('send');
     await click(await find(byLabel(t('workbench.send'))));
     // Open the running turn's work process so the steps stream in view.
+    enter('process');
     const process = await find(() => [...document.querySelectorAll('button[aria-expanded="false"]')]
       .find((button) => button.textContent?.includes(t('chat.working'))));
     await click(process);
     pointer.hide();
-    // The turn streams on its own; let the finished answer sit, then start over.
-    await wait(scriptedTurn(prompt, 'timing').at(-1)![0] + LOOP_PAUSE_MS);
-    window.location.reload();
+    enter('answer');
+    // The turn streams on its own; let the finished answer sit, then start
+    // over (landing) or stop (docs player, which offers a replay).
+    if (!controlled) {
+      await wait(turnMs + LOOP_PAUSE_MS);
+      window.location.reload();
+      return;
+    }
+    await wait(turnMs + END_HOLD_MS);
+    ended = true;
+    enter('done');
   };
   void run().catch((error: unknown) => {
     pointer.hide();
+    ended = true;
+    enter('done');
     if (!(error instanceof Stopped)) console.error('TodeX demo autoplay stopped', error);
   });
 }
