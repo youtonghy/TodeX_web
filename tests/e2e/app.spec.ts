@@ -1,10 +1,11 @@
 import { expect, test } from '@playwright/test';
+import { expectHome, openConversation } from './workbench';
 
 test('renders the responsive three-pane workbench without horizontal overflow', async ({ page }, testInfo) => {
   await page.goto('/app');
   await expect(page).toHaveTitle(/TodeX/);
-  // A fresh browser opens the default conversation of the None workspace.
-  await expect(page.getByRole('textbox', { name: '消息输入' })).toBeVisible();
+  // A fresh browser opens the home page.
+  await expectHome(page);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 
   const viewport = page.viewportSize();
@@ -15,6 +16,8 @@ test('renders the responsive three-pane workbench without horizontal overflow', 
     await page.keyboard.press('Escape');
     await expect(page.getByRole('button', { name: '个人主页' })).not.toBeInViewport();
   }
+  // The default conversation of the None workspace is one pick away.
+  await openConversation(page);
   await expect(page.getByRole('button', { name: '打开右侧面板' })).toBeVisible();
 
   await page.screenshot({ path: testInfo.outputPath(`${testInfo.project.name}.png`), fullPage: true });

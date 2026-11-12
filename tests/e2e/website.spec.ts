@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
+import { expectHome, openConversation } from './workbench';
 
 const releasesFixture = JSON.parse(readFileSync(join(process.cwd(), 'tests/fixtures/releases.json'), 'utf8')) as unknown;
 
@@ -16,9 +17,9 @@ test('keeps the public website independent of the workbench and opens /app', asy
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await page.getByRole('link', { name: '打开网页版', exact: true }).click();
   await expect(page).toHaveURL(/\/app$/);
-  await expect(page.getByRole('textbox', { name: '消息输入' })).toBeVisible();
+  await expectHome(page);
   await page.reload();
-  await expect(page.getByRole('textbox', { name: '消息输入' })).toBeVisible();
+  await expectHome(page);
 });
 
 test.describe('live workbench demo', () => {
@@ -28,9 +29,9 @@ test.describe('live workbench demo', () => {
     await page.goto('/');
     await page.getByRole('img', { name: /TodeX 工作台实时演示/ }).scrollIntoViewIfNeeded();
     const demo = page.frameLocator('.preview-stage iframe');
-    // The desktop's demo fixtures: the Lumen team's checkout conversation.
-    await expect(demo.getByText('顺便把错误提示文案改成中文，并保持和设计规范一致的颜色。')).toBeVisible({ timeout: 15_000 });
-    await expect(demo.getByText('错误提示已统一为中文', { exact: false })).toBeVisible();
+    // The workbench starts on its home page, on the desktop's demo fixtures (the plan limits).
+    await expect(demo.getByRole('button', { name: '自定义布局' })).toBeVisible({ timeout: 15_000 });
+    await expect(demo.getByText('5 小时窗口')).toBeVisible();
     expect(await page.evaluate(() => Object.keys(localStorage).filter((key) => key.startsWith('todex.web.')))).toEqual([]);
     expect(await page.evaluate(() => document.activeElement === document.body)).toBe(true);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
@@ -50,7 +51,9 @@ test('autoplays a new conversation from prompt to streamed answer on the landing
 
 test('keeps the demo in memory, away from the workbench storage on the same origin', async ({ page }) => {
   await page.goto('/demo');
-  await expect(page.getByText('顺便把错误提示文案改成中文，并保持和设计规范一致的颜色。')).toBeVisible({ timeout: 15_000 });
+  await expectHome(page, 15_000);
+  await openConversation(page, '重构结账页表单校验');
+  await expect(page.getByText('顺便把错误提示文案改成中文，并保持和设计规范一致的颜色。')).toBeVisible();
   await page.goto('/demo-isolation-check');
   expect(await page.evaluate(() => Object.keys(localStorage).filter((key) => key.startsWith('todex.')))).toEqual([]);
   expect(await page.evaluate(async () => (await indexedDB.databases()).map((db) => db.name))).not.toContain('todex.web.keys');
@@ -117,7 +120,7 @@ test('supports navigation at every viewport', async ({ page }) => {
 test('loads the workbench at nested /app URLs without treating similarly named pages as app routes', async ({ page }) => {
   await stubReleaseCatalog(page);
   await page.goto('/app/conversation/example');
-  await expect(page.getByRole('textbox', { name: '消息输入' })).toBeVisible();
+  await expectHome(page);
   await page.goto('/application');
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('让创造，在任何地方发生。');
 });
