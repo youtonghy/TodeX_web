@@ -5,7 +5,7 @@ import { act, createElement, useCallback, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { ConversationRuntime } from '@todex/protocol/conversationRuntime';
 import { WorkbenchPanel } from '../../src/renderer/screens/WorkbenchPanel';
-import { createAgentBrowserWatch, takeNewAgentBrowserTab } from '../../src/renderer/session/agentBrowserTabs';
+import { createAgentBrowserWatch, createAgentComputerWatch, takeNewAgentBrowserTab, takeNewAgentComputerSession } from '../../src/renderer/session/agentBrowserTabs';
 import type { TodeXSession } from '../../src/renderer/session/useTodeXSession';
 import type { WorkbenchRequest, WorkbenchTab } from '../../src/renderer/lib/panels';
 import { withStores } from './helpers/sessionStores';
@@ -65,6 +65,35 @@ describe('takeNewAgentBrowserTab', () => {
     expect(takeNewAgentBrowserTab(watch, 'c2', runtime(51, 'y'), false)).toBe(true);
     // Back to c1: a tab opened there meanwhile is history too.
     expect(takeNewAgentBrowserTab(watch, 'c1', runtime(9, 'meanwhile'), false)).toBe(false);
+  });
+});
+
+const computer = (appliedSequence: number, active: boolean, awaitingHost = false) => ({
+  appliedSequence,
+  desktopComputer: { active, awaitingHost, actions: [] },
+});
+
+describe('takeNewAgentComputerSession', () => {
+  it('reports a session that starts, or awaits the host, after the conversation became the viewed one', () => {
+    const watch = createAgentComputerWatch();
+    // A session already running when the conversation is opened only seeds.
+    expect(takeNewAgentComputerSession(watch, 'c1', computer(10, true), false)).toBe(false);
+    expect(takeNewAgentComputerSession(watch, 'c1', computer(11, true), false)).toBe(false);
+    // It ends, then a new first use waits for the host: that opens it, once.
+    expect(takeNewAgentComputerSession(watch, 'c1', computer(12, false), false)).toBe(false);
+    expect(takeNewAgentComputerSession(watch, 'c1', computer(13, false, true), false)).toBe(true);
+    // The host allows it: the same engagement, not a new one.
+    expect(takeNewAgentComputerSession(watch, 'c1', computer(14, true), false)).toBe(false);
+  });
+
+  it('ignores recovery batches and history paged in below the window', () => {
+    const watch = createAgentComputerWatch();
+    takeNewAgentComputerSession(watch, 'c1', computer(10, false), false);
+    expect(takeNewAgentComputerSession(watch, 'c1', computer(10, true), false)).toBe(false);
+    takeNewAgentComputerSession(watch, 'c1', computer(11, false), false);
+    expect(takeNewAgentComputerSession(watch, 'c1', computer(30, true), true)).toBe(false);
+    // Another conversation starts seeding afresh.
+    expect(takeNewAgentComputerSession(watch, 'c2', computer(5, true), false)).toBe(false);
   });
 });
 

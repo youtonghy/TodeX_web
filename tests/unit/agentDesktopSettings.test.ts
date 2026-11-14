@@ -9,6 +9,8 @@ import type { TodeXSession } from '../../src/renderer/session/useTodeXSession';
 
 vi.hoisted(() => {
   window.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false, media: '', onchange: null });
+  // The live view placement control measures its segments.
+  globalThis.ResizeObserver ??= class { observe() {} unobserve() {} disconnect() {} };
 });
 let root: Root;
 let container: HTMLDivElement;
