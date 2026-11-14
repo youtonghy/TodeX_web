@@ -36,6 +36,8 @@ function render(props: { repairPairing?: boolean } = {}) {
     connectionState: 'idle', connectionHealth: { state: 'idle' }, updateBackendConnection, setSettings,
     historyEncryption: { ...history, forBackend: () => history },
     settingsForBackend(this: { settings: unknown }) { return this.settings; }, v2ProvidersByBackend: {},
+    // The Smart work mode page reads the focused backend's agents.
+    v2Providers: [], providerModels: {}, capabilityCatalogs: {},
   } as unknown as TodeXSession;
   container = document.createElement('div');
   document.body.append(container);
