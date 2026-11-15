@@ -2,7 +2,7 @@ import { afterEach, beforeAll, expect, it, vi } from 'vitest';
 import * as React from 'react';
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { toast } from '../../src/renderer/components/ui/toast';
+import { toast } from '../../src/renderer/components/ui/toast-store';
 import { ChatPanel } from '../../src/renderer/screens/ChatPanel';
 import { ConversationPermissionActions, PermissionRequestCard } from '../../src/renderer/components/ConversationRunStatus';
 import { deviceIdentityFromSecret } from '@todex/protocol/deviceAuth';

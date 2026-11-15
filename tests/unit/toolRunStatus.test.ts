@@ -2,7 +2,8 @@ import { afterEach, beforeAll, expect, it, vi } from 'vitest';
 import * as React from 'react';
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { formatElapsed, ToolElapsed } from '../../src/renderer/components/chat/ToolRunStatus';
+import { ToolElapsed } from '../../src/renderer/components/chat/ToolRunStatus';
+import { formatElapsed } from '../../src/renderer/components/chat/formatElapsed';
 import { setLocale } from '../../src/renderer/i18n';
 
 let root: Root;

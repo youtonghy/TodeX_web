@@ -2,11 +2,11 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { classifyPendingRequest } from '@todex/protocol/todex';
-import { toast } from '../../src/renderer/components/ui/toast';
+import { toast } from '../../src/renderer/components/ui/toast-store';
 import { createConversationRuntime } from '@todex/protocol/conversationRuntime';
 import { ComposerSendButton } from '../../src/renderer/components/chat/ComposerControls';
-import { ConversationPermissionActions, ConversationPromptInput, ConversationRunStatus, PermissionRequestCard, TurnUsageSummary,
-  useConversationPromptInput } from '../../src/renderer/components/ConversationRunStatus';
+import { ConversationPermissionActions, ConversationPromptInput, ConversationRunStatus, PermissionRequestCard, TurnUsageSummary } from '../../src/renderer/components/ConversationRunStatus';
+import { useConversationPromptInput } from '../../src/renderer/components/useConversationPromptInput';
 
 let root: Root | undefined;
 let container: HTMLDivElement | undefined;

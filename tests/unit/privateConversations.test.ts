@@ -3,7 +3,7 @@ import * as React from 'react';
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { ConversationManifest } from '@todex/protocol/v2';
-import { toast } from '../../src/renderer/components/ui/toast';
+import { toast } from '../../src/renderer/components/ui/toast-store';
 import { useTodeXSession, type TodeXSession } from '../../src/renderer/session/useTodeXSession';
 import { loadJson, saveJson } from '../../src/renderer/lib/storage';
 import { t } from '../../src/renderer/i18n';

@@ -2,7 +2,7 @@ import { afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest';
 import * as React from 'react';
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { toast } from '../../src/renderer/components/ui/toast';
+import { toast } from '../../src/renderer/components/ui/toast-store';
 // Behaviour the session-store split must keep (see the plan of 2026-10-29).
 import { useTodeXSession, type TodeXSession } from '../../src/renderer/session/useTodeXSession';
 import { useConversationTimeline } from '../../src/renderer/session/conversationStore';
