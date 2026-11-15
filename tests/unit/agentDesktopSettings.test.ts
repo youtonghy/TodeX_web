@@ -174,3 +174,56 @@ it('explains when the backend predates desktop tools', async () => {
   expect(container.textContent).toContain('请先更新后端');
   expect(container.querySelector('[role="switch"], input[type="checkbox"]')).toBeNull();
 });
+
+const kitesurf = (state: { installed: boolean; supported?: boolean; downloading?: boolean }) => {
+  const supported = state.supported ?? true;
+  const reason = !supported ? 'Kitesurf is not available on Windows yet.' : state.installed ? undefined : 'Kitesurf is not installed yet.';
+  return {
+    ...browser(true),
+    available: supported && state.installed,
+    ...(reason ? { reason } : {}),
+    engine: 'kitesurf' as const,
+    engines: {
+      kitesurf: {
+        version: '2026.11.13-4a29038', installed: state.installed, downloading: state.downloading ?? false, overridden: false,
+        supported, available: supported && state.installed, ...(reason ? { reason } : {}),
+      },
+    },
+  };
+};
+
+it('shows the chosen Kitesurf engine instead of Chromium and its workspace profile', async () => {
+  vi.spyOn(V2ApiClient.prototype, 'getAgentDesktop').mockResolvedValue({ ...base, browser: kitesurf({ installed: true }) });
+  vi.spyOn(V2ApiClient.prototype, 'getAgentBrowserProfiles').mockResolvedValue({ profiles: [{ id: 'p1', name: 'app', createdAt: 1 }], workspaces: { ws_1: 'p1' } });
+  await render();
+  expect(button('Agent 浏览器').textContent).toContain('已就绪');
+  await press('Agent 浏览器');
+  expect(container.textContent).toContain('以无界面方式运行 Kitesurf');
+  expect(container.textContent).toContain('Kitesurf（实验）');
+  expect(container.textContent).toContain('版本 2026.11.13-4a29038');
+  expect(container.textContent).not.toContain('尚未安装 Chromium');
+  // Kitesurf keeps nothing between tabs: no workspace profile to pick.
+  expect(container.textContent).not.toContain('当前工作区');
+  expect(container.textContent).toContain('Kitesurf 不使用浏览器资料');
+  expect(button('新建资料')).toBeUndefined();
+});
+
+it('offers no Kitesurf download where it cannot run, and downloads it where it can', async () => {
+  vi.spyOn(V2ApiClient.prototype, 'getAgentBrowserProfiles').mockResolvedValue({ profiles: [], workspaces: {} });
+  const get = vi.spyOn(V2ApiClient.prototype, 'getAgentDesktop').mockResolvedValue({ ...base, browser: kitesurf({ installed: false, supported: false }) });
+  await render();
+  expect(button('Agent 浏览器').textContent).toContain('不可用');
+  await press('Agent 浏览器');
+  expect(container.textContent).toContain('Kitesurf is not available on Windows yet.');
+  expect(button('下载浏览器组件')).toBeUndefined();
+  act(() => root.unmount()); container.remove();
+
+  get.mockResolvedValue({ ...base, browser: kitesurf({ installed: false }) });
+  await render();
+  await press('Agent 浏览器');
+  expect(container.textContent).toContain('尚未安装 Kitesurf');
+  const install = vi.spyOn(V2ApiClient.prototype, 'installAgentBrowser').mockResolvedValue({ ...base, browser: kitesurf({ installed: false, downloading: true }) });
+  await press('下载浏览器组件');
+  expect(install).toHaveBeenCalled();
+  expect(container.textContent).toContain('正在下载 Kitesurf…');
+});
