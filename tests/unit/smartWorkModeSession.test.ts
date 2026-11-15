@@ -43,6 +43,10 @@ let planSkill = 'planner';
 function event(sequence: number, type: string, payload: Record<string, unknown>) {
   return { schemaVersion: 2, eventId: `e${sequence}`, conversationId: 'c', sequence, time: '2026-11-14T00:00:00Z', type, payload };
 }
+function reentered(sequence: number, turnId: string) {
+  return event(sequence, 'provider.event', { turnId, provider: 'claude-code', providerMethod: 'plan_reentered', metadata: {
+    workMode: 'plan', model: 'claude-fable-5-2', reasoningEffort: 'medium' } });
+}
 function handoff(sequence: number, turnId: string) {
   return event(sequence, 'provider.event', { turnId, provider: 'claude-code', providerMethod: 'plan_handoff', metadata: {
     workMode: 'implement', model: 'claude-opus-5-5', reasoningEffort: 'medium', permissionMode: 'auto', applied: 'now', reason: 'plan_approved' } });
@@ -68,6 +72,7 @@ let session: TodeXSession;
 beforeAll(() => { Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true, React }); });
 beforeEach(() => {
   vi.useFakeTimers();
+  delete (provider.capabilities.permissionConfig as { supportsReplan?: boolean }).supportsReplan;
   storedConversation = conversation;
   journal = [];
   planSkill = 'planner';
@@ -196,6 +201,8 @@ it('a live plan handoff moves the conversation to execution, and choosing Smart 
   expect(execute).toMatchObject({ workMode: 'implement', model: 'claude-opus-5-5', reasoningEffort: 'high', permissionMode: 'auto' });
   expect(execute.afterPlan).toBeUndefined();
   expect(execute.skills).toBeUndefined();
+  // A backend without supportsReplan would reject the field.
+  expect(execute.replan).toBeUndefined();
 
   await act(async () => { await session.applyConversationWorkMode('c', 'smart'); });
   expect(session.conversations.find((item) => item.id === 'c')?.smartPhase).toBe('plan');
@@ -229,4 +236,52 @@ it('a replayed handoff newer than the phase moves it to execution', async () => 
   await act(async () => { await vi.advanceTimersByTimeAsync(200); });
   expect(session.conversationRuntimeById.c?.appliedSequence).toBe(3);
   expect(session.conversations.find((item) => item.id === 'c')).toMatchObject({ smartPhase: 'execute', smartPhaseSequence: 2 });
+});
+
+it('an execute prompt says what to plan with when the backend supports replan', async () => {
+  Object.assign(provider.capabilities.permissionConfig, { supportsReplan: true });
+  const socket = await mount();
+  await act(async () => { await session.applyConversationWorkMode('c', 'smart'); });
+  await sendTurn(socket, 'plan it', (sequence, turnId) => [handoff(sequence, turnId)]);
+  const execute = await sendTurn(socket, 'one more thing');
+  expect(execute).toMatchObject({ workMode: 'implement', model: 'claude-opus-5-5', permissionMode: 'auto',
+    replan: { model: 'claude-fable-5-2', reasoningEffort: 'medium' } });
+});
+
+it('Claude re-entering Plan mode moves an executing conversation back to planning', async () => {
+  Object.assign(provider.capabilities.permissionConfig, { supportsReplan: true });
+  const socket = await mount();
+  await act(async () => { await session.applyConversationWorkMode('c', 'smart'); });
+  await sendTurn(socket, 'plan it', (sequence, turnId) => [handoff(sequence, turnId)]);
+  await sendTurn(socket, 'a bigger task', (sequence, turnId) => [reentered(sequence, turnId)]);
+  expect(session.conversations.find((item) => item.id === 'c')?.smartPhase).toBe('plan');
+  const plan = await sendTurn(socket, 'go on planning');
+  expect(plan).toMatchObject({ workMode: 'plan', model: 'claude-fable-5-2', afterPlan: { model: 'claude-opus-5-5', permissionMode: 'auto' } });
+  expect(plan.replan).toBeUndefined();
+
+  // Approving that plan hands off within the same turn as usual.
+  await sendTurn(socket, 'a third task', (sequence, turnId) => [reentered(sequence, turnId), handoff(sequence + 1, turnId)]);
+  expect(session.conversations.find((item) => item.id === 'c')?.smartPhase).toBe('execute');
+});
+
+it('attaching the plan skill while executing plans that message and the ones after it', async () => {
+  const socket = await mount();
+  await act(async () => { await session.applyConversationWorkMode('c', 'smart'); });
+  await sendTurn(socket, 'plan it', (sequence, turnId) => [handoff(sequence, turnId)]);
+  await act(async () => {
+    session.setConversationSelectedSkills('c', [{ name: 'reviewer', path: '', displayName: 'reviewer', resourceId: 'skill-reviewer' }]);
+  });
+  const other = await sendTurn(socket, 'review this');
+  expect(other.workMode).toBe('implement');
+  expect(session.conversations.find((item) => item.id === 'c')?.smartPhase).toBe('execute');
+
+  await act(async () => {
+    session.setConversationSelectedSkills('c', [{ name: 'planner', path: '', displayName: 'planner', resourceId: 'skill-planner' }]);
+  });
+  const plan = await sendTurn(socket, 'a complex new task');
+  expect(plan).toMatchObject({ workMode: 'plan', model: 'claude-fable-5-2', afterPlan: { model: 'claude-opus-5-5' },
+    skills: [{ resourceId: 'skill-planner', name: 'planner' }] });
+  expect(session.conversations.find((item) => item.id === 'c')?.smartPhase).toBe('plan');
+  const next = await sendTurn(socket, 'more detail');
+  expect(next.workMode).toBe('plan');
 });
