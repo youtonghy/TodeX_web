@@ -10,3 +10,7 @@ output/
 .env
 .env.*
 !.env.example
+
+# agent tooling
+.pi/
+.claude/
