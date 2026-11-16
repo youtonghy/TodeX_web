@@ -17,3 +17,6 @@ export async function loadSshPassword(_backendId: string, _alias: string): Promi
 export async function saveSshPassword(_backendId: string, _alias: string, password: string | null): Promise<void> {
   if (password !== null) throw new Error('SSH passwords cannot be saved in the browser');
 }
+
+/** Nothing is ever saved in the browser, so there is nothing to copy. */
+export async function copySshPasswords(_fromId: string, _toId: string, _aliases: readonly string[]): Promise<void> {}
