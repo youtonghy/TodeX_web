@@ -52,3 +52,26 @@ it('falls back to the latest screenshot without a live frame', async () => {
   expect(container.querySelector('img')?.getAttribute('src')).toBe('data:image/jpeg;base64,shot_a');
   expect(container.textContent).not.toContain('实时');
 });
+
+it('puts the AI cursor where the agent last acted on the live frame, and not on a screenshot', async () => {
+  // A 400×300 box showing a 1280×800 frame: 400×250, 25 px bands above and below.
+  vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(400);
+  vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(300);
+  vi.spyOn(HTMLImageElement.prototype, 'naturalWidth', 'get').mockReturnValue(1280);
+  vi.spyOn(HTMLImageElement.prototype, 'naturalHeight', 'get').mockReturnValue(800);
+  const frame = vi.spyOn(V2ApiClient.prototype, 'getComputerFrame').mockResolvedValue({ mimeType: 'image/jpeg', dataUrl: 'data:image/jpeg;base64,live' });
+  // The latest action typed: the cursor stays at the click before it.
+  const actions = [action('a', { point: { x: 0.5, y: 0.2 }, shotId: 'shot_a' }), action('b', { point: { x: 0.25, y: 0.5 } }), action('c')];
+  await render({ active: true, deviceName: 'Studio Mac', actions });
+  await act(async () => { container.querySelector('img')!.dispatchEvent(new Event('load')); });
+  const cursor = container.querySelector<SVGElement>('[data-testid="computer-ai-cursor"]');
+  expect(cursor?.style.transform).toBe('translate(98.5px, 148.5px)');
+
+  frame.mockRejectedValue(new Error('404'));
+  act(() => root.unmount()); container.remove();
+  vi.spyOn(V2ApiClient.prototype, 'getAgentShot').mockImplementation(async (_c, shotId) => ({ shotId, mimeType: 'image/jpeg', dataUrl: `data:image/jpeg;base64,${shotId}` }));
+  await render({ active: true, deviceName: 'Studio Mac', actions });
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
+  expect(container.querySelector('img')?.getAttribute('src')).toBe('data:image/jpeg;base64,shot_a');
+  expect(container.querySelector('[data-testid="computer-ai-cursor"]')).toBeNull();
+});
