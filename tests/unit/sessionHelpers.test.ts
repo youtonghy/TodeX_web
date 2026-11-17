@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { BackendRequestError, conversationsForWorkspaceSnapshot, readBackendError, workspaceLinkTarget } from '../../src/renderer/session/helpers';
+import { BackendRequestError, conversationsForWorkspaceSnapshot, readBackendError, reasoningEffortLabel, workspaceLinkTarget } from '../../src/renderer/session/helpers';
 import type { ConversationRecord, WorkspaceRecord } from '../../src/renderer/session/helpers';
 
 const workspace = (id: string) => ({ id, name: id, path: `/${id}`, updatedAt: 1 }) as unknown as WorkspaceRecord;
@@ -30,4 +30,11 @@ it('leaves external links to the browser where the host has no browser tab', () 
   expect(workspaceLinkTarget('https://github.com/x', '/repo')).toBeNull();
   expect(workspaceLinkTarget('http://127.0.0.1:3000/', '/repo')).toBeNull();
   expect(workspaceLinkTarget('src/index.ts', '/repo')).toEqual({ kind: 'file', filePath: '/repo/src/index.ts' });
+});
+
+it('labels a reasoning effort TodeX does not know by its own name', () => {
+  expect(reasoningEffortLabel('ultra')).toBe(reasoningEffortLabel('highest'));
+  expect(reasoningEffortLabel(' turbo ')).toBe('turbo');
+  expect(reasoningEffortLabel(null)).toBe('default');
+  expect(reasoningEffortLabel('  ')).toBe('default');
 });
