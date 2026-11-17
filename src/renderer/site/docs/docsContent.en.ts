@@ -300,7 +300,7 @@ API for scripts and services; see [External API & keys](/docs/backend/external-a
 | **Claude Code** | stream-json | Drives the Claude CLI; built-in model aliases without a gateway |
 | **Pi** | Native RPC | Command discovery, dynamic models, interactive tool approval |
 | **Grok Build** | Managed CLI | Versioned, self-updatable like other managed CLIs |
-| **Antigravity** | stream-json | Drives \`agy\` print mode; a TodeX PreToolUse hook in \`~/.gemini/config\` asks for approval per tool (ask / full access); auto uses agy's own Auto review where the account offers it (otherwise it asks); also carries TodeX's MCP tools |
+| **Antigravity** | ACP (\`agy acp\`) | One resident \`agy acp\` process per conversation; agy asks for approval through ACP (ask / full access, where TodeX approves); auto uses agy's own Auto review where the account offers it (otherwise it asks); also carries TodeX's MCP tools |
 | **ACP 2.0** | stdio profiles | Devin (\`devin acp\`), OpenCode (\`opencode acp\`), omp (\`omp acp\`), custom \`config.toml\` profiles |
 
 The backend never mutates provider installations to serve a UI: capability

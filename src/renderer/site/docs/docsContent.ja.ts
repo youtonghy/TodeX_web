@@ -317,7 +317,7 @@ REST + SSE API も提供します。[外部 API とキー](/docs/backend/externa
 | **Claude Code** | stream-json | Claude CLI を駆動。ゲートウェイなしで組み込みモデルエイリアスを使用 |
 | **Pi** | Native RPC | コマンド検出、動的モデル、対話的ツール承認 |
 | **Grok Build** | Managed CLI | 他の管理対象 CLI と同様にバージョン管理され、自己更新可能 |
-| **Antigravity** | stream-json | \`agy\` の print モードを駆動。\`~/.gemini/config\` に置く TodeX の PreToolUse フックがツールごとに承認（確認 / フルアクセス）。自動モードはアカウントで利用可能なら agy 自身の Auto 審査を使い（不可なら確認として動作）、TodeX の MCP ツールも提供 |
+| **Antigravity** | ACP（\`agy acp\`） | 会話ごとに常駐する \`agy acp\` プロセスを駆動。agy は ACP で承認を求める（確認 / フルアクセス。後者は TodeX が許可）。自動モードはアカウントで利用可能なら agy 自身の Auto 審査を使い（不可なら確認として動作）、TodeX の MCP ツールも提供 |
 | **ACP 2.0** | stdio profiles | Devin（\`devin acp\`）、OpenCode（\`opencode acp\`）、omp（\`omp acp\`）、カスタム \`config.toml\` プロファイル |
 
 バックエンドは UI を提供するためにプロバイダーのインストールを変更する

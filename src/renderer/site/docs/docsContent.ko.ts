@@ -303,7 +303,7 @@ API도 제공합니다. [외부 API와 키](/docs/backend/external-api)를 참�
 | **Claude Code** | stream-json | Claude CLI를 구동합니다. 게이트웨이 없이 내장 모델 별칭 사용 |
 | **Pi** | Native RPC | 명령 검색, 동적 모델, 대화형 도구 승인 |
 | **Grok Build** | Managed CLI | 다른 관리형 CLI처럼 버전 관리 및 자체 업데이트 가능 |
-| **Antigravity** | stream-json | \`agy\` print 모드를 구동합니다. \`~/.gemini/config\`의 TodeX PreToolUse 훅이 도구별로 승인하고(확인 / 전체 액세스), 자동 모드는 계정에서 제공될 때 agy 자체 Auto 검토를 사용하며(아니면 확인으로 동작) TodeX MCP 도구를 연결합니다 |
+| **Antigravity** | ACP(\`agy acp\`) | 대화마다 상주하는 \`agy acp\` 프로세스를 구동합니다. agy가 ACP로 승인을 요청하고(확인 / 전체 액세스, 후자는 TodeX가 허용), 자동 모드는 계정에서 제공될 때 agy 자체 Auto 검토를 사용하며(아니면 확인으로 동작) TodeX MCP 도구를 연결합니다 |
 | **ACP 2.0** | stdio profiles | Devin(\`devin acp\`), OpenCode(\`opencode acp\`), omp(\`omp acp\`), 사용자 정의 \`config.toml\` 프로파일 |
 
 백엔드는 UI를 제공하기 위해 프로바이더 설치를 절대 변경하지 않습니다.
