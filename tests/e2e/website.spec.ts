@@ -31,7 +31,9 @@ test.describe('live workbench demo', () => {
     const demo = page.frameLocator('.preview-stage iframe');
     // The workbench starts on its home page, on the desktop's demo fixtures (the plan limits).
     await expect(demo.getByRole('button', { name: '自定义布局' })).toBeVisible({ timeout: 15_000 });
+    await expect(demo.getByRole('region', { name: '等待回复' }).getByText('等待授权')).toBeVisible();
     await expect(demo.getByText('5 小时窗口')).toBeVisible();
+    await expect(demo.getByText(/版本不一致/)).toHaveCount(0);
     expect(await page.evaluate(() => Object.keys(localStorage).filter((key) => key.startsWith('todex.web.')))).toEqual([]);
     expect(await page.evaluate(() => document.activeElement === document.body)).toBe(true);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
@@ -45,6 +47,7 @@ test('autoplays a new conversation from prompt to streamed answer on the landing
   await page.goto('/demo?autoplay&lang=en');
   const prompt = 'Add an order summary card to the checkout page: items, discounts, and the total due.';
   await expect(page.getByRole('textbox', { name: 'Message input' })).toHaveText(prompt, { timeout: 20_000 });
+  await expect(page.getByRole('button', { name: 'Plan 3/3', exact: true })).toBeVisible({ timeout: 20_000 });
   await expect(page.getByText('Run pnpm test checkout')).toBeVisible({ timeout: 20_000 });
   await expect(page.getByText('The order summary card is in place:')).toBeVisible({ timeout: 20_000 });
 });

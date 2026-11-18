@@ -35,6 +35,23 @@ function scriptedTurn(prompt: string, turnId: string): DemoTurnStep[] {
     [at, 'tool.started', { toolCallId: call(id), toolName, arguments: args }],
     [at + takes, 'tool.completed', { toolCallId: call(id), toolName, arguments: args, result, isError: false }],
   ];
+  const plan = (
+    at: number,
+    s1: 'pending' | 'in_progress' | 'completed',
+    s2: 'pending' | 'in_progress' | 'completed',
+    s3: 'pending' | 'in_progress' | 'completed',
+  ): DemoTurnStep => [
+    at,
+    'plan.updated',
+    {
+      explanation: t('demo.autoplayPlanExplanation'),
+      steps: [
+        { text: t('demo.autoplayPlanStep1'), status: s1 },
+        { text: t('demo.autoplayPlanStep2'), status: s2 },
+        { text: t('demo.autoplayPlanStep3'), status: s3 },
+      ],
+    },
+  ];
   const answer = t('demo.autoplayAnswer');
   const answerAt = 7600;
   const streamed = streamSteps(answerAt, answer, turnId);
@@ -42,14 +59,18 @@ function scriptedTurn(prompt: string, turnId: string): DemoTurnStep[] {
   return [
     [0, 'message.created', { role: 'user', content: prompt }],
     [150, 'turn.started', { status: 'running' }],
-    [700, 'thought.delta', { thinking: t('demo.autoplayThinking') }],
+    [700, 'thought.delta', { thinking: t('demo.autoplayThinking'), block: { category: 'reasoning', id: `${turnId}-thought`, turnId, phase: 'delta' } }],
+    plan(1100, 'in_progress', 'pending', 'pending'),
     ...tool(1500, 'read', 'Read', { file_path: 'src/checkout/CheckoutPage.tsx' },
       'export function CheckoutPage() {\n  const cart = useCart();\n  return <CheckoutLayout aside={null}>…</CheckoutLayout>;\n}', 800),
+    plan(2400, 'completed', 'in_progress', 'pending'),
     ...tool(2700, 'write', 'Write', { file_path: 'src/checkout/OrderSummary.tsx' }, 'File created successfully at: src/checkout/OrderSummary.tsx', 1000),
     ...tool(4100, 'edit', 'Edit', { file_path: 'src/checkout/CheckoutPage.tsx', old_string: 'aside={null}', new_string: 'aside={<OrderSummary cart={cart} />}' },
       'The file src/checkout/CheckoutPage.tsx has been updated.', 700),
+    plan(4900, 'completed', 'completed', 'in_progress'),
     ...tool(5200, 'test', 'Bash', { command: 'pnpm test checkout', description: 'Run checkout unit tests' },
       ' ✓ src/checkout/OrderSummary.test.tsx (5 tests) 41ms\n ✓ src/checkout/schema.test.ts (14 tests) 38ms\n\n Test Files  2 passed (2)\n      Tests  19 passed (19)', 1800),
+    plan(7100, 'completed', 'completed', 'completed'),
     ...streamed,
     [doneAt, 'message.completed', {
       role: 'assistant',
@@ -204,8 +225,7 @@ export function startDemoAutoplay(): void {
     await click(await find(byLabel(t('workbench.send'))));
     // Open the running turn's work process so the steps stream in view.
     enter('process');
-    const process = await find(() => [...document.querySelectorAll('button[aria-expanded="false"]')]
-      .find((button) => button.textContent?.includes(t('chat.working'))));
+    const process = await find(() => document.querySelector('main section > button[aria-expanded="false"]'));
     await click(process);
     pointer.hide();
     enter('answer');
