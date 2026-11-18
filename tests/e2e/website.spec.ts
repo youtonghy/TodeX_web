@@ -45,7 +45,7 @@ test('autoplays a new conversation from prompt to streamed answer on the landing
   await page.goto('/demo?autoplay&lang=en');
   const prompt = 'Add an order summary card to the checkout page: items, discounts, and the total due.';
   await expect(page.getByRole('textbox', { name: 'Message input' })).toHaveText(prompt, { timeout: 20_000 });
-  await expect(page.getByText('Bash · pnpm test checkout')).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText('Run pnpm test checkout')).toBeVisible({ timeout: 20_000 });
   await expect(page.getByText('The order summary card is in place:')).toBeVisible({ timeout: 20_000 });
 });
 
