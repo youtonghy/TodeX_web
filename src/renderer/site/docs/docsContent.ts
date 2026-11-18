@@ -4,6 +4,7 @@
 // missing pages/sections fall back to English so a partial translation never
 // breaks navigation.
 import type { Locale } from '../../i18n';
+import { isDemoScene, type DemoScene } from '../../demo/playback';
 import { enDocs } from './docsContent.en';
 import { zhCNDocs } from './docsContent.zh-CN';
 import { jaDocs } from './docsContent.ja';
@@ -247,4 +248,68 @@ export function getDocsContent(locale: Locale): DocsContent {
     contentCache.set(locale, content);
   }
   return content;
+}
+
+export type DocSegment =
+  | { kind: 'markdown'; content: string }
+  | { kind: 'demo'; scene: DemoScene };
+
+const DEMO_DIRECTIVE_RE = /^:::demo(?:\s+(\S+))?[ \t]*$/;
+
+/** Extracts every `:::demo` directive (outside code fences) with validation info. */
+export function extractDemoDirectives(markdown: string): Array<{ raw?: string; valid: boolean; scene: DemoScene }> {
+  const directives: Array<{ raw?: string; valid: boolean; scene: DemoScene }> = [];
+  let inFence = false;
+  for (const line of markdown.split('\n')) {
+    if (line.trimStart().startsWith('```')) {
+      inFence = !inFence;
+      continue;
+    }
+    if (inFence) continue;
+    const match = DEMO_DIRECTIVE_RE.exec(line);
+    if (!match) continue;
+    const raw = match[1];
+    if (!raw) {
+      directives.push({ valid: true, scene: 'walkthrough' });
+    } else if (isDemoScene(raw)) {
+      directives.push({ raw, valid: true, scene: raw });
+    } else {
+      directives.push({ raw, valid: false, scene: 'walkthrough' });
+    }
+  }
+  return directives;
+}
+
+/** Splits a docs page body into Markdown segments and workbench demo embeds. */
+export function parseDocSegments(markdown: string): DocSegment[] {
+  const segments: DocSegment[] = [];
+  let buffer: string[] = [];
+  let inFence = false;
+
+  const flushMarkdown = () => {
+    const content = buffer.join('\n');
+    if (content.trim()) segments.push({ kind: 'markdown', content });
+    buffer = [];
+  };
+
+  for (const line of markdown.split('\n')) {
+    if (line.trimStart().startsWith('```')) {
+      inFence = !inFence;
+      buffer.push(line);
+      continue;
+    }
+    if (!inFence) {
+      const match = DEMO_DIRECTIVE_RE.exec(line);
+      if (match) {
+        flushMarkdown();
+        const raw = match[1];
+        const scene = raw && isDemoScene(raw) ? raw : 'walkthrough';
+        segments.push({ kind: 'demo', scene });
+        continue;
+      }
+    }
+    buffer.push(line);
+  }
+  flushMarkdown();
+  return segments;
 }

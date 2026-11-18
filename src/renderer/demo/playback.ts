@@ -3,6 +3,42 @@
 
 export const DEMO_PATH = '/demo';
 
+/** Workbench feature scenes embedded in `/docs` (`:::demo` / `:::demo <scene>`). */
+export const DEMO_SCENES = [
+  'walkthrough',
+  'mesh',
+  'smart',
+  'smart-settings',
+  'plan-steps',
+  'execution-group',
+  'background-tasks',
+  'home',
+  'computer-live',
+  'agent-browser',
+  'linked-skills',
+  'config-sync',
+  'offline-sidebar',
+] as const;
+export type DemoScene = (typeof DEMO_SCENES)[number];
+
+export function isDemoScene(value: string): value is DemoScene {
+  return (DEMO_SCENES as readonly string[]).includes(value);
+}
+
+/** Builds the `/demo` URL with every query parameter the scene needs on boot. */
+export function demoSceneUrl(scene: DemoScene, locale: string): string {
+  if (scene === 'walkthrough') {
+    return `${DEMO_PATH}?lang=${encodeURIComponent(locale)}&autoplay&controls`;
+  }
+  const params = new URLSearchParams({ lang: locale, scene });
+  if (scene === 'mesh') params.set('mesh', '1');
+  if (scene === 'home') params.set('board', 'busy');
+  if (scene === 'computer-live') params.set('live', 'computer');
+  if (scene === 'config-sync') params.set('backends', '2');
+  if (scene === 'offline-sidebar') params.set('backends', 'offline');
+  return `${DEMO_PATH}?${params.toString()}`;
+}
+
 /** Host → demo: run or hold the walkthrough. The landing page pauses it while
  * it is scrolled out of view; the docs player also maps its play/pause button
  * onto this. */
