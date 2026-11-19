@@ -183,6 +183,28 @@ it('keeps live events in arrival order while a wrap is being fetched', async () 
   expect(onError).not.toHaveBeenCalled();
 });
 
+it('counts live events waiting for decryption and drops them with their socket', async () => {
+  const backend = fakeBackend();
+  const api = await mount(backend);
+  const key = backend.key();
+  backend.hold();
+  const delivered: unknown[] = [];
+  const deliver = (event: Record<string, unknown>) => delivered.push(event.sequence);
+  api().receiveSocketEvent('b1', 'conv', encryptedEvent(key, 5, {}, { text: 'a' }), undefined, 'full', deliver, vi.fn(), 300);
+  api().receiveSocketEvent('b1', 'conv', { conversationId: 'conv', sequence: 6, payload: {} }, undefined, 'full', deliver, vi.fn(), 40);
+  expect(api().liveDecryptBacklog('b1')).toEqual({ events: 2, chars: 340 });
+  expect(api().liveDecryptBacklog('b2')).toEqual({ events: 0, chars: 0 });
+
+  // The socket closed: the held events are abandoned (resubscribing replays them).
+  api().dropLiveDecryption('b1');
+  expect(api().liveDecryptBacklog('b1')).toEqual({ events: 0, chars: 0 });
+  // A new event does not wait behind the abandoned chain.
+  api().receiveSocketEvent('b1', 'conv', { conversationId: 'conv', sequence: 7, payload: {} }, undefined, 'full', deliver, vi.fn(), 10);
+  expect(delivered).toEqual([7]);
+  await act(async () => { backend.releaseAll(); await new Promise((resolve) => setTimeout(resolve, 20)); });
+  expect(delivered).toEqual([7]);
+});
+
 it('decrypts encrypted manifest titles once the backend is ready', async () => {
   const backend = fakeBackend();
   const api = await mount(backend);
