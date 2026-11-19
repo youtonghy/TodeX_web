@@ -74,3 +74,13 @@ it('keeps another backend\'s conversations of a workspace with the same id', () 
   const [tagged] = mergeManifestConversations([conversation('cb', 'ws')], [manifest('cb', 'ws')], [sameB], 'b');
   expect(tagged.backendConnectionId).toBe('b');
 });
+
+it('leaves a conversation another backend already listed as its own', () => {
+  const sameA = { ...workspaceA, id: 'ws' } as WorkspaceRecord;
+  const sameB = { ...workspaceB, id: 'ws' } as WorkspaceRecord;
+  const current = mergeManifestConversations([], [manifest('c', 'ws')], [sameA, sameB], 'a');
+  // b lists the same id (two profiles of one daemon, or shared fixtures).
+  const merged = mergeManifestConversations(current, [manifest('c', 'ws')], [sameA, sameB], 'b');
+  expect(merged).toBe(current);
+  expect(merged[0].backendConnectionId).toBe('a');
+});
