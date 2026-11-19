@@ -13,7 +13,7 @@ import {
   type HistorySegmentKey,
 } from '@todex/protocol/historyCrypto';
 import { encodeQrCode } from '@todex/protocol/qrCode';
-import { recoveryQrPayload } from '@todex/protocol/recoveryKey';
+import { recoveryQrPayload, recoverySeedFromWords } from '@todex/protocol/recoveryKey';
 import { decodeBase64UrlBytes, encodeBase64Url } from '@todex/protocol/transportCrypto';
 import type { ConversationManifest } from '@todex/protocol/v2';
 import { buildChatRenderItems, isChatTimelineEntry } from '../../src/renderer/components/conversationTimeline';
@@ -55,9 +55,21 @@ function fakeBackend() {
   const wrapsFetched: string[][] = [];
   let gate: Promise<void> | null = null;
   let open: () => void = () => {};
+  /** How the next `history.recovery.set` calls behave, in order. */
+  const recoveryReplies: Array<'timeout' | 'wrong-rid'> = [];
   const sendCommand = vi.fn(async ({ type, payload }: { type: string; payload: Record<string, unknown> }) => {
     if (type === 'history.encryption.get') return { ...state };
     if (blocked) throw revokedError();
+    if (type === 'history.recovery.set') {
+      const reply = recoveryReplies.shift();
+      if (reply === 'timeout') throw new Error('timed out');
+      return { rid: reply === 'wrong-rid' ? 'rid_other' : b64(historyRecipientId(decodeBase64UrlBytes(payload.publicKey as string))) };
+    }
+    if (type === 'history.keys.list') return { items: [] };
+    if (type === 'history.grant.fulfill') {
+      if (payload.complete) state.grants = state.grants.map((grant) => ((grant as { grantId: string }).grantId === payload.grantId ? { ...(grant as object), status: 'fulfilled' } : grant));
+      return { added: 0 };
+    }
     if (type === 'history.recipient.register') {
       if (revokedKeys.has(payload.publicKey as string)) throw new ProtocolCommandError('[CONFLICT] recipient revoked', 'rejected', 'id', 'CONFLICT');
       devicePublicKey = decodeBase64UrlBytes(payload.publicKey as string);
@@ -80,7 +92,7 @@ function fakeBackend() {
     throw new Error(`unexpected ${type}`);
   });
   return {
-    state, sendCommand, wrapsFetched, revokedKeys,
+    state, sendCommand, wrapsFetched, revokedKeys, recoveryReplies,
     block(value: boolean) { blocked = value; },
     /** Wraps a key for this device later (a grant batch). */
     grant(key: HistorySegmentKey) { keys.set(b64(key.kid), key); },
@@ -95,14 +107,16 @@ function fakeBackend() {
   };
 }
 
-async function mount(backend: ReturnType<typeof fakeBackend>, { supported = true, status = 'ready', onUnlocked = vi.fn() }: { supported?: boolean; status?: string; onUnlocked?: (ids?: readonly string[]) => void } = {}) {
+async function mount(backend: ReturnType<typeof fakeBackend>, { supported = true, status = 'ready', onUnlocked = vi.fn(), autoGrantRecipients }: {
+  supported?: boolean; status?: string; onUnlocked?: (ids?: readonly string[]) => void; autoGrantRecipients?: (backendId: string) => ReadonlyMap<string, string>;
+} = {}) {
   let api!: HistoryEncryptionSession;
   // One connected backend, b1, which is also the focused one.
   const backends = { b1: { connected: true, supported } };
   const sendCommand = (_backendId: string, message: { id: string; type: string; payload: Record<string, unknown> }, timeoutMs?: number) =>
     backend.sendCommand(message, timeoutMs);
   function Harness() {
-    api = useHistoryEncryption({ backends, focusBackendId: 'b1', sendCommand, onUnlocked });
+    api = useHistoryEncryption({ backends, focusBackendId: 'b1', sendCommand, onUnlocked, autoGrantRecipients });
     return null;
   }
   container = document.createElement('div');
@@ -358,4 +372,55 @@ it('explains the forced e2e write errors', () => {
   expect(historyErrorMessage('HISTORY_READ_ONLY')).toBe('这是旧版未加密历史，只读。');
   expect(historyErrorMessage('HISTORY_KEY_REQUIRED')).toContain('本设备尚未登记历史密钥');
   expect(historyErrorMessage('CONFLICT')).toBeNull();
+});
+
+it('retrying a recovery key after a failed save uploads the same key the shown words belong to', async () => {
+  const backend = fakeBackend();
+  const api = await mount(backend);
+  const draft = api().createRecoveryDraft();
+  backend.recoveryReplies.push('timeout');
+  await expect(api().confirmRecoveryKey(draft)).rejects.toThrow('timed out');
+  await act(async () => { await api().confirmRecoveryKey(draft); });
+  const uploaded = backend.sendCommand.mock.calls.filter(([frame]) => frame.type === 'history.recovery.set').map(([frame]) => frame.payload.publicKey);
+  const expected = b64(historyRecipientKeyPairFromSeed(recoverySeedFromWords(draft.words)).publicKey);
+  expect(uploaded).toEqual([expected, expected]);
+  expect(draft.rid).toBe(b64(historyRecipientId(decodeBase64UrlBytes(expected))));
+});
+
+it('a recovery key the backend registers under another rid is reported as not saved', async () => {
+  const backend = fakeBackend();
+  const api = await mount(backend);
+  backend.recoveryReplies.push('wrong-rid');
+  await expect(api().confirmRecoveryKey(api().createRecoveryDraft())).rejects.toThrow('不一致');
+});
+
+const peerKey = historyRecipientKeyPairFromSeed(new Uint8Array(32).fill(5)).publicKey;
+const impostorKey = historyRecipientKeyPairFromSeed(new Uint8Array(32).fill(6)).publicKey;
+const peerGrant = (publicKey: Uint8Array) => ({ grantId: 'grt_peer', rid: b64(historyRecipientId(publicKey)), deviceId: 'dev_peer', requestedAt: 'now', status: 'pending', publicKey: b64(publicKey) });
+const keysListed = (backend: ReturnType<typeof fakeBackend>) => backend.sendCommand.mock.calls.filter(([frame]) => frame.type === 'history.keys.list').length;
+const settle = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+
+it('a group grant whose key is not the one the roster lists waits for a manual decision', async () => {
+  const backend = fakeBackend();
+  backend.state.grants = [peerGrant(impostorKey)];
+  await mount(backend, { autoGrantRecipients: () => new Map([['dev_peer', b64(peerKey)]]) });
+  await settle();
+  expect(keysListed(backend)).toBe(0);
+});
+
+it('a self-consistent key and rid the roster does not list is not auto-granted either', async () => {
+  const backend = fakeBackend();
+  backend.state.grants = [peerGrant(peerKey)];
+  await mount(backend, { autoGrantRecipients: () => new Map([['dev_peer', b64(impostorKey)]]) });
+  await settle();
+  expect(keysListed(backend)).toBe(0);
+});
+
+it('a group grant for the roster key is fulfilled without asking', async () => {
+  const backend = fakeBackend();
+  backend.state.grants = [peerGrant(peerKey)];
+  await mount(backend, { autoGrantRecipients: () => new Map([['dev_peer', b64(peerKey)]]) });
+  await act(async () => { await vi.waitFor(() => expect(keysListed(backend)).toBe(1)); });
+  const fulfil = backend.sendCommand.mock.calls.find(([frame]) => frame.type === 'history.grant.fulfill');
+  expect(fulfil?.[0].payload).toMatchObject({ rid: b64(historyRecipientId(peerKey)), grantId: 'grt_peer', complete: true });
 });

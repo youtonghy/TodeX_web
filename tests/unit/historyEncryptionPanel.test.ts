@@ -38,7 +38,7 @@ afterEach(async () => {
 const WORDS = 'abandon ability able about above absent absorb abstract absurd abuse access accident account accuse achieve acid acoustic acquire across act action actor actress actual'.split(' ');
 
 function session(state: Partial<HistoryEncryptionState> = {}, extra: Partial<HistoryEncryptionSession> = {}) {
-  const draft: RecoveryKeyDraft = { seed: new Uint8Array(32).fill(1), words: WORDS, qrPayload: 'todex-recovery:v1:AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE' };
+  const draft: RecoveryKeyDraft = { publicKey: new Uint8Array(1216).fill(2), rid: 'rid_rec', words: WORDS, qrPayload: 'todex-recovery:v1:AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE' };
   return {
     view: {
       backendId: 'b1', status: 'ready', localRid: 'me',
@@ -98,6 +98,21 @@ it('is always end-to-end; without a recovery key it warns, and setting one shows
   await act(async () => { checkbox.click(); });
   await press('保存恢复密钥');
   expect(history.confirmRecoveryKey).toHaveBeenCalledTimes(1);
+});
+
+it('a failed save keeps the dialog open and retries with the same draft', async () => {
+  const confirmRecoveryKey = vi.fn().mockRejectedValueOnce(new Error('timed out')).mockResolvedValueOnce(undefined);
+  const history = session({}, { confirmRecoveryKey });
+  await render(history);
+  await press('创建恢复密钥');
+  await act(async () => { (document.querySelector('input[type="checkbox"]') as HTMLInputElement).click(); });
+  await press('保存恢复密钥');
+  expect(document.querySelector('ol[aria-label="恢复单词"]')).toBeTruthy();
+  expect(toast.success).not.toHaveBeenCalled();
+  await press('保存恢复密钥');
+  expect(confirmRecoveryKey).toHaveBeenCalledTimes(2);
+  expect(confirmRecoveryKey.mock.calls[1][0]).toBe(confirmRecoveryKey.mock.calls[0][0]);
+  expect(document.querySelector('ol[aria-label="恢复单词"]')).toBeNull();
 });
 
 it('opened from the notice, it starts setting up the recovery key', async () => {
