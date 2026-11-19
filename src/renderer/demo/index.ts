@@ -31,7 +31,7 @@ import {
   demoUsageRecords,
   demoWorkspaces,
 } from './fixtures';
-import { DEMO_MESH_DEVICE_SECRET, demoMesh } from './mesh';
+import { DEMO_MESH_DEVICE_SECRET, DEMO_MESH_NAS_ID, demoMesh } from './mesh';
 import { demoOfflineTransport, demoSecondTransport, demoTransport, installDemoFetch } from './transport';
 
 export function installDemoMode(): void {
@@ -76,17 +76,23 @@ export function installDemoMode(): void {
   }
 
   // `mesh=1`: the demo backend as a node of the demo group; `mesh=local`:
-  // reached over IPC with the group link kept as a standby.
+  // reached over IPC with the group link kept as a standby; `mesh=leaving`:
+  // this device is leaving, and an offline NAS has not confirmed.
   const meshMode = params.get('mesh');
-  if (meshMode === '1' || meshMode === 'local') {
+  if (meshMode === '1' || meshMode === 'local' || meshMode === 'leaving') {
     const mesh = demoMesh(DEMO_SERVER_URL);
     const node = { groupId: mesh.group.groupId, nodeId: mesh.nodeId };
     const profile = { name: 'MBP', labelColor: '#3b82f6', tenantId: 'default', encryptionProtocol: 'none', encryptionPublicKey: '', transportVerified: false, createdAt: 0, updatedAt: 0 };
     store.set(BACKEND_CONNECTIONS_STORAGE_KEY, meshMode === 'local' ? [
       { ...profile, id: 'default-backend', serverUrl: 'todex-ipc://local' },
       { ...profile, id: 'demo-mesh-standby', serverUrl: DEMO_SERVER_URL, disabled: true, mesh: node },
+    ] : meshMode === 'leaving' ? [
+      { ...profile, id: 'default-backend', serverUrl: DEMO_SERVER_URL, mesh: node },
+      { ...profile, id: 'demo-mesh-nas', name: 'NAS', serverUrl: DEMO_OFFLINE_SERVER_URL, mesh: { groupId: mesh.group.groupId, nodeId: DEMO_MESH_NAS_ID } },
     ] : [{ ...profile, id: 'default-backend', serverUrl: DEMO_SERVER_URL, mesh: node }]);
-    store.set(MESH_GROUPS_STORAGE_KEY, [mesh.group]);
+    store.set(MESH_GROUPS_STORAGE_KEY, [meshMode === 'leaving'
+      ? { ...mesh.group, leaving: { at: 0, othersCarry: false, nodeCount: 2, pendingNodes: [DEMO_MESH_NAS_ID], nodeNames: { [mesh.nodeId]: 'MBP', [DEMO_MESH_NAS_ID]: 'NAS' } } }
+      : mesh.group]);
     void saveSealedSecret(`${DEVICE_SECRET_STORAGE_KEY}.default-backend`, DEMO_MESH_DEVICE_SECRET);
     if (meshMode === 'local') void saveSealedSecret(`${DEVICE_SECRET_STORAGE_KEY}.demo-mesh-standby`, DEMO_MESH_DEVICE_SECRET);
     void saveSealedSecret(meshDeviceSecretKey(mesh.group.groupId), DEMO_MESH_DEVICE_SECRET);
