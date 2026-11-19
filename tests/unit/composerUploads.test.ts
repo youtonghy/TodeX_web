@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { attachmentToken, composerTokensInText, expandTextCapsules, liveComposerAttachments, type ComposerAttachmentDraft } from '../../src/renderer/session/helpers';
 import { prepareSentAttachments } from '../../src/renderer/session/sentAttachments';
+import { uploadPromptFile } from '../../src/renderer/session/promptUploads';
+import { PROMPT_UPLOAD_CHUNK_BYTES } from '@todex/protocol/promptUploads';
+import type { V2ApiClient } from '@todex/protocol/v2';
 
 function attachment(partial: Partial<ComposerAttachmentDraft>): ComposerAttachmentDraft {
   return { id: 'a', kind: 'file', name: 'a.txt', mimeType: 'text/plain', sizeBytes: 1, dataUrl: '', source: 'clipboard', ...partial };
@@ -29,5 +32,28 @@ describe('pasted-text capsules', () => {
   it('are sent as file receipts if one ever reaches the receipt list', async () => {
     const [receipt] = await prepareSentAttachments([capsule]);
     expect(receipt).toMatchObject({ kind: 'file', name: '粘贴的文本', textContent: 'line one\nline two' });
+  });
+});
+
+describe('uploadPromptFile', () => {
+  it('stops sending chunks once the conversation is gone', async () => {
+    const sent: Array<{ offset: number; conversationId?: string }> = [];
+    let wanted = true;
+    const api = {
+      uploadPromptChunk: async (name: string, offset: number, bytes: Uint8Array, uploadId?: string, _timeout?: number, conversationId?: string) => {
+        sent.push({ offset, conversationId });
+        // The conversation is deleted while the first chunk is in flight.
+        wanted = false;
+        return { uploadId: uploadId ?? 'u1', path: `/private/${name}`, name, mimeType: 'text/plain', sizeBytes: offset + bytes.length };
+      },
+    } as unknown as V2ApiClient;
+    const blob = new Blob([new Uint8Array(PROMPT_UPLOAD_CHUNK_BYTES + 10)]);
+    await expect(uploadPromptFile(api, 'big.bin', blob, 'conv-private', () => wanted)).rejects.toThrow();
+    expect(sent).toEqual([{ offset: 0, conversationId: 'conv-private' }]);
+  });
+
+  it('does not start for a conversation that is already gone', async () => {
+    const api = { uploadPromptChunk: async () => { throw new Error('must not upload'); } } as unknown as V2ApiClient;
+    await expect(uploadPromptFile(api, 'a.txt', new Blob(['hi']), 'conv-private', () => false)).rejects.toThrow(/deleted|删除|削除|삭제/);
   });
 });
