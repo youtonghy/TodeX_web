@@ -49,3 +49,21 @@ it('counts epochs per backend', () => {
   expect(epochs.current('a')).toBe(before + 1);
   expect(epochs.current('b')).toBe(0);
 });
+
+it('drops local copies of workspaces deleted on another device, unless edited here since', () => {
+  const deleted = { id: 'gone', path: '/gone', backendConnectionId: 'a', deletedAt: 10 } as WorkspaceTombstone;
+  const merge = mergeWorkspaceDirectory({
+    backendId: 'a', remote: [workspace('kept', '/kept')], rejections: [],
+    workspaces: [
+      workspace('gone', '/gone', { backendConnectionId: 'a', updatedAt: 5 }),
+      workspace('edited', '/edited', { backendConnectionId: 'a', updatedAt: 20 }),
+    ],
+    tombstones: [],
+    backendDeleted: [deleted, { ...deleted, id: 'edited', path: '/edited' }],
+  });
+  expect(merge.nextScoped.map((item) => item.id).sort()).toEqual(['edited', 'kept']);
+  expect(merge.localScoped.map((item) => item.id)).toEqual(['edited']);
+  // The backend already holds these deletions: nothing to delete again, no local tombstones kept.
+  expect(merge.staleRemoteIds).toEqual([]);
+  expect(merge.survivingTombstones).toBeNull();
+});
