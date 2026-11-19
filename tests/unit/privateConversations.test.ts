@@ -90,8 +90,8 @@ describe('private notification feed entries', () => {
     const feed = await import('../../src/renderer/session/notificationFeed');
     feed.addNotification({ kind: 'conversation', status: 'success', title: 'public', description: 'reply', conversationId: 'ca' });
     feed.addNotification({ kind: 'conversation', status: 'success', title: t('private.notifyReply'), description: '', conversationId: 'cp', ephemeral: true });
-    const stored = JSON.parse(window.localStorage.getItem('todex.notificationFeed.v1') ?? '[]') as Array<{ title: string }>;
-    expect(stored.map((item) => item.title)).toEqual(['public']);
+    const stored = JSON.parse(window.localStorage.getItem('todex.notificationFeed.v2') ?? '[]') as Array<{ conversationId: string }>;
+    expect(stored.map((item) => item.conversationId)).toEqual(['ca']);
     feed.forgetConversationNotifications(new Set(['cp']));
     const reloaded = await (vi.resetModules(), import('../../src/renderer/session/notificationFeed'));
     let items: unknown[] = [];
@@ -101,6 +101,30 @@ describe('private notification feed entries', () => {
     await act(async () => { probeRoot.render(createElement(Probe)); });
     expect(items).toHaveLength(1);
     act(() => probeRoot.unmount());
+  });
+
+  it('stores conversation entries without their title or text and migrates v1', async () => {
+    window.localStorage.setItem('todex.notificationFeed.v1', JSON.stringify([
+      { id: 'old', kind: 'conversation', status: 'success', title: 'Secret project', description: 'reply excerpt', at: 1, read: false, conversationId: 'ca' },
+      { id: 'sys', kind: 'system', status: 'error', title: 'Update failed', description: 'network', at: 1, read: false },
+    ]));
+    const feed = await import('../../src/renderer/session/notificationFeed');
+    expect(window.localStorage.getItem('todex.notificationFeed.v1')).toBeNull();
+    feed.addNotification({ kind: 'conversation', status: 'information', title: 'Run rm -rf build?', description: 'rm -rf build', conversationId: 'cb' });
+    const raw = window.localStorage.getItem('todex.notificationFeed.v2') ?? '';
+    for (const secret of ['Secret project', 'reply excerpt', 'rm -rf build']) expect(raw).not.toContain(secret);
+    const stored = JSON.parse(raw) as Array<{ id: string; title: string; restored?: boolean }>;
+    expect(stored.find((item) => item.id === 'sys')).toMatchObject({ title: 'Update failed' });
+    expect(stored.filter((item) => item.restored).map((item) => item.title)).toEqual(['', '']);
+  });
+
+  it('a Pi notice of a private conversation never reaches storage; a normal one keeps only its conversation', async () => {
+    const { toast: freshToast } = await import('../../src/renderer/components/ui/toast-store');
+    freshToast.info('Pi · Private chat', { description: 'extension says hi', conversationId: 'cp', ephemeral: true });
+    freshToast.info('Pi · Work chat', { description: 'build finished', conversationId: 'cw', workspaceId: 'w' });
+    const raw = window.localStorage.getItem('todex.notificationFeed.v2') ?? '';
+    for (const secret of ['Private chat', 'extension says hi', 'Work chat', 'build finished']) expect(raw).not.toContain(secret);
+    expect((JSON.parse(raw) as Array<{ conversationId?: string }>).map((item) => item.conversationId)).toEqual(['cw']);
   });
 });
 

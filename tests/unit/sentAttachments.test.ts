@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  bindSentAttachmentEvents, prepareSentAttachments, projectSentAttachments, pruneSentAttachmentRecords,
-  type SentAttachmentRecord,
+  attachmentsFromRequestContent, bindSentAttachmentEvents, prepareSentAttachments, projectSentAttachments, pruneSentAttachmentRecords,
+  restoreSentAttachmentRecords, storedSentAttachmentRecords, type SentAttachmentRecord,
 } from '../../src/renderer/session/sentAttachments';
 import type { ConversationEvent } from '@todex/protocol/v2';
 import { classifyV2ConversationEvent } from '@todex/protocol/mobileParity';
@@ -130,7 +130,7 @@ describe('legacy message attachment recovery', () => {
     const result = projectSentAttachments([message], [record()], 'c')[0];
     expect(result.sentAttachments).toEqual([
       { id: 'native-user-item:attachment:0', kind: 'image', name: '图片 1', mimeType: 'image/png', sizeBytes: null, previewUrl: imageUrl },
-      { id: 'native-user-item:attachment:1', kind: 'file', name: 'notes.txt', mimeType: 'text/plain', sizeBytes: null },
+      { id: 'native-user-item:attachment:1', kind: 'file', name: 'notes.txt', mimeType: 'text/plain', sizeBytes: null, textContent: 'file content' },
     ]);
     expect(result.subtitle).toBe(message.subtitle);
     expect(result.raw).toBe(message.raw);
@@ -153,5 +153,51 @@ describe('legacy message attachment recovery', () => {
       { ...entry('remote'), raw: JSON.stringify({ type: 'userMessage', content: [{ type: 'image', url: 'https://example.com/image.png' }] }) },
     ];
     expect(projectSentAttachments(rows, [], 'c').every(item => !item.sentAttachments)).toBe(true);
+  });
+});
+
+describe('stored receipts', () => {
+  const full: SentAttachmentRecord = {
+    conversationId: 'c', requestId: 'r1', eventId: 'e1', turnId: 't1', text: 'secret prompt',
+    attachments: [{ id: 'a', kind: 'image', name: 'plan.png', mimeType: 'image/png', sizeBytes: 3, previewUrl: 'data:image/png;base64,AAAA', textContent: 'x' }],
+  };
+
+  it('keep only which message had attachments', () => {
+    const stored = storedSentAttachmentRecords([full]);
+    expect(stored).toEqual([{ conversationId: 'c', requestId: 'r1', eventId: 'e1', turnId: 't1' }]);
+    expect(JSON.stringify(stored)).not.toMatch(/secret|plan\.png|base64/);
+  });
+
+  it('read back as content-less records, flagging older builds that stored content', () => {
+    expect(restoreSentAttachmentRecords([full])).toEqual({
+      hadContent: true,
+      records: [{ conversationId: 'c', requestId: 'r1', eventId: 'e1', turnId: 't1', text: '', attachments: [], restored: true }],
+    });
+    expect(restoreSentAttachmentRecords(storedSentAttachmentRecords([full])).hadContent).toBe(false);
+    expect(restoreSentAttachmentRecords('junk')).toEqual({ records: [], hadContent: false });
+  });
+
+  it('a restored record does not blank the row: the summary text stays until history refills it', () => {
+    const [restored] = restoreSentAttachmentRecords([full]).records;
+    const row = { ...entry('e1'), subtitle: 'secret prompt and file' };
+    expect(projectSentAttachments([row], [restored], 'c')[0]).toEqual(row);
+  });
+
+  it('rebuild cards from the content a v2 user message carries for retries', () => {
+    const attachments = attachmentsFromRequestContent('e1', [
+      { type: 'image', data: 'iVBORw0KGgo=', mimeType: 'image/png' },
+      { type: 'text', text: '[附件: notes.md]\nhello' },
+      { type: 'text', text: '[引用: src/app.ts:3-4]\nContent:\nconst a = 1;' },
+      { type: 'file', path: '/up/report.pdf', name: 'report.pdf' },
+      { type: 'localImage', path: '/up/shot.png' },
+      { type: 'text', text: 'ordinary prompt text' },
+    ]);
+    expect(attachments).toEqual([
+      { id: 'e1:attachment:0', kind: 'image', name: '图片 1', mimeType: 'image/png', sizeBytes: null, previewUrl: 'data:image/png;base64,iVBORw0KGgo=' },
+      { id: 'e1:attachment:1', kind: 'file', name: 'notes.md', mimeType: 'text/plain', sizeBytes: null, textContent: 'hello' },
+      { id: 'e1:attachment:2', kind: 'file', name: 'src/app.ts:3-4', mimeType: 'text/plain', sizeBytes: null, textContent: 'const a = 1;' },
+      { id: 'e1:attachment:3', kind: 'file', name: 'report.pdf', mimeType: 'application/octet-stream', sizeBytes: null },
+      { id: 'e1:attachment:4', kind: 'image', name: 'shot.png', mimeType: 'image/*', sizeBytes: null },
+    ]);
   });
 });
