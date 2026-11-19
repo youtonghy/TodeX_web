@@ -57,3 +57,20 @@ it('fixes run modes only on records it creates', () => {
   expect(merged).toBe(existing);
   expect(merged[0].permissionMode).toBe('ask');
 });
+
+it('keeps another backend\'s conversations of a workspace with the same id', () => {
+  // Same path on two backends: the backends give both workspaces one id.
+  const sameA = { ...workspaceA, id: 'ws' } as WorkspaceRecord;
+  const sameB = { ...workspaceB, id: 'ws' } as WorkspaceRecord;
+  let current = mergeManifestConversations([], [manifest('ca', 'ws')], [sameA, sameB], 'a');
+  current = mergeManifestConversations(current, [manifest('cb', 'ws')], [sameA, sameB], 'b');
+  expect(current.map((item) => [item.id, item.backendConnectionId]).sort()).toEqual([['ca', 'a'], ['cb', 'b']]);
+  // Each backend's next listing leaves the other's conversation alone.
+  const afterA = mergeManifestConversations(current, [manifest('ca', 'ws')], [sameA, sameB], 'a');
+  expect(afterA.map((item) => item.id).sort()).toEqual(['ca', 'cb']);
+  const afterB = mergeManifestConversations(afterA, [manifest('cb', 'ws')], [sameA, sameB], 'b');
+  expect(afterB.map((item) => item.id).sort()).toEqual(['ca', 'cb']);
+  // An untagged record picks its backend up from the listing that has it.
+  const [tagged] = mergeManifestConversations([conversation('cb', 'ws')], [manifest('cb', 'ws')], [sameB], 'b');
+  expect(tagged.backendConnectionId).toBe('b');
+});

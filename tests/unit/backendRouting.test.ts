@@ -3,6 +3,7 @@ import {
   ownerBackendId,
   resolveNoWorkspaceBackendId,
   tagLegacyBackendRecords,
+  workspaceRemovalScope,
 } from '../../src/renderer/session/backendRouting';
 
 const profiles = [
@@ -61,3 +62,24 @@ it('tagging keeps the inputs when nothing is untagged', () => {
   expect(tagLegacyBackendRecords(records, '').workspaces).toBe(records.workspaces);
 });
 
+
+it('scopes a workspace deletion to its backend when two backends share the id', () => {
+  // Backends name workspaces after their path: /repo on a and b is `ws`.
+  const workspaces = [{ id: 'ws', backendConnectionId: 'a' }, { id: 'ws', backendConnectionId: 'b' }, { id: 'other', backendConnectionId: 'a' }];
+  const conversations = [
+    { id: 'ca', workspaceId: 'ws', backendConnectionId: 'a' },
+    { id: 'cb', workspaceId: 'ws', backendConnectionId: 'b' },
+    // Untagged: follows the first workspace with its id (backend a).
+    { id: 'legacy', workspaceId: 'ws' },
+    { id: 'elsewhere', workspaceId: 'other', backendConnectionId: 'a' },
+  ];
+  const scope = workspaceRemovalScope(workspaces, conversations, 'ws', 'b', 'a');
+  expect(workspaces.filter(scope.workspace)).toEqual([{ id: 'ws', backendConnectionId: 'b' }]);
+  expect(scope.conversationIds).toEqual(['cb']);
+  expect(scope.terminal({ workspaceId: 'ws', conversationId: '', backendConnectionId: 'b' })).toBe(true);
+  expect(scope.terminal({ workspaceId: 'ws', conversationId: '', backendConnectionId: 'a' })).toBe(false);
+  expect(scope.terminal({ workspaceId: '', conversationId: 'cb' })).toBe(true);
+  const first = workspaceRemovalScope(workspaces, conversations, 'ws', 'a', 'a');
+  expect(first.conversationIds).toEqual(['ca', 'legacy']);
+  expect(workspaces.filter(first.workspace)).toEqual([{ id: 'ws', backendConnectionId: 'a' }]);
+});
