@@ -7,6 +7,9 @@ test('the Web workbench checks Claude quota each time and preserves the composer
     await page.getByRole('button', { name: '打开导航侧栏' }).click();
   }
   await page.getByRole('grid', { name: '对话' }).getByRole('row', { name: '重构结账页表单校验' }).click();
+  if (viewport && viewport.width <= 768) {
+    await page.getByRole('button', { name: '折叠侧栏' }).click();
+  }
   const composer = page.getByRole('textbox', { name: '消息输入' });
   await composer.fill('保留这条草稿');
   for (let attempt = 0; attempt < 2; attempt++) {
