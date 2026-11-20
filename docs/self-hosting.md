@@ -62,3 +62,27 @@ trusted_proxies = ["172.17.0.2"]
 ## 开发
 
 `TODEX_BACKENDS=… pnpm dev` 让 Vite 开发服务器提供相同的 `/api/config` 与 `/backend/<id>/` 代理。
+
+## 构建镜像
+
+GitHub Actions 的 `docker` 工作流需手动触发（**Actions → docker → Run workflow**），输入发行版本号（如 `1.2.3`）。它会推送 `ghcr.io/youtonghy/todex_web:<version>`（默认同时推送 `:latest`），需要仓库密钥 `HEROUI_KEY`（`hp_…`）以便 `hpsetup` 获取授权的 `@heroui-pro/react` 内容；`protocol_ref` 输入指定编译所用的 `youtonghy/TodeX_protocol` 分支或标签。
+
+本地构建需要一个同级的 `TodeX_protocol` 检出作为 `todexprotocol` 构建上下文，并在 shell 中导出 `HEROUI_KEY`。密钥以 BuildKit secret 传入，不会写进镜像层。[`compose.build.yaml`](../compose.build.yaml) 在服务上叠加了 `build` 配置：
+
+```bash
+export HEROUI_KEY="hp_..."
+docker compose -f compose.yaml -f compose.build.yaml up -d --build
+# TODEX_PROTOCOL_DIR=/path/to/TodeX_protocol 和 TODEX_BUILD_VERSION=1.2.3 可覆盖默认值
+```
+
+等价的 `docker buildx` 命令：
+
+```bash
+docker buildx build \
+  --build-context todexprotocol=/path/to/TodeX_protocol \
+  --secret id=HEROUI_KEY,env=HEROUI_KEY \
+  --build-arg TODEX_BUILD_VERSION=1.2.3 \
+  -t todex-web .
+```
+
+CI 构建时应把 `TODEX_BUILD_VERSION` 设为发行版本；本地开发构建显示 `DEV0.0.0`，`package.json` 保持占位版本 `0.0.0`。

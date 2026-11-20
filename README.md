@@ -4,210 +4,191 @@
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="src/renderer/assets/brand/t-icon-dark-beige.png" />
     <source media="(prefers-color-scheme: light)" srcset="src/renderer/assets/brand/t-icon-light.png" />
-    <img src="src/renderer/assets/brand/t-icon-dark-beige.png" alt="TodeX" width="160" height="160" />
+    <img src="src/renderer/assets/brand/t-icon-dark-beige.png" alt="TodeX" width="120" height="120" />
   </picture>
 </p>
 
-The TodeX public website lives at `/`, with the stateless web workbench at `/app`.
-The website introduces the product, offers official Desktop packages and a one-line Backend installer;
-the mobile app is not available for download yet. Each workbench browser connects
-directly to its own user-managed `todex-agentd` over REST and WebSocket; a
-self-hosted deployment (`TODEX_BACKENDS`) instead pins its backends and reaches
-them through this server's proxy, still behind device verification.
+<p align="center">
+  <strong>The TodeX website and the full TodeX workbench in your browser: run and follow Codex, Claude Code, Pi and other coding agents on your own backends, from any computer.</strong>
+</p>
 
-The title menu includes CLI management for the active Backend, including installed/latest version status, one-click install of missing CLIs and managed one-click upgrades. Agent accounts can be exported and imported per agent as a JSON file to sync providers between hosts.
-The chat model picker includes a search field above the list, with case-insensitive model name matching, a clear button, and keyboard navigation.
+<p align="center">
+  <a href="README.md">English</a> · <a href="README.zh-CN.md">简体中文</a>
+</p>
 
-## Requirements
+![TodeX Web workbench](docs/screenshots/home-en.png)
 
-- Node.js 22 or newer
-- pnpm 11.24.0
-- `TodeX_protocol` checked out next to this directory because the build reuses its `src` protocol implementation
-- A reachable `todex-agentd` with browser access enabled
+TodeX Web serves two things from one site:
 
-## Development
+- **The website** at `/`: what TodeX does, a live demo of the workbench, documentation, and downloads of the desktop app and the backend installer.
+- **The workbench** at `/app`: the same workspace as [TodeX Desktop](https://github.com/youtonghy/TodeX_desktop), in a browser. It connects to your own TodeX backends (`todex-agentd`), which run the agent CLIs on their machines.
 
-```bash
-export HEROUI_AUTH_TOKEN="<your licensed HeroUI Pro token>"
-pnpm install
-pnpm dev
-```
+It works in light and dark themes, in English, 简体中文, 日本語 and 한국어, and you can self-host it with Docker.
 
-The renderer reuses the licensed HeroUI Pro layout used by TodeX Desktop, so a valid HeroUI Pro token is required when installing dependencies in a clean checkout.
+## Contents
 
-Open `http://127.0.0.1:5173` for the website, or `http://127.0.0.1:5173/app` for the workbench.
+- [The website](#the-website)
+- [Home at a glance](#home-at-a-glance)
+- [Conversations](#conversations)
+- [Models, reasoning and work modes](#models-reasoning-and-work-modes)
+- [Plans and the task board](#plans-and-the-task-board)
+- [Private conversations](#private-conversations)
+- [Terminal and SSH](#terminal-and-ssh)
+- [Agent desktop tools](#agent-desktop-tools)
+- [Backends, groups and config sync](#backends-groups-and-config-sync)
+- [Agent CLI management and Agent Calling](#agent-cli-management-and-agent-calling)
+- [Usage profile](#usage-profile)
+- [Security and browser data](#security-and-browser-data)
+- [Deploy](#deploy)
+- [Development](#development)
 
-The two entries load independently. Visiting the website does not initialize the
-workbench bridge or connect to a Backend. Existing `todex.web.*` browser data stays
-available at `/app` on the same origin; no data migration is required. `/app/` and
-nested `/app/*` URLs also load the workbench, including on direct visits and refresh.
+## The website
 
-The website's workbench preview embeds `/demo`: the real sidebar, chat and workbench
-panels replaying a scripted walkthrough (new workspace → new conversation → send a
-message → receive the answer) from in-memory sample data. It never connects to a
-Backend or writes `todex.web.*` storage, pauses while scrolled out of view, and shows
-the finished state without animation under `prefers-reduced-motion`. The script and
-sample data live in `src/renderer/demo/`. The CSP allows same-origin framing
-(`frame-ancestors 'self'`) for this embed only.
+The landing page introduces TodeX and embeds a live demo: the real workbench replaying a short walkthrough with sample data, without connecting to any backend. **Downloads** lists the desktop packages for each version and platform, with release notes and checksums, plus the one-line backend installer. **Docs** has guides for workspaces, agents and plans, with live demo scenes for each feature.
 
-## Website downloads
+![TodeX website](docs/screenshots/site-en.png)
 
-The version and platform selectors are served by `GET /api/releases`, which the
-Node server answers with live GitHub Releases data (10-minute in-memory cache;
-the last good catalog is served flagged `stale` if a refresh fails). The server
-needs public GitHub API access; set `GITHUB_TOKEN` to raise the rate limit.
-Website visitors never contact GitHub directly. Only Desktop is offered as
-packages: unpublished architectures are not listed, and download links point to
-official release assets, with release notes and SHA256 checksum files alongside
-them. Backend is installed with the one-line `install.sh` command from
-TodeX_backend (macOS / Linux / WSL), which does not depend on the catalog; on
-Windows the card also links to the native build on the latest release. Product copy is based on the ecosystem, Desktop,
-Backend, and Web READMEs. The original generated sky asset and its prompt are
-documented in [website assets](docs/website-assets.md).
+## Home at a glance
 
-## Production
+The home page shows what needs you right now: running conversations, conversations waiting for your reply or approval, today's conversations and token usage, and each agent's plan limits with their reset times. **Customize layout** adds, removes and rearranges the cards.
 
-```bash
-TODEX_BUILD_VERSION=1.2.3 pnpm build
-HOST=0.0.0.0 PORT=4173 pnpm start
-```
+| Light | Dark |
+| :---: | :---: |
+| ![Home, light](docs/screenshots/home-en.png) | ![Home, dark](docs/screenshots/home-dark-en.png) |
 
-CI should set `TODEX_BUILD_VERSION` to the release version while building. Local
-development builds display `DEV0.0.0`; `package.json` keeps the valid placeholder
-version `0.0.0`.
+## Conversations
 
-### Docker
+Workspaces are grouped into folders in the sidebar, each with its conversations and their live status. In a conversation you follow the agent's streamed answer, expand each run's commands, file diffs and tool calls, and answer approval requests once or for the whole conversation. The header shows the agent, Git branch, worktree and the size of the change.
 
-Published images live at `ghcr.io/youtonghy/todex_web`, tagged with each release
-version plus `latest`. The container listens on `4173`, runs as the unprivileged
-`node` user (no writes, so `--read-only` works), and ships a health check
-against `GET /healthz`. Images are built for `linux/amd64` and `linux/arm64`.
-`HOST` and `PORT` set the listener; `GITHUB_TOKEN` is optional and only raises
-the GitHub API rate limit used by `GET /api/releases`. There is no user
-database or session store.
+The composer takes images and files, and has `@` (files, folders, other conversations, skills, MCP servers, SSH hosts, apps), `/` (the agent's slash commands) and `#` (skills and MCP servers) menus. Messages sent while the agent is busy wait in a queue, and conversations keep running after you close the tab, because the backend runs them.
 
-**Self-hosting with fixed backends:** set `TODEX_BACKENDS` to comma-separated
-`Name=URL` entries (one or more). With it set:
+| Light | Dark |
+| :---: | :---: |
+| ![Conversation, light](docs/screenshots/conversation-en.png) | ![Conversation, dark](docs/screenshots/conversation-dark-en.png) |
 
-- The browser only talks to this site. Every request, WebSocket and device
-  pairing included, goes to `/backend/<id>/` and the server forwards it; the
-  backend addresses are never sent to the browser (`GET /api/config` returns
-  ids and names only).
-- The workbench lists exactly the configured backends: they cannot be added,
-  removed or re-addressed. `/` redirects to `/app`.
-- Every browser still has to pass device verification on each backend. The
-  proxy overwrites `Origin` with a fixed non-local value, so even a backend on
-  the same machine running anonymously on loopback cannot be reached through it
-  without authorization.
-- The proxied backends must have transport encryption enabled, or pairing is
-  refused.
+The running plan and the agent's goal stay above the composer:
 
-Without `TODEX_BACKENDS` nothing changes. See
-[docs/self-hosting.md](docs/self-hosting.md).
+| Plan steps | Agent goal |
+| :---: | :---: |
+| ![Plan steps](docs/screenshots/plan-steps-en.png) | ![Goal](docs/screenshots/goal-en.png) |
 
-Run it directly:
+## Models, reasoning and work modes
+
+Search for a model, drag the reasoning effort, and pick the work mode: **Implement**, **Plan**, or **Smart** for Claude Code (plan with one model, then run the approved plan with an execution model on auto-approval).
+
+| Model and reasoning effort | Work modes |
+| :---: | :---: |
+| ![Model picker](docs/screenshots/model-card-en.png) | ![Work modes](docs/screenshots/work-mode-en.png) |
+
+## Plans and the task board
+
+A task board per workspace, with priorities, due dates and status, tasks pinned to the conversations that work on them, and a calendar view.
+
+| Board | Calendar |
+| :---: | :---: |
+| ![Task board](docs/screenshots/task-board-en.png) | ![Plan calendar](docs/screenshots/plan-calendar-en.png) |
+
+## Private conversations
+
+A private conversation lives only in the backend's memory: nothing goes into history, and it is gone after a restart. Scheduled conversations send their prompt at the time you pick.
+
+![Private conversation](docs/screenshots/private-conversation-en.png)
+
+## Terminal and SSH
+
+Open terminals on the backend machine, manage its SSH hosts, keys, FTP sites and port forwarding, browse remote files over SFTP/FTP, and give agents access to chosen hosts with per-conversation or per-command approval.
+
+![Terminal hosts](docs/screenshots/terminal-hosts-en.png)
+
+## Agent desktop tools
+
+With agent desktop tools on, an agent can drive a browser and operate apps on the backend's computer. You watch it live and can stop it at any time; first use in each conversation needs approval.
+
+| Computer Use live view | Settings |
+| :---: | :---: |
+| ![Computer Use live view](docs/screenshots/computer-live-en.png) | ![Agent desktop tools](docs/screenshots/settings-agent-desktop-en.png) |
+
+## Backends, groups and config sync
+
+Add as many backends as you like; each stays connected and serves its own workspaces. Pairing needs only the backend's address and a code you compare before approving. **Backend groups** join devices and backends into a group with QR invites and encrypted relays, and **config sync** copies agent accounts, settings, MCP servers and skills from one backend to another.
+
+| Backend connections | Backend groups |
+| :---: | :---: |
+| ![Backend connections](docs/screenshots/settings-backends-en.png) | ![Backend groups](docs/screenshots/settings-mesh-en.png) |
+
+![Config sync](docs/screenshots/config-sync-en.png)
+
+## Agent CLI management and Agent Calling
+
+See each agent CLI's installed and latest version, update or install it in one click, switch provider accounts, and export or import them as a file. **Agent Calling** lets agents hand tasks to other agents and models, and creates API keys for scripts that call agents through the backend's external API.
+
+| CLI management | Agent Calling |
+| :---: | :---: |
+| ![CLI management](docs/screenshots/settings-cli-en.png) | ![Agent Calling](docs/screenshots/settings-agent-calling-en.png) |
+
+## Usage profile
+
+Token usage per agent and model, cache hit rate, an activity heatmap and active conversations by month.
+
+![Profile](docs/screenshots/profile-en.png)
+
+## Security and browser data
+
+- **Device verification**: each browser pairs with a backend by comparing a code with the backend's console (or `todex-agentd pair approve`). Approval pins the backend's key and enrolls this browser's signing key; there are no keys to paste. See [device verification](docs/device-verification.md).
+- **Encrypted transport**: once paired, every request and the live connection are encrypted, loopback included. Without pairing only a backend on this machine can be reached, and a changed backend key asks you to pair again.
+- **End-to-end encrypted history**: history is always encrypted with keys your devices hold; the app reminds you until a recovery key is set.
+- **Browser data**: connection settings and preferences live in this browser profile's local storage, and device keys are sealed in IndexedDB. Keys can only be saved on HTTPS or `localhost`. On a shared computer, use **Settings › Backend connections › Clear data**. Anything that runs script on the site's origin (including privileged extensions) can use these credentials, so serve reviewed assets and keep the included Content Security Policy.
+
+## Deploy
+
+The published image is `ghcr.io/youtonghy/todex_web` (`linux/amd64` and `linux/arm64`, tagged with each release and `latest`). It listens on port `4173`, runs as an unprivileged user with a read-only filesystem, and has a health check at `/healthz`. There is no user database.
 
 ```bash
 docker run -d --name todex-web --restart unless-stopped --read-only \
-  -p 4173:4173 \
-  -e TODEX_BACKENDS="Home=http://192.168.1.20:7345,Office=https://office.lan:7345" \
-  ghcr.io/youtonghy/todex_web:latest
+  -p 4173:4173 ghcr.io/youtonghy/todex_web:latest
 ```
 
-Or use the bundled [`compose.yaml`](compose.yaml):
+Or with the bundled [`compose.yaml`](compose.yaml):
 
 ```bash
 cp .env.example .env   # set TODEX_BACKENDS and, optionally, PORT
 docker compose pull
 docker compose up -d
-docker compose logs -f web
 ```
 
-Pin a version with `TODEX_WEB_TAG=1.2.3 docker compose up -d`. Upgrade with
-`docker compose pull && docker compose up -d`.
+Pin a version with `TODEX_WEB_TAG=1.2.3`; upgrade with `docker compose pull && docker compose up -d`.
 
-```yaml
-services:
-  web:
-    image: ghcr.io/youtonghy/todex_web:${TODEX_WEB_TAG:-latest}
-    restart: unless-stopped
-    ports:
-      - "${PORT:-4173}:4173"
-    read_only: true
-    environment:
-      HOST: 0.0.0.0
-      PORT: "4173"
-      TODEX_BACKENDS: ${TODEX_BACKENDS:-}
-```
+**Self-hosting with fixed backends.** Set `TODEX_BACKENDS` to comma-separated `Name=URL` entries, for example `Home=http://192.168.1.20:7345,Office=https://office.lan:7345`. The browser then talks only to this site, which forwards everything (pairing included) to the configured backends without ever revealing their addresses; the workbench shows exactly those backends, and `/` redirects to `/app`. Every browser still has to pass device verification on each backend, and the backends must have transport encryption on. See [self-hosting](docs/self-hosting.md).
 
-Put a trusted reverse proxy (Caddy, nginx, Traefik) in front of the container to
-terminate TLS and forward WebSocket upgrades. With `TODEX_BACKENDS` the browser
-only talks to this site. Without it, an HTTPS page must use HTTPS/WSS for
-non-loopback Backends, and each Backend must allow the deployed site origin
-through CORS and, when relevant, browser Private Network Access: add it to the
-Backend's `security.cors_origins` (or `TODEX_AGENTD_CORS_ORIGINS`, comma
-separated), which also governs Private Network Access. Backends allow only the
-desktop app and loopback pages otherwise.
+Without `TODEX_BACKENDS`, each browser connects to its own backends directly. Put a reverse proxy (Caddy, nginx, Traefik) in front for TLS and WebSocket upgrades; an HTTPS page needs HTTPS/WSS backends, and each backend must allow the site's origin in `security.cors_origins` (or `TODEX_AGENTD_CORS_ORIGINS`).
 
-#### Building the image
+`GITHUB_TOKEN` is optional and only raises the GitHub API rate limit for the downloads list, which the server fetches from GitHub Releases and caches for 10 minutes.
 
-The `docker` GitHub Actions workflow is triggered manually (**Actions → docker →
-Run workflow**) with a release version such as `1.2.3`. It pushes
-`ghcr.io/youtonghy/todex_web:<version>` (plus `:latest` by default) and requires
-a `HEROUI_KEY` repository secret (the `hp_…` key) so `hpsetup` can fetch the
-licensed `@heroui-pro/react` contents. The `protocol_ref` input pins which
-`youtonghy/TodeX_protocol` branch or tag the protocol sources are compiled from.
+## Development
 
-To build locally, the image needs a sibling `TodeX_protocol` checkout as the
-`todexprotocol` build context and `HEROUI_KEY` exported in the shell. The key is
-passed as a BuildKit secret and never stored in a layer.
-[`compose.build.yaml`](compose.build.yaml) layers a `build` section onto the
-service:
+Requirements: Node.js 22+, pnpm 11, and a [TodeX_protocol](https://github.com/youtonghy/TodeX_protocol) checkout next to this directory. Installing dependencies in a clean checkout needs a licensed UI package token in `HEROUI_AUTH_TOKEN`.
 
 ```bash
-export HEROUI_KEY="hp_..."
-docker compose -f compose.yaml -f compose.build.yaml up -d --build
-# TODEX_PROTOCOL_DIR=/path/to/TodeX_protocol and TODEX_BUILD_VERSION=1.2.3 override the defaults
-```
-
-The equivalent plain `docker buildx` invocation:
-
-```bash
-docker buildx build \
-  --build-context todexprotocol=/path/to/TodeX_protocol \
-  --secret id=HEROUI_KEY,env=HEROUI_KEY \
-  --build-arg TODEX_BUILD_VERSION=1.2.3 \
-  -t todex-web .
-```
-
-## Device verification
-
-Enter only the Backend address, request device verification, then compare the full code (and the transport key fingerprint) in the Backend TUI (`d`) and approve with `a` or reject with `r`. The code also authenticates the Backend's transport public key: approval enrolls this browser's signing key and pins that key, then connects. There is no manual key, paste or QR import; each backend's page under Settings › Backend connections shows the pinned protocol, fingerprint and verified state with a Re-pair action. Every backend is paired and stays connected on its own, serving its own workspaces; new conversations outside any workspace (None) start on the backend chosen there, by default the first one added. Pairing uses v3 (commit, then reveal). See [device verification](docs/device-verification.md) for expiry and credential handling.
-
-## Transport encryption
-
-With a pinned key the client always uses transport v2, loopback included: the WebSocket uses `tv=2` binary frames and every REST request goes through the `POST /v2/sealed` tunnel; only `/health`, `/v2/transport-policy` and device verification are called directly. Without a pinned key only a loopback Backend can be reached (in plaintext); a remote address is refused with a prompt to pair with encryption, and a changed Backend protocol asks for re-pairing instead of downgrading. A key saved without device-pairing verification (older manual imports) is refused on every host, loopback included, until the Backend is paired again. See [device verification](docs/device-verification.md#传输加密transport-v2).
-
-## History encryption
-
-Conversation history is always end-to-end encrypted; there is no switch. The browser registers its own history key with each Backend on first connect, and a reminder stays visible until a recovery key is set. Conversations stored before encryption are read-only: they can be viewed, exported, archived or deleted. See [history encryption](docs/device-verification.md#历史记录加密).
-
-## Browser data and credentials
-
-Connection profiles, Backend tokens, selected workspaces, layout preferences, event cursors, and bounded local caches are stored under `todex.web.*` in the browser's `localStorage`. Device signing keys are instead sealed in IndexedDB under a non-extractable AES-GCM key (plaintext copies from older versions are migrated on load); this needs a secure context (HTTPS or localhost), and on plain-HTTP pages new device keys cannot be saved. All of this is isolated by browser origin and browser profile, not by a TodeX account.
-
-Any script executing on the site origin or a privileged browser extension can read or use these credentials. Deploy immutable reviewed assets, use the included Content Security Policy, avoid third-party scripts, and use the in-app **Clear data** action on shared devices.
-
-## Checks
-
-```bash
+pnpm install
+pnpm dev     # website at http://127.0.0.1:5173, workbench at /app, demo at /demo
 pnpm lint
 pnpm typecheck
 pnpm test
 pnpm test:e2e
-pnpm build
+TODEX_BUILD_VERSION=1.2.3 pnpm build
+HOST=0.0.0.0 PORT=4173 pnpm start
 ```
 
-## App icons
+Building the Docker image yourself, and the release workflow: [docs/self-hosting.md](docs/self-hosting.md) and [`compose.build.yaml`](compose.build.yaml). Website assets: [docs/website-assets.md](docs/website-assets.md). App icons: [docs/app-icons.md](docs/app-icons.md).
 
-Desktop and Web share the same T artwork, with light and dark variants for the interface and documentation. See [app icon assets](docs/app-icons.md) for previews, file roles, and update instructions.
+## Related repositories
+
+- [TodeX Desktop](https://github.com/youtonghy/TodeX_desktop): the desktop app
+- [TodeX Backend](https://github.com/youtonghy/TodeX_backend): the `todex-agentd` backend that runs the agents
+- [TodeX Native](https://github.com/youtonghy/TodeX_native): the mobile app
+- [TodeX Container](https://github.com/youtonghy/TodeX_container): a Docker image with the backend and agent CLIs
+- [TodeX Protocol](https://github.com/youtonghy/TodeX_protocol): the client library shared by the desktop and web clients
+
+## License
+
+MIT. See [LICENSE](LICENSE).
