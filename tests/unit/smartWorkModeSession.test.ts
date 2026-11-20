@@ -23,7 +23,7 @@ vi.mock('@todex/protocol/connectionProbe', async importOriginal => ({
 
 const provider = { id: 'claude-code', displayName: 'Claude Code', available: true, profiles: [], models: [], capabilities: {
   nativeResume: true, cancel: true, permissions: true, toolEvents: true, nativeSkills: true, nativeMcp: false,
-  managedMcp: false, modelSelection: true, controlActions: ['cancel'],
+  managedMcp: false, modelSelection: true, claudeRegionPreflight: true, controlActions: ['cancel'],
   permissionConfig: { modes: ['ask', 'auto'], defaultMode: 'ask', supportsPlan: true },
 } };
 const models = [
