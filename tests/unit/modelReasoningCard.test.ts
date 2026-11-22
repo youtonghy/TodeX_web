@@ -216,3 +216,64 @@ it('labels vendor families with display names and lists their models without a l
   await act(async () => { versionItems()[1].click(); });
   expect(onSelectModel).toHaveBeenCalledExactlyOnceWith('zai/glm-5');
 });
+
+const shanhaiDialog = () => document.querySelector<HTMLElement>('[role="dialog"][aria-label="山海经模型周期表"]');
+const shanhaiCells = () => [...(shanhaiDialog()?.querySelectorAll<HTMLInputElement>('input[type="radio"]') ?? [])];
+
+function pointer(type: string, target: EventTarget) {
+  const init = { bubbles: true, cancelable: true, composed: true, pointerId: 1, pointerType: 'mouse', button: 0, buttons: type === 'pointerup' ? 0 : 1, width: 1, height: 1, pressure: 0.5, detail: 1, isPrimary: true };
+  const Event = typeof PointerEvent === 'function' ? PointerEvent : MouseEvent;
+  target.dispatchEvent(new Event(type, init));
+}
+
+/** Holds the trigger down for `ms`, then releases it over the trigger. */
+async function holdTrigger(ms: number) {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  try {
+    await act(async () => { pointer('pointerdown', trigger()); });
+    await act(async () => { vi.advanceTimersByTime(ms); });
+    await act(async () => {
+      pointer('pointerup', trigger());
+      trigger().dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0, detail: 1 }));
+    });
+  } finally {
+    vi.useRealTimers();
+  }
+}
+
+it('opens the 山海经 table on a long press instead of the regular picker', async () => {
+  const { onSelectModel } = renderCard();
+  await holdTrigger(600);
+  expect(shanhaiDialog()).toBeTruthy();
+  expect(dropdownOpen()).toBe(false);
+  const cells = shanhaiCells();
+  expect(cells).toHaveLength(88);
+  // Every model is dealt onto at least one cell.
+  for (const model of models) {
+    expect(cells.some(cell => cell.getAttribute('aria-label')?.endsWith(`：${model.displayName}`))).toBe(true);
+  }
+  // The current model starts selected; picking a cell only previews it.
+  expect(cells.find(cell => cell.checked)?.getAttribute('aria-label')).toMatch(/：Claude Opus 5 Medium$/);
+  const gpt = cells.find(cell => cell.getAttribute('aria-label')?.endsWith('：GPT Astra'))!;
+  await act(async () => { gpt.click(); });
+  expect(onSelectModel).not.toHaveBeenCalled();
+  expect(shanhaiDialog()!.textContent).toContain('GPT Astra');
+  const confirm = [...shanhaiDialog()!.querySelectorAll('button')].find(button => button.textContent === '选择模型')!;
+  await act(async () => { confirm.click(); });
+  expect(onSelectModel).toHaveBeenCalledExactlyOnceWith('gpt-astra');
+  expect(shanhaiDialog()).toBeNull();
+  expect(trigger().textContent).toContain('GPT Astra');
+});
+
+it('keeps a short press on the regular picker', async () => {
+  renderCard();
+  await holdTrigger(100);
+  expect(shanhaiDialog()).toBeNull();
+  expect(dropdownOpen()).toBe(true);
+});
+
+it('does not open the 山海经 table without models', async () => {
+  renderCard({ items: [] });
+  await holdTrigger(600);
+  expect(shanhaiDialog()).toBeNull();
+});
