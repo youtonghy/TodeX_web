@@ -791,12 +791,13 @@ TodeX stays connected to **multiple backends at once**: each backend manages its
 
 ## Option 1: Backend groups (recommended for multiple devices & servers)
 
-Under **Settings → Backend groups**, your devices and \`todex-agentd\` instances form a decentralized trust group with no central server:
+Under **Settings → Backend groups**, your devices and \`todex-agentd\` instances form a decentralized trust group that needs no central server (you can still pick a hub to speed up discovery and relaying):
 
 1. **Create or join**: Click **Create group** on your first device and save the one-time 24-word **recovery key**. On new devices, open **Backend groups → Join group** and scan the **Invite QR code** (or paste the invite text — it carries node addresses only, never keys), then click **Approve** on **any existing device** after checking the verification code. Approval grants access to every backend in the group and their encrypted history at once.
 2. **Add backends**: Already-paired backends join directly in place under **Add backend → Paired backend** (keeping existing conversations and history). Unpaired backends join via **Address and join code** (\`todex-agentd mesh join-code\`, valid 24 hours and printed in an ungrouped backend's startup log).
 3. **Local IPC + group standby**: If this computer's backend is in the group and connected via [Local backend](/docs/desktop/local-backend), data and requests flow over IPC (**This computer · data over IPC**) while the group connection stays open as a standby for presence, roster sync, and join requests; sibling profiles of the same daemon share history grants automatically.
 4. **Pinned addresses, LAN beacons & relays**: Pin public IPs, domains, or port-forwarded URLs in a node's group settings. Desktop clients listen for UDP 21047 LAN beacons, and when all direct addresses fail, traffic can route through another node of the group over an **end-to-end encrypted relay** (**Via** \`<node>\`), returning to direct as soon as a direct address answers.
+5. **Hubs**: in the node settings of a backend with a public address that stays online, turn on **Hub** (the member list tags it **Hub**; a group may have several). The other backends keep a connection to it and swap their latest addresses through it, and the hub tells each one the public address it sees; devices first get through via the hub and move to a direct connection as soon as one works. A hub only passes on signed rosters and addresses and cannot read what it relays.
 
 :::demo mesh
 
