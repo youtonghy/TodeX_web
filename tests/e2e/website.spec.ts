@@ -89,7 +89,7 @@ test('offers Desktop packages per platform and a one-line Backend installer', as
   await expect(backend.getByText('Windows 请在 WSL 终端中运行此命令。')).toHaveCount(0);
   await page.getByRole('button', { name: 'macOS', exact: true }).click();
   await expect(desktop.getByRole('link', { name: '下载 Desktop v2.0.0 macos ARM64' })).toHaveAttribute('href', /TodeX-v2\.0\.0-macos-arm64\.dmg$/);
-  await expect(page.getByText('暂缓发布 / COMING LATER')).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Native 仓库（需访问权限）' })).toHaveAttribute('href', 'https://github.com/youtonghy/TodeX_native');
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
 

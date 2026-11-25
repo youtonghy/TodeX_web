@@ -44,7 +44,7 @@ It works in light and dark themes, in English, 简体中文, 日本語 and 한�
 
 ## The website
 
-The landing page introduces TodeX and embeds a live demo: the real workbench replaying a short walkthrough with sample data, without connecting to any backend. **Downloads** lists the desktop packages for each version and platform, with release notes and checksums, plus the one-line backend installer. **Docs** has guides for workspaces, agents and plans, with live demo scenes for each feature.
+The landing page introduces TodeX and embeds a live demo: the real workbench replaying a short walkthrough with sample data, without connecting to any backend. The privacy promise at `/#privacy` explains where self-hosted work goes and what a group relay or cloud model provider can see. **Downloads** lists the desktop packages for each version and platform, with release notes and checksums, plus the one-line backend installer. **Docs** has guides for workspaces, agents and plans, with live demo scenes for each feature.
 
 ![TodeX website](docs/screenshots/site-en.png)
 

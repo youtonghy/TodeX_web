@@ -77,6 +77,25 @@ function WorkbenchPreview() {
   </div>;
 }
 
+function PrivacyPromise() {
+  const t = useT();
+  return (
+    <section id="privacy" className="section-width how-inner privacy-promise" aria-labelledby="privacy-heading">
+      <div className="how-intro">
+        <span className="eyebrow"><span />{t('site.privacy.label')}</span>
+        <h2 id="privacy-heading">{t('site.privacy.title')}</h2>
+        <p>{t('site.privacy.promise')}</p>
+        <a className="text-link" href="/docs/backend/security">{t('site.privacy.guide')} <RiArrowRightLine size={16} /></a>
+      </div>
+      <dl className="privacy-details">
+        <dt>{t('site.privacy.mesh.title')}</dt><dd>{t('site.privacy.mesh.body')}</dd>
+        <dt>{t('site.privacy.transport.title')}</dt><dd>{t('site.privacy.transport.body')}</dd>
+        <dt>{t('site.privacy.source.title')}</dt><dd>{t('site.privacy.source.body')} <a className="text-link" href="#source">{t('site.privacy.source.link')} <RiArrowRightLine size={14} /></a></dd>
+      </dl>
+    </section>
+  );
+}
+
 export function Website() {
   const t = useT();
   const locale = useLocale();
@@ -107,13 +126,53 @@ export function Website() {
         <div className="features-grid">
           <article className="feature-card feature-agents"><div className="feature-visual agents-visual" aria-hidden="true"><div className="agent-orbit orbit-outer" /><div className="agent-orbit orbit-inner" /><span className="orbit-center"><img src={brand} alt="" /></span><span className="orbit-node orbit-codex"><ProviderIcon provider="codex" className="size-7" /></span><span className="orbit-node orbit-claude"><ProviderIcon provider="claude" className="size-7" /></span><span className="orbit-node orbit-pi"><ProviderIcon provider="pi" className="size-6" /></span><span className="orbit-node orbit-code"><RiCodeSSlashLine size={25} /></span></div><div className="feature-copy"><span className="mono feature-number">01 / CONNECT</span><h3>{t('site.features.agents.title')}</h3><p>{t('site.features.agents.body')}</p><a href={`${backendRepository}#key-features`} target="_blank" rel="noreferrer">{t('site.features.agents.link')} <RiArrowRightUpLine size={16} /></a></div></article>
           <article className="feature-card"><div className="feature-visual tools-visual" aria-hidden="true"><div className="tool-stack stack-back"><RiTerminalBoxLine size={17} /><span>Terminal</span><span className="tool-key">⌘ 3</span></div><div className="tool-stack stack-middle"><RiGitBranchLine size={17} /><span>Git changes</span><span className="tool-diff">+128 −16</span></div><div className="tool-stack stack-front"><RiCommandLine size={17} /><span>Skills & MCP</span><span className="tool-key">⌘ K</span></div></div><div className="feature-copy"><span className="mono feature-number">02 / CREATE</span><h3>{t('site.features.tools.title')}</h3><p>{t('site.features.tools.body')}</p><a href="/app">{t('site.features.tools.link')} <RiArrowRightUpLine size={16} /></a></div></article>
-          <article className="feature-card"><div className="feature-visual privacy-visual" aria-hidden="true"><div className="privacy-ring"><RiShieldCheckLine size={49} strokeWidth={0.3} /></div><div className="privacy-tag mono"><span /> YOUR MACHINE. YOUR RULES.</div><span className="privacy-spark spark-one">+</span><span className="privacy-spark spark-two">+</span></div><div className="feature-copy"><span className="mono feature-number">03 / OWN</span><h3>{t('site.features.privacy.title')}</h3><p>{t('site.features.privacy.body')}</p><a href={`${backendRepository}#key-features`} target="_blank" rel="noreferrer">{t('site.features.privacy.link')} <RiArrowRightUpLine size={16} /></a></div></article>
+          <article className="feature-card"><div className="feature-visual privacy-visual" aria-hidden="true"><div className="privacy-ring"><RiShieldCheckLine size={49} strokeWidth={0.3} /></div><div className="privacy-tag mono"><span /> YOUR MACHINE. YOUR RULES.</div><span className="privacy-spark spark-one">+</span><span className="privacy-spark spark-two">+</span></div><div className="feature-copy"><span className="mono feature-number">03 / OWN</span><h3>{t('site.features.privacy.title')}</h3><p>{t('site.features.privacy.body')}</p><a href="#privacy">{t('site.features.privacy.link')} <RiArrowDownLine size={16} /></a></div></article>
+        </div>
+        <div className="workflows">
+          <article>
+            <h3>{t('site.workflows.review.title')}</h3>
+            <p>{t('site.workflows.review.body')}</p>
+            <a className="text-link" href="/docs/desktop/workbench">{t('site.workflows.review.link')} <RiArrowRightLine size={16} /></a>
+          </article>
+          <article>
+            <h3>{t('site.workflows.resume.title')}</h3>
+            <p>{t('site.workflows.resume.body')}</p>
+            <a className="text-link" href="/docs/mobile">{t('site.workflows.resume.link')} <RiArrowRightLine size={16} /></a>
+          </article>
         </div>
       </section>
       <section className="how-section" id="how-it-works" aria-labelledby="how-heading"><div className="section-width how-inner"><div className="how-intro"><span className="eyebrow"><span /> LOCAL ROOTS. LIMITLESS REACH.</span><h2 id="how-heading">{t('site.how.title1')}<br />{t('site.how.title2')}</h2><p>{t('site.how.lede1')}<br />{t('site.how.lede2')}</p><a href={`${backendRepository}#quick-start`} target="_blank" rel="noreferrer" className="text-link">{t('site.how.guide')} <RiArrowRightUpLine size={17} /></a><div className="connection-map" aria-label={t('site.how.mapLabel')}><div className="connection-clients"><span><RiComputerLine size={20} /> Desktop</span><span><RiGlobalLine size={20} /> Web</span></div><div className="connection-lines" aria-hidden="true"><span /><span /></div><div className="connection-backend"><RiServerLine size={24} /><span>{t('site.how.backend')}<small>{t('site.how.backendSub')}</small></span><i /></div></div></div><ol className="setup-steps"><li><span className="step-number mono">01</span><div><h3>{t('site.how.step1.title')}</h3><p>{t('site.how.step1.body')}</p><CopyCommand command="todex-agentd tui" label={t('site.how.copy.label')} /></div></li><li><span className="step-number mono">02</span><div><h3>{t('site.how.step2.title')}</h3><p>{t('site.how.step2.body')}</p><span className="step-note"><RiShieldCheckLine size={14} /> {t('site.how.step2.note')}</span></div></li><li><span className="step-number mono">03</span><div><h3>{t('site.how.step3.title')}</h3><p>{t('site.how.step3.body')}</p><a href="/app" className="text-link">{t('site.how.step3.link')} <RiArrowRightLine size={16} /></a></div></li></ol></div></section>
+      <PrivacyPromise />
       <Downloads />
       <section className="closing-section"><span className="eyebrow"><span /> THE NEXT CHAPTER IS YOURS</span><h2>{t('site.closing.title')}</h2><p>{t('site.closing.body')}</p><a href="/app" className={`${buttonVariants({ variant: 'primary', size: 'lg' })} site-button`}>{t('site.closing.cta')} <RiArrowRightUpLine size={18} /></a><span className="closing-coordinate mono" aria-hidden="true">IDEA → BUILD → WHAT'S NEXT?</span></section>
     </main>
-    <footer className="site-footer section-width"><div className="footer-top"><div><Brand footer /><p>{t('site.footer.tagline')}<br /><span className="mono">AN OPEN WORKSPACE FOR OPEN POSSIBILITIES.</span></p></div><div className="footer-links"><div><span className="mono">PRODUCT</span><a href="#possibilities">{t('site.nav.possibilities')}</a><a href="#downloads">{t('site.footer.download')}</a><a href="/app">{t('site.footer.workbench')}</a></div><div><span className="mono">RESOURCES</span><a href={`${backendRepository}#quick-start`} target="_blank" rel="noreferrer">{t('site.footer.quickstart')} <RiArrowRightUpLine size={12} /></a><a href="/docs">{t('site.footer.docs')} <RiArrowRightUpLine size={12} /></a><a href={`${repository}/issues`} target="_blank" rel="noreferrer">{t('site.footer.issues')} <RiArrowRightUpLine size={12} /></a></div><div><span className="mono">OPEN SOURCE</span><a href={repository} target="_blank" rel="noreferrer">Desktop <RiArrowRightUpLine size={12} /></a><a href={backendRepository} target="_blank" rel="noreferrer">Backend <RiArrowRightUpLine size={12} /></a><span className="footer-mobile-status">{t('site.footer.mobile')}</span></div></div></div><div className="footer-bottom"><span>© {new Date().getFullYear()} TodeX. <span className="footer-license">Released under the MIT License.</span></span><a href={repository} target="_blank" rel="noreferrer"><RiGithubLine size={15} /> {t('site.footer.open')} <RiArrowRightUpLine size={13} /></a></div></footer>
+    <footer className="site-footer section-width">
+      <div className="footer-top">
+        <div><Brand footer /><p>{t('site.footer.tagline')}<br /><span className="mono">AN OPEN WORKSPACE FOR OPEN POSSIBILITIES.</span></p></div>
+        <div className="footer-links">
+          <div>
+            <span className="mono">PRODUCT</span>
+            <a href="#possibilities">{t('site.nav.possibilities')}</a>
+            <a href="#privacy">{t('site.privacy.label')}</a>
+            <a href="#downloads">{t('site.footer.download')}</a>
+            <a href="/app">{t('site.footer.workbench')}</a>
+          </div>
+          <div>
+            <span className="mono">RESOURCES</span>
+            <a href={`${backendRepository}#quick-start`} target="_blank" rel="noreferrer">{t('site.footer.quickstart')} <RiArrowRightUpLine size={12} /></a>
+            <a href="/docs">{t('site.footer.docs')} <RiArrowRightUpLine size={12} /></a>
+            <a href={`${repository}/issues`} target="_blank" rel="noreferrer">{t('site.footer.issues')} <RiArrowRightUpLine size={12} /></a>
+          </div>
+          <div id="source">
+            <span className="mono">OPEN SOURCE</span>
+            <a href={repository} target="_blank" rel="noreferrer">Desktop <RiArrowRightUpLine size={12} /></a>
+            <a href={backendRepository} target="_blank" rel="noreferrer">Backend <RiArrowRightUpLine size={12} /></a>
+            <a href="https://github.com/youtonghy/TodeX_web" target="_blank" rel="noreferrer">Web <RiArrowRightUpLine size={12} /></a>
+            <a href="https://github.com/youtonghy/TodeX_protocol" target="_blank" rel="noreferrer">Protocol <RiArrowRightUpLine size={12} /></a>
+          </div>
+        </div>
+      </div>
+      <div className="footer-bottom"><span>© {new Date().getFullYear()} TodeX. <span className="footer-license">Released under the MIT License.</span></span><a href={repository} target="_blank" rel="noreferrer"><RiGithubLine size={15} /> {t('site.footer.open')} <RiArrowRightUpLine size={13} /></a></div>
+    </footer>
   </div>;
 }

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Button, ListBox, Select, Skeleton } from '@heroui/react';
 import { buttonVariants } from '@heroui/styles';
-import { RiAppleFill, RiArrowDownLine, RiArrowRightUpLine, RiComputerLine, RiDownloadLine, RiServerLine, RiTerminalBoxLine, RiWindowsFill } from '@remixicon/react';
+import { RiAppleFill, RiArrowDownLine, RiArrowRightLine, RiArrowRightUpLine, RiComputerLine, RiDownloadLine, RiServerLine, RiTerminalBoxLine, RiWindowsFill } from '@remixicon/react';
 import { useLocale, useT } from '../i18n';
 import { CopyCommand } from './CopyCommand';
 import { loadReleaseCatalog, type Release, type ReleaseAsset, type ReleaseCatalog } from './releases';
@@ -145,7 +145,10 @@ export function Downloads() {
         <BackendInstallCard platform={platform} />
       </div>
       <div className="download-extras"><p><RiDownloadLine size={16} /> {t('site.downloads.source')}</p>{state.status === 'ready' && <span className="mono">{t('site.downloads.updated', { date: new Date(state.catalog.checkedAt).toLocaleDateString(locale) })}</span>}</div>
-      <div className="mobile-release"><div><span className="mobile-release-icon">↗</span><span><strong>{t('site.downloads.mobileTitle')}</strong><small>{t('site.downloads.mobileBody')}</small></span></div><span className="coming-soon mono">{t('site.downloads.mobileStatus')}</span></div>
+      <div className="mobile-release">
+        <div><span className="mobile-release-icon" aria-hidden="true">↗</span><span><strong>TodeX Native</strong><small>{t('site.downloads.mobileBody')}</small><a className="text-link" href="/docs/mobile">{t('site.workflows.resume.link')} <RiArrowRightLine size={14} /></a></span></div>
+        <a className="text-link" href="https://github.com/youtonghy/TodeX_native" target="_blank" rel="noreferrer">{t('site.downloads.mobileRepo')} <RiArrowRightUpLine size={16} /></a>
+      </div>
       <p className="browser-alternative">{t('site.downloads.hasBackend')}<a href="/app" className={buttonVariants({ variant: 'ghost' })}>{t('site.downloads.openWeb')} <RiArrowRightUpLine size={16} /></a></p>
     </section>
   );
