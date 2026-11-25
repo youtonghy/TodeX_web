@@ -251,14 +251,20 @@
 .docs-demo-stage { position: relative; width: 100%; overflow: hidden; aspect-ratio: 1440 / 880; background: #fff; }
 .docs-demo-stage iframe { position: absolute; top: 0; left: 0; border: 0; transform-origin: 0 0; opacity: 0; transition: opacity .4s ease; pointer-events: none; }
 .docs-demo-stage iframe.is-loaded { opacity: 1; }
-.docs-demo-stage iframe.is-interactive { pointer-events: auto; }
-.docs-demo-controls { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-top: 1px solid #ebebeb; background: #fafafa; color: #4a5560; font-size: 12px; }
-.docs-demo-scene-bar { justify-content: space-between; padding: 8px 12px; }
-.docs-demo-scene-caption { color: #67757c; font-size: 11.5px; line-height: 1.5; min-width: 0; }
+/* While the frame loads or fast-forwards to a step, a veil hides the rush. */
+.docs-demo-stage::after { content: ""; position: absolute; inset: 0; background: #fff; opacity: 0; pointer-events: none; transition: opacity .25s ease; }
+.docs-demo-stage.is-covered::after { opacity: .82; }
+.docs-demo-controls { display: flex; align-items: center; gap: 6px; padding: 7px 10px; border-top: 1px solid #ebebeb; background: #fafafa; color: #4a5560; font-size: 12px; }
 .docs-demo-restart { gap: 6px; font-size: 12px; flex-shrink: 0; }
-.docs-demo-progress { position: relative; flex: 1; min-width: 40px; height: 4px; border-radius: 4px; background: #e2e7e1; overflow: hidden; }
-.docs-demo-progress > span { position: absolute; inset: 0; background: #b24d32; transform-origin: 0 50%; transition: transform .2s linear; }
-.docs-demo-step { display: inline-flex; align-items: baseline; gap: 6px; min-width: 9.5em; justify-content: flex-end; white-space: nowrap; }
+.docs-demo-steps { display: flex; flex: 1; min-width: 40px; gap: 4px; margin: 0 4px; padding: 0; list-style: none; }
+.docs-demo-steps li { flex: 1; min-width: 0; margin: 0; padding: 0; }
+.docs-demo-step-dot { display: block; width: 100%; height: 18px; padding: 0; border: 0; background: none; cursor: pointer; }
+.docs-demo-step-dot::before { content: ""; display: block; height: 4px; border-radius: 4px; background: #e2e7e1; transition: background-color .2s ease; }
+.docs-demo-step-dot:hover::before { background: #cdd5cc; }
+.docs-demo-step-dot.is-done::before { background: #d9a08f; }
+.docs-demo-step-dot.is-current::before { background: #b24d32; }
+.docs-demo-step-dot:focus-visible { outline: 2px solid #b24d32; outline-offset: 2px; border-radius: 4px; }
+.docs-demo-step { display: inline-flex; align-items: baseline; gap: 6px; min-width: 11em; max-width: 40%; justify-content: flex-end; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .docs-demo-step small { font: 10px "SFMono-Regular", Consolas, monospace; color: #8a949a; }
 .docs-demo-note { margin: 0; padding: 0 12px 9px; background: #fafafa; color: #7a8590; font-size: 11.5px; line-height: 1.6; }
 @media (max-width: 640px) {
@@ -266,10 +272,11 @@
   .docs-demo-dots { width: auto; }
   .docs-demo-badge { min-width: 0; font-size: 9px; }
   .docs-demo-stage { aspect-ratio: 390 / 700; }
-  .docs-demo-scene-bar { flex-wrap: wrap; gap: 6px; }
+  .docs-demo-controls { flex-wrap: wrap; }
   .docs-demo-restart { min-width: 0; padding-inline: 8px; }
-  .docs-demo-step { min-width: 0; }
+  /* The step name gets its own line under the controls. */
+  .docs-demo-step { order: 1; flex-basis: 100%; max-width: none; min-width: 0; justify-content: flex-start; padding: 0 6px 2px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .docs-demo-progress > span, .docs-demo-stage iframe { transition: none; }
+  .docs-demo-step-dot::before, .docs-demo-stage::after, .docs-demo-stage iframe { transition: none; }
 }

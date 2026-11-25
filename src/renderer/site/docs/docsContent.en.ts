@@ -65,7 +65,7 @@ TodeX Web client ──────┐                 │
 
 | Goal | Doc |
 | --- | --- |
-| See what changed in 2.5, with interactive workbench previews | [What's new in 2.5](/docs/introduction/whats-new) |
+| See what changed in 2.5, with automated workbench demos | [What's new in 2.5](/docs/introduction/whats-new) |
 | Get running in ten minutes | [Quick start](/docs/introduction/quick-start) |
 | Learn the vocabulary and architecture | [Concepts](/docs/introduction/concepts) |
 | Run the backend | [Backend overview](/docs/backend) |
@@ -76,7 +76,7 @@ TodeX Web client ──────┐                 │
     'introduction/whats-new': {
       slug: 'introduction/whats-new',
       title: "What's new in 2.5",
-      description: 'Backend groups, Smart work mode, plan review & live step checklists, customizable Home board, Kitesurf browser engine, and single-window Computer Use — with interactive workbench previews.',
+      description: 'Backend groups, Smart work mode, plan review & live step checklists, customizable Home board, Kitesurf browser engine, and single-window Computer Use — each with a step-by-step automated workbench demo.',
       body: body(`
 TodeX 2.5 (November 2026) brings decentralized multi-backend trust and tighter control over agent workflows: group your machines and devices without a central server, pair Claude Code with a two-stage Smart work mode, and work from a clearer timeline, Home board, and live desktop/browser panels.
 
@@ -836,7 +836,7 @@ Open any point-to-point backend in Settings to check its fingerprint, **Re-pair*
       title: 'The workbench',
       description: 'Home board, sidebar, Smart work mode & plan review, action-titled timelines, workbench tabs, and shortcuts.',
       body: body(`
-The workbench is identical on desktop and web (web shortcut differences are noted). Watch the full scripted walkthrough first, then interact directly with each feature preview below:
+The workbench is identical on desktop and web (web shortcut differences are noted). Watch the full scripted walkthrough first; each section below has its own automated demo you can pause or step through:
 
 :::demo
 

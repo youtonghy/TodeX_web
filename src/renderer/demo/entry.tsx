@@ -3,7 +3,6 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { installDemoMode } from './index';
 import { startDemoAutoplay } from './autoplay';
-import { startDemoScene } from './scenes';
 import { AppRoot } from '../AppRoot';
 import { applyAppearance } from '../lib/appearance';
 import '@fontsource-variable/inter';
@@ -24,4 +23,3 @@ if (!root) throw new Error('root element missing');
 
 createRoot(root).render(<StrictMode><AppRoot /></StrictMode>);
 startDemoAutoplay();
-startDemoScene();

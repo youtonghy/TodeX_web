@@ -1,75 +1,41 @@
-// A docs-embedded workbench preview: either the scripted walkthrough
-// (`walkthrough`, inert with play/pause/restart controls) or an interactive
-// feature scene (`/demo?scene=<scene>`) framed in a workbench window chrome.
+// A docs-embedded workbench demo: the real workbench (`/demo?scene=<scene>`)
+// driven by a script, framed in a workbench window chrome. It plays itself
+// once it is on screen; the reader can pause it, restart it, or jump to any
+// step from the step bar.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '@heroui/react';
-import { RiPauseFill, RiPlayFill, RiResetLeftLine } from '@remixicon/react';
+import { RiArrowLeftSLine, RiArrowRightSLine, RiPauseFill, RiPlayFill, RiResetLeftLine } from '@remixicon/react';
 import brand from '../../assets/brand/t-icon-light.png';
 import { useLocale, useT, type MessageKey } from '../../i18n';
-import { DEMO_STEPS, demoFrameSize, demoSceneUrl, isDemoStatusMessage, type DemoPlaybackMessage, type DemoScene, type DemoStep } from '../../demo/playback';
+import { DEMO_SCENE_STEPS, demoFrameSize, demoSceneUrl, isDemoStatusMessage, type DemoPlaybackMessage, type DemoScene, type DemoSeekMessage } from '../../demo/playback';
 
-/** The chapters a reader watches; loading and done sit outside the count. */
-const chapters: readonly DemoStep[] = DEMO_STEPS.filter((step) => step !== 'loading' && step !== 'done');
+type Status = { step: number; seeking: boolean; ended: boolean };
+const initialStatus: Status = { step: -1, seeking: false, ended: false };
 
-const stepLabels: Record<DemoStep, MessageKey> = {
-  loading: 'docs.demo.step.loading',
-  newConversation: 'docs.demo.step.newConversation',
-  typing: 'docs.demo.step.typing',
-  send: 'docs.demo.step.send',
-  process: 'docs.demo.step.process',
-  answer: 'docs.demo.step.answer',
-  done: 'docs.demo.step.done',
-};
-
-const sceneTitleKeys: Record<DemoScene, MessageKey> = {
-  walkthrough: 'docs.demo.scene.walkthrough.title',
-  mesh: 'docs.demo.scene.mesh.title',
-  smart: 'docs.demo.scene.smart.title',
-  'smart-settings': 'docs.demo.scene.smart-settings.title',
-  'plan-steps': 'docs.demo.scene.plan-steps.title',
-  'execution-group': 'docs.demo.scene.execution-group.title',
-  'background-tasks': 'docs.demo.scene.background-tasks.title',
-  home: 'docs.demo.scene.home.title',
-  'computer-live': 'docs.demo.scene.computer-live.title',
-  'agent-browser': 'docs.demo.scene.agent-browser.title',
-  'linked-skills': 'docs.demo.scene.linked-skills.title',
-  'config-sync': 'docs.demo.scene.config-sync.title',
-  'offline-sidebar': 'docs.demo.scene.offline-sidebar.title',
-};
-
-const sceneCaptionKeys: Record<DemoScene, MessageKey> = {
-  walkthrough: 'docs.demo.scene.walkthrough.caption',
-  mesh: 'docs.demo.scene.mesh.caption',
-  smart: 'docs.demo.scene.smart.caption',
-  'smart-settings': 'docs.demo.scene.smart-settings.caption',
-  'plan-steps': 'docs.demo.scene.plan-steps.caption',
-  'execution-group': 'docs.demo.scene.execution-group.caption',
-  'background-tasks': 'docs.demo.scene.background-tasks.caption',
-  home: 'docs.demo.scene.home.caption',
-  'computer-live': 'docs.demo.scene.computer-live.caption',
-  'agent-browser': 'docs.demo.scene.agent-browser.caption',
-  'linked-skills': 'docs.demo.scene.linked-skills.caption',
-  'config-sync': 'docs.demo.scene.config-sync.caption',
-  'offline-sidebar': 'docs.demo.scene.offline-sidebar.caption',
-};
+/** Every key below is checked for each scene and step in tests/unit/docsContent.test.ts. */
+const sceneKey = (scene: DemoScene, part: 'title' | 'caption') => `docs.demo.scene.${scene}.${part}` as MessageKey;
+const stepKey = (scene: DemoScene, step: string) => `docs.demo.scene.${scene}.step.${step}` as MessageKey;
 
 export function DocsDemo({ scene = 'walkthrough' }: { scene?: DemoScene }) {
   const t = useT();
   const locale = useLocale();
-  const isWalkthrough = scene === 'walkthrough';
+  const steps: readonly string[] = DEMO_SCENE_STEPS[scene];
   const stageRef = useRef<HTMLDivElement>(null);
   const frameRef = useRef<HTMLIFrameElement>(null);
   const [width, setWidth] = useState(0);
   const [nearViewport, setNearViewport] = useState(false);
   const [loaded, setLoaded] = useState(false);
-  const [reloadNonce, setReloadNonce] = useState(0);
+  // Each reload starts the frame at `startStep` (fast-forwarding to it).
+  const [frame, setFrame] = useState({ nonce: 0, startStep: 0 });
   // The demo's entry is a deferred module that may start listening after the
   // frame's load event, so play/pause is sent once it has reported back.
   const [ready, setReady] = useState(false);
   const [onScreen, setOnScreen] = useState(false);
   // Reduced motion waits for the reader to press play.
   const [paused, setPaused] = useState(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches);
-  const [status, setStatus] = useState<{ step: DemoStep; progress: number; ended: boolean }>({ step: 'loading', progress: 0, ended: false });
+  const [status, setStatus] = useState<Status>(initialStatus);
+  // The step the reader asked for, shown as current until the demo gets there.
+  const [pending, setPending] = useState<number | null>(null);
 
   useEffect(() => {
     const stage = stageRef.current;
@@ -93,39 +59,61 @@ export function DocsDemo({ scene = 'walkthrough' }: { scene?: DemoScene }) {
   }, []);
 
   useEffect(() => {
-    if (!isWalkthrough) return;
     const onMessage = (event: MessageEvent) => {
       if (event.origin !== window.location.origin || event.source !== frameRef.current?.contentWindow) return;
       if (!isDemoStatusMessage(event.data)) return;
+      const next: Status = { step: event.data.step, seeking: event.data.seeking, ended: event.data.ended };
       setReady(true);
-      setStatus({ step: event.data.step, progress: event.data.progress, ended: event.data.ended });
+      setStatus((current) => (current.step === next.step && current.seeking === next.seeking && current.ended === next.ended ? current : next));
+      if ((!next.seeking && next.step >= 0) || next.ended) setPending(null);
     };
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
-  }, [isWalkthrough]);
+  }, []);
 
-  // The walkthrough runs while it is on screen, not paused and not finished.
-  const playing = isWalkthrough && ready && onScreen && !paused && !status.ended;
+  // The demo runs while it is on screen, not paused and not finished.
+  const playing = ready && onScreen && !paused && !status.ended;
   useEffect(() => {
-    if (!isWalkthrough || !ready) return;
+    if (!ready) return;
     const message: DemoPlaybackMessage = { type: 'todex-demo-playback', playing };
     frameRef.current?.contentWindow?.postMessage(message, window.location.origin);
-  }, [isWalkthrough, ready, playing]);
+  }, [ready, playing]);
 
-  const restart = useCallback(() => {
+  const reload = useCallback((startStep: number) => {
     setLoaded(false);
     setReady(false);
-    setPaused(false);
-    setStatus({ step: 'loading', progress: 0, ended: false });
-    setReloadNonce((count) => count + 1);
+    setStatus(initialStatus);
+    setFrame((current) => ({ nonce: current.nonce + 1, startStep }));
   }, []);
+
+  const goTo = useCallback((target: number) => {
+    const step = Math.min(Math.max(target, 0), steps.length - 1);
+    setPaused(false);
+    setPending(step);
+    // Later steps fast-forward in place; earlier ones (or a finished demo)
+    // start over from the requested step.
+    if (ready && !status.ended && step > status.step) {
+      const message: DemoSeekMessage = { type: 'todex-demo-seek', step };
+      frameRef.current?.contentWindow?.postMessage(message, window.location.origin);
+    } else {
+      reload(step);
+    }
+  }, [ready, reload, status.ended, status.step, steps.length]);
+
+  const restart = useCallback(() => {
+    setPaused(false);
+    setPending(null);
+    reload(0);
+  }, [reload]);
 
   const size = demoFrameSize(width);
   const scale = width ? width / size.width : 1;
-  const chapter = chapters.indexOf(status.step);
-  const percent = Math.round(status.progress * 100);
-  const sceneTitle = t(sceneTitleKeys[scene]);
-  const iframeSrc = demoSceneUrl(scene, locale);
+  const current = pending ?? status.step;
+  // Hide the frame while it loads or fast-forwards to the requested step.
+  const covered = !loaded || status.step < 0 || status.seeking || pending !== null;
+  const sceneTitle = t(sceneKey(scene, 'title'));
+  const label = `${sceneTitle} · ${t('docs.demo.ariaLabel')}`;
+  const stepText = status.ended ? t('docs.demo.done') : current >= 0 ? t(stepKey(scene, steps[current])) : t('docs.demo.loading');
 
   return (
     <figure className="docs-demo">
@@ -137,63 +125,65 @@ export function DocsDemo({ scene = 'walkthrough' }: { scene?: DemoScene }) {
           <span className="docs-demo-title-slash">/</span>
           <span className="docs-demo-title-scene">{sceneTitle}</span>
         </span>
-        <span className="docs-demo-badge">
-          {isWalkthrough ? t('site.preview.demoLabel') : t('docs.demo.interactiveBadge')}
-        </span>
+        <span className="docs-demo-badge">{t('site.preview.demoLabel')}</span>
       </div>
       <div
         ref={stageRef}
-        className="docs-demo-stage"
-        role={isWalkthrough ? 'img' : undefined}
-        aria-label={isWalkthrough ? t('docs.demo.ariaLabel') : sceneTitle}
+        className={covered ? 'docs-demo-stage is-covered' : 'docs-demo-stage'}
+        role="img"
+        aria-label={label}
         style={width ? { height: Math.round(size.height * scale) } : undefined}
       >
         {width && nearViewport ? (
           <iframe
-            key={`${locale}:${scene}:${reloadNonce}`}
+            key={`${locale}:${scene}:${frame.nonce}`}
             ref={frameRef}
-            src={iframeSrc}
-            title={isWalkthrough ? t('docs.demo.ariaLabel') : sceneTitle}
+            src={demoSceneUrl(scene, locale, frame.startStep)}
+            title={label}
             loading="lazy"
-            inert={isWalkthrough ? true : undefined}
-            tabIndex={isWalkthrough ? -1 : undefined}
-            className={[loaded ? 'is-loaded' : '', !isWalkthrough ? 'is-interactive' : ''].filter(Boolean).join(' ') || undefined}
+            inert
+            tabIndex={-1}
+            className={loaded ? 'is-loaded' : undefined}
             onLoad={() => setLoaded(true)}
             style={{ width: size.width, height: size.height, transform: `scale(${scale})` }}
           />
         ) : null}
       </div>
-      {isWalkthrough ? (
-        <>
-          <figcaption className="docs-demo-controls">
-            {status.ended ? (
-              <Button size="sm" variant="ghost" isIconOnly aria-label={t('docs.demo.replay')} onPress={restart}><RiResetLeftLine size={16} /></Button>
-            ) : (
-              <Button size="sm" variant="ghost" isIconOnly aria-label={paused ? t('docs.demo.play') : t('docs.demo.pause')} isDisabled={!ready}
-                onPress={() => setPaused(!paused)}>
-                {paused ? <RiPlayFill size={16} /> : <RiPauseFill size={16} />}
-              </Button>
-            )}
-            <Button size="sm" variant="ghost" className="docs-demo-restart" onPress={restart} isDisabled={!ready && !status.ended}>
-              <RiResetLeftLine size={14} /> {t('docs.demo.restart')}
-            </Button>
-            <div className="docs-demo-progress" role="progressbar" aria-label={t('docs.demo.progress')} aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent}>
-              <span style={{ transform: `scaleX(${status.progress})` }} />
-            </div>
-            <span className="docs-demo-step" aria-live="polite">
-              {chapter >= 0 ? <small>{chapter + 1}/{chapters.length}</small> : null}{t(stepLabels[status.step])}
-            </span>
-          </figcaption>
-          <p className="docs-demo-note">{t('docs.demo.note')}</p>
-        </>
-      ) : (
-        <figcaption className="docs-demo-controls docs-demo-scene-bar">
-          <span className="docs-demo-scene-caption">{t(sceneCaptionKeys[scene])}</span>
-          <Button size="sm" variant="ghost" className="docs-demo-restart" onPress={restart} isDisabled={!loaded}>
-            <RiResetLeftLine size={14} /> {t('docs.demo.resetScene')}
+      <figcaption className="docs-demo-controls">
+        {status.ended ? (
+          <Button size="sm" variant="ghost" isIconOnly aria-label={t('docs.demo.replay')} onPress={restart}><RiResetLeftLine size={16} /></Button>
+        ) : (
+          <Button size="sm" variant="ghost" isIconOnly aria-label={paused ? t('docs.demo.play') : t('docs.demo.pause')} isDisabled={!ready}
+            onPress={() => setPaused(!paused)}>
+            {paused ? <RiPlayFill size={16} /> : <RiPauseFill size={16} />}
           </Button>
-        </figcaption>
-      )}
+        )}
+        <Button size="sm" variant="ghost" isIconOnly aria-label={t('docs.demo.prevStep')} isDisabled={current <= 0} onPress={() => goTo(current - 1)}>
+          <RiArrowLeftSLine size={16} />
+        </Button>
+        <Button size="sm" variant="ghost" isIconOnly aria-label={t('docs.demo.nextStep')} isDisabled={current >= steps.length - 1} onPress={() => goTo(current + 1)}>
+          <RiArrowRightSLine size={16} />
+        </Button>
+        <ol className="docs-demo-steps" aria-label={t('docs.demo.steps')}>
+          {steps.map((step, index) => {
+            const stepLabel = t(stepKey(scene, step));
+            const state = index < current || (status.ended && index === current) ? 'done' : index === current ? 'current' : 'todo';
+            return (
+              <li key={step}>
+                <button type="button" className={`docs-demo-step-dot is-${state}`} aria-current={index === current ? 'step' : undefined}
+                  aria-label={`${index + 1}/${steps.length} ${stepLabel}`} title={stepLabel} onClick={() => goTo(index)} />
+              </li>
+            );
+          })}
+        </ol>
+        <span className="docs-demo-step" aria-live="polite">
+          {current >= 0 && !status.ended ? <small>{current + 1}/{steps.length}</small> : null}{stepText}
+        </span>
+        <Button size="sm" variant="ghost" className="docs-demo-restart" onPress={restart} isDisabled={!ready && !status.ended}>
+          <RiResetLeftLine size={14} /> {t('docs.demo.restart')}
+        </Button>
+      </figcaption>
+      <p className="docs-demo-note">{t(sceneKey(scene, 'caption'))} {t('docs.demo.note')}</p>
     </figure>
   );
 }

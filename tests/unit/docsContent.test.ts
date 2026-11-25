@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { DEMO_SCENES, demoSceneUrl, isDemoScene } from '../../src/renderer/demo/playback';
-import { SUPPORTED_LOCALES, translate, type MessageKey } from '../../src/renderer/i18n';
+import { DEMO_SCENES, DEMO_SCENE_STEPS, demoSceneUrl, isDemoScene } from '../../src/renderer/demo/playback';
+import { SUPPORTED_LOCALES, type MessageKey } from '../../src/renderer/i18n';
+import { messages } from '../../src/renderer/i18n/messages';
 import {
   docPageOrder,
   extractDemoDirectives,
@@ -97,15 +98,19 @@ describe('docsContent', () => {
     }
   });
 
-  it('provides localized i18n titles and captions for every demo scene', () => {
+  it('labels every demo scene and step in every locale', () => {
+    const shared = ['loading', 'done', 'play', 'pause', 'replay', 'restart', 'prevStep', 'nextStep', 'steps', 'note', 'ariaLabel'];
     for (const locale of SUPPORTED_LOCALES) {
-      expect(translate(locale, 'docs.demo.interactiveBadge').trim().length).toBeGreaterThan(0);
-      expect(translate(locale, 'docs.demo.resetScene').trim().length).toBeGreaterThan(0);
-      for (const scene of DEMO_SCENES) {
-        const titleKey = `docs.demo.scene.${scene}.title` as MessageKey;
-        const captionKey = `docs.demo.scene.${scene}.caption` as MessageKey;
-        expect(translate(locale, titleKey).trim().length).toBeGreaterThan(0);
-        expect(translate(locale, captionKey).trim().length).toBeGreaterThan(0);
+      const keys = [
+        ...shared.map((key) => `docs.demo.${key}`),
+        ...DEMO_SCENES.flatMap((scene) => [
+          `docs.demo.scene.${scene}.title`,
+          `docs.demo.scene.${scene}.caption`,
+          ...DEMO_SCENE_STEPS[scene].map((step) => `docs.demo.scene.${scene}.step.${step}`),
+        ]),
+      ];
+      for (const key of keys) {
+        expect(messages[locale][key as MessageKey]?.trim(), `${locale}: ${key}`).toBeTruthy();
       }
     }
   });
@@ -139,9 +144,10 @@ describe('docsContent', () => {
     ]);
 
     expect(demoSceneUrl('walkthrough', 'zh-CN')).toBe('/demo?lang=zh-CN&autoplay&controls');
-    expect(demoSceneUrl('mesh', 'en')).toBe('/demo?lang=en&scene=mesh&mesh=1');
-    expect(demoSceneUrl('smart', 'ja')).toBe('/demo?lang=ja&scene=smart');
-    expect(demoSceneUrl('offline-sidebar', 'ko')).toBe('/demo?lang=ko&scene=offline-sidebar&backends=offline');
+    expect(demoSceneUrl('walkthrough', 'zh-CN', 3)).toBe('/demo?lang=zh-CN&step=3&autoplay&controls');
+    expect(demoSceneUrl('mesh', 'en')).toBe('/demo?lang=en&scene=mesh&mesh=1&autoplay&controls');
+    expect(demoSceneUrl('smart', 'ja', 2)).toBe('/demo?lang=ja&scene=smart&step=2&autoplay&controls');
+    expect(demoSceneUrl('offline-sidebar', 'ko')).toBe('/demo?lang=ko&scene=offline-sidebar&backends=offline&autoplay&controls');
     expect(isDemoScene('smart')).toBe(true);
     expect(isDemoScene('unknown-scene')).toBe(false);
   });

@@ -52,6 +52,15 @@ test('autoplays a new conversation from prompt to streamed answer on the landing
   await expect(page.getByText('The order summary card is in place:')).toBeVisible({ timeout: 20_000 });
 });
 
+test('fast-forwards a docs demo scene to the step it starts on', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name === 'tablet', 'Covered by the desktop and mobile layouts.');
+  test.setTimeout(60_000);
+  // `step=3` is the mesh demo's last step: the script runs every earlier step
+  // fast, then opens the invite dialog.
+  await page.goto('/demo?lang=en&scene=mesh&mesh=1&step=3&autoplay&controls');
+  await expect(page.getByRole('img', { name: 'Invite QR code' })).toBeVisible({ timeout: 30_000 });
+});
+
 test('keeps the demo in memory, away from the workbench storage on the same origin', async ({ page }) => {
   await page.goto('/demo');
   await expectHome(page, 15_000);

@@ -1,249 +1,113 @@
-// Site autoplay for the demo (`/demo?autoplay`): a pointer drives the real
-// workbench — opens a new conversation, types a prompt and sends it — and the
-// in-memory backend answers with a scripted turn. The landing page loops it;
-// the docs player adds `&controls`, which plays it once, follows the host's
-// play/pause and reports progress back. The static `/demo` (no `autoplay`)
-// stays identical to the desktop's `?demo`.
-import { t } from '../i18n';
-import { isDemoPlaybackMessage, type DemoStatusMessage, type DemoStep } from './playback';
-import { setDemoTurnScript, type DemoTimer, type DemoTurnStep } from './transport';
+// Plays the scripted demos (./scenes) on the real workbench:
+// - `/demo?autoplay` (landing page): loops the walkthrough, pausing while the
+//   host reports it scrolled away; stays still under reduced motion.
+// - `/demo?scene=<scene>&autoplay&controls` (docs player): plays the scene's
+//   steps once, follows the host's play/pause, fast-forwards on a seek
+//   (`step=<n>` on boot) and reports the step back.
+// - `/demo?scene=<scene>` without `autoplay`: quietly opens the scene's first
+//   step. Plain `/demo` stays identical to the desktop's `?demo`.
+import { DEMO_SCENE_STEPS, isDemoPlaybackMessage, isDemoScene, isDemoSeekMessage, type DemoScene, type DemoStatusMessage } from './playback';
+import { Stopped, createClock, createDriver, type DemoDriver } from './driver';
+import { sceneScripts } from './scenes';
+import { setDemoTurnScript } from './transport';
+import { scriptedTurn, walkthroughPrompt } from './walkthrough';
 
 const LOOP_PAUSE_MS = 8000;
-/** The docs player lets the finished answer sit this long before it ends. */
+/** The docs player lets the last step sit this long before it ends. */
 const END_HOLD_MS = 1500;
-const CLICK_MS = 850 + 180 + 250;
-const TYPE_MS = 55;
+/** How much faster the demo runs while it fast-forwards to a step. */
+const SEEK_SPEED = 14;
 
-class Stopped extends Error {}
-
-/** The assistant's reply arrives in chunks, like a provider stream. */
-function streamSteps(start: number, text: string, turnId: string): DemoTurnStep[] {
-  const block = { category: 'assistant_final', id: `${turnId}-answer`, turnId, phase: 'delta' };
-  const characters = Array.from(text);
-  const size = Math.max(4, Math.ceil(characters.length / 70));
-  const steps: DemoTurnStep[] = [];
-  for (let index = 0, time = start; index < characters.length; index += size, time += 45) {
-    steps.push([time, 'message.delta', { role: 'assistant', delta: characters.slice(index, index + size).join(''), block }]);
-  }
-  return steps;
-}
-
-/** Reasoning, a few tool calls with results, then the streamed answer. */
-function scriptedTurn(prompt: string, turnId: string): DemoTurnStep[] {
-  const call = (name: string) => `${turnId}-${name}`;
-  const tool = (at: number, id: string, toolName: string, args: Record<string, unknown>, result: string, takes: number): DemoTurnStep[] => [
-    [at, 'tool.started', { toolCallId: call(id), toolName, arguments: args }],
-    [at + takes, 'tool.completed', { toolCallId: call(id), toolName, arguments: args, result, isError: false }],
-  ];
-  const plan = (
-    at: number,
-    s1: 'pending' | 'in_progress' | 'completed',
-    s2: 'pending' | 'in_progress' | 'completed',
-    s3: 'pending' | 'in_progress' | 'completed',
-  ): DemoTurnStep => [
-    at,
-    'plan.updated',
-    {
-      explanation: t('demo.autoplayPlanExplanation'),
-      steps: [
-        { text: t('demo.autoplayPlanStep1'), status: s1 },
-        { text: t('demo.autoplayPlanStep2'), status: s2 },
-        { text: t('demo.autoplayPlanStep3'), status: s3 },
-      ],
-    },
-  ];
-  const answer = t('demo.autoplayAnswer');
-  const answerAt = 7600;
-  const streamed = streamSteps(answerAt, answer, turnId);
-  const doneAt = (streamed.at(-1)?.[0] ?? answerAt) + 200;
-  return [
-    [0, 'message.created', { role: 'user', content: prompt }],
-    [150, 'turn.started', { status: 'running' }],
-    [700, 'thought.delta', { thinking: t('demo.autoplayThinking'), block: { category: 'reasoning', id: `${turnId}-thought`, turnId, phase: 'delta' } }],
-    plan(1100, 'in_progress', 'pending', 'pending'),
-    ...tool(1500, 'read', 'Read', { file_path: 'src/checkout/CheckoutPage.tsx' },
-      'export function CheckoutPage() {\n  const cart = useCart();\n  return <CheckoutLayout aside={null}>…</CheckoutLayout>;\n}', 800),
-    plan(2400, 'completed', 'in_progress', 'pending'),
-    ...tool(2700, 'write', 'Write', { file_path: 'src/checkout/OrderSummary.tsx' }, 'File created successfully at: src/checkout/OrderSummary.tsx', 1000),
-    ...tool(4100, 'edit', 'Edit', { file_path: 'src/checkout/CheckoutPage.tsx', old_string: 'aside={null}', new_string: 'aside={<OrderSummary cart={cart} />}' },
-      'The file src/checkout/CheckoutPage.tsx has been updated.', 700),
-    plan(4900, 'completed', 'completed', 'in_progress'),
-    ...tool(5200, 'test', 'Bash', { command: 'pnpm test checkout', description: 'Run checkout unit tests' },
-      ' ✓ src/checkout/OrderSummary.test.tsx (5 tests) 41ms\n ✓ src/checkout/schema.test.ts (14 tests) 38ms\n\n Test Files  2 passed (2)\n      Tests  19 passed (19)', 1800),
-    plan(7100, 'completed', 'completed', 'completed'),
-    ...streamed,
-    [doneAt, 'message.completed', {
-      role: 'assistant',
-      message: { role: 'assistant', content: [{ type: 'text', text: answer }] },
-      block: { category: 'assistant_final', id: `${turnId}-answer`, turnId, phase: 'completed' },
-    }],
-    [doneAt + 100, 'usage.updated', { model: 'opus', contextWindow: 200_000, usage: { last: { input: 18_400, output: 1_150, cacheRead: 64_000, cacheWrite: 2_100, total: 19_550 } } }],
-    [doneAt + 200, 'turn.completed', { status: 'completed' }],
-  ];
-}
-
-function createPointer() {
-  const pointer = document.createElement('div');
-  pointer.setAttribute('aria-hidden', 'true');
-  Object.assign(pointer.style, {
-    position: 'fixed', top: '0', left: '0', zIndex: '2147483647', pointerEvents: 'none',
-    opacity: '0', transform: 'translate(-40px, -40px)',
-    transition: 'transform 700ms cubic-bezier(0.45, 0, 0.2, 1), opacity 300ms ease',
-  });
-  pointer.innerHTML = '<span data-ripple style="position:absolute;left:-16px;top:-16px;width:32px;height:32px;border-radius:9999px;background:rgb(18 141 219 / 0.28);transform:scale(0);transition:transform 180ms ease"></span>'
-    + '<svg width="22" height="22" viewBox="0 0 24 24" style="position:relative;filter:drop-shadow(0 2px 3px rgb(0 0 0 / 0.25))"><path d="M4 2.5 20 11l-7 2-3.5 7z" fill="#18222e" stroke="#fff" stroke-width="1.5" stroke-linejoin="round"/></svg>';
-  document.body.append(pointer);
-  const ripple = pointer.querySelector<HTMLElement>('[data-ripple]')!;
-  return {
-    moveTo(element: Element, caret = false) {
-      const rect = element.getBoundingClientRect();
-      // Text fields are clicked near where the caret lands, buttons in the middle.
-      const x = caret ? rect.left + Math.min(48, rect.width / 2) : rect.left + rect.width / 2;
-      pointer.style.opacity = '1';
-      pointer.style.transform = `translate(${x}px, ${rect.top + rect.height / 2}px)`;
-    },
-    press(down: boolean) { ripple.style.transform = down ? 'scale(1)' : 'scale(0)'; },
-    hide() { pointer.style.opacity = '0'; },
-  };
-}
-
-function visible(element: Element | null): element is HTMLElement {
-  if (!(element instanceof HTMLElement) || element.closest('[inert]')) return false;
-  const rect = element.getBoundingClientRect();
-  return rect.width > 0 && rect.height > 0;
-}
-
-/** Time that only passes while the walkthrough plays and the page is shown, so
- * pausing holds the pointer, the typing and the streamed turn alike. */
-function createClock() {
-  let now = 0;
-  let running = true;
-  let last = performance.now();
-  const tasks = new Set<{ due: number; callback: () => void }>();
-  window.setInterval(() => {
-    const current = performance.now();
-    // Cap the step so a throttled background tab does not jump ahead.
-    if (running && document.visibilityState === 'visible') now += Math.min(current - last, 250);
-    last = current;
-    for (const task of [...tasks].sort((a, b) => a.due - b.due)) {
-      if (task.due > now) break;
-      tasks.delete(task);
-      task.callback();
-    }
-  }, 40);
-  const after: DemoTimer = (callback, ms) => {
-    const task = { due: now + ms, callback };
-    tasks.add(task);
-    return () => { tasks.delete(task); };
-  };
-  return {
-    after,
-    wait: (ms: number) => new Promise<void>((resolve) => { after(resolve, ms); }),
-    now: () => now,
-    setRunning(value: boolean) { running = value; },
-  };
+function stepsOf(scene: DemoScene): ((d: DemoDriver) => Promise<void>)[] {
+  const steps = sceneScripts[scene].steps as Record<string, (d: DemoDriver) => Promise<void>>;
+  return DEMO_SCENE_STEPS[scene].map((id) => steps[id]);
 }
 
 export function startDemoAutoplay(): void {
   const params = new URLSearchParams(window.location.search);
-  if (!params.has('autoplay')) return;
-  const controlled = params.has('controls');
+  const autoplay = params.has('autoplay');
+  const controlled = autoplay && params.has('controls');
+  const rawScene = params.get('scene');
+  const scene: DemoScene | null = rawScene && isDemoScene(rawScene) ? rawScene : autoplay ? 'walkthrough' : null;
+  if (!scene) return;
   // Reduced motion keeps the still demo on the landing page; the docs player
   // only moves when the reader presses play.
-  if (!controlled && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-  const prompt = t('demo.autoplayPrompt');
+  if (autoplay && !controlled && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+
   const clock = createClock();
+  const prompt = walkthroughPrompt();
   setDemoTurnScript((text, turnId) => (text.trim() === prompt ? scriptedTurn(prompt, turnId) : null), clock.after);
+  const script = sceneScripts[scene];
+  const steps = stepsOf(scene);
 
-  // The landing page pauses the walkthrough while it is scrolled away; the
-  // docs player also pauses it on request. The player starts it explicitly.
-  if (controlled) clock.setRunning(false);
-  window.addEventListener('message', (event) => {
-    if (event.origin !== window.location.origin || event.source !== window.parent) return;
-    if (isDemoPlaybackMessage(event.data)) clock.setRunning(event.data.playing);
-  });
+  if (!autoplay) {
+    // A still scene for local checks: open it without a pointer and stop.
+    clock.setSpeed(SEEK_SPEED);
+    const driver = createDriver(clock, { pointer: false });
+    void script.prepare(driver).then(() => steps[0](driver)).catch(() => {
+      // Best effort; leave the reader on whatever view opened.
+    });
+    return;
+  }
 
-  const turnMs = scriptedTurn(prompt, 'timing').at(-1)![0];
-  // Rough length of the walkthrough, for the docs player's progress bar.
-  const totalMs = 2600 + CLICK_MS * 4 + 700 + 400 + Array.from(prompt).length * TYPE_MS + turnMs + END_HOLD_MS;
-  let step: DemoStep = 'loading';
+  const driver = createDriver(clock);
+  let step = -1;
+  let target = 0;
   let ended = false;
   const report = () => {
     if (!controlled || window.parent === window) return;
-    const progress = ended ? 1 : Math.min(clock.now() / totalMs, 0.99);
-    const message: DemoStatusMessage = { type: 'todex-demo-status', step, progress, ended };
+    const message: DemoStatusMessage = { type: 'todex-demo-status', step, seeking: !ended && step < target, ended };
     window.parent.postMessage(message, window.location.origin);
   };
-  const enter = (next: DemoStep) => { step = next; report(); };
-  if (controlled) window.setInterval(report, 200);
-
-  const wait = clock.wait;
-  const find = async (lookup: () => Element | null | undefined, timeout = 8000) => {
-    for (let waited = 0; waited < timeout; waited += 100) {
-      const element = lookup();
-      if (visible(element ?? null)) return element as HTMLElement;
-      await wait(100);
-    }
-    throw new Stopped();
+  const seekTo = (next: number) => {
+    target = Math.min(Math.max(next, 0), steps.length - 1);
+    clock.setSpeed(step < target ? SEEK_SPEED : 1);
+    report();
   };
-  const byLabel = (label: string) => () => [...document.querySelectorAll('button, [role="button"]')]
-    .find((element) => element.getAttribute('aria-label') === label || element.textContent?.trim() === label);
 
-  const pointer = createPointer();
-  const click = async (element: HTMLElement, caret = false) => {
-    pointer.moveTo(element, caret);
-    await wait(850);
-    pointer.press(true);
-    await wait(180);
-    element.click();
-    pointer.press(false);
-    await wait(250);
-  };
+  // The landing page pauses the demo while it is scrolled away; the docs
+  // player also pauses it on request, and starts it explicitly (opened on its
+  // own, the page just plays).
+  if (controlled) {
+    if (window.parent !== window) clock.setRunning(false);
+    const start = Number(params.get('step'));
+    if (Number.isInteger(start) && start > 0) seekTo(start);
+    // A heartbeat, so a host that starts listening late still hears it.
+    window.setInterval(report, 500);
+  }
+  window.addEventListener('message', (event) => {
+    if (event.origin !== window.location.origin || event.source !== window.parent) return;
+    if (isDemoPlaybackMessage(event.data)) clock.setRunning(event.data.playing);
+    else if (controlled && isDemoSeekMessage(event.data) && !ended && event.data.step > step) seekTo(event.data.step);
+  });
+  report();
 
   const run = async () => {
-    enter('loading');
-    await wait(2600);
-    enter('newConversation');
-    // Phones keep the sidebar in a drawer: open it for the new conversation.
-    const newConversation = byLabel(t('sidebar.newConversation'));
-    if (!visible(newConversation() ?? null)) await click(await find(byLabel(t('app.openSidebar'))));
-    await click(await find(newConversation));
-    // The drawer stays open after creating; Escape slides it shut.
-    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
-    await wait(700);
-
-    enter('typing');
-    const composer = await find(() => document.querySelector('[role="textbox"][contenteditable="true"]'));
-    await click(composer, true);
-    composer.focus();
-    for (const character of Array.from(prompt)) {
-      document.execCommand('insertText', false, character);
-      await wait(TYPE_MS);
+    await script.prepare(driver);
+    for (let index = 0; index < steps.length; index += 1) {
+      step = index;
+      if (step >= target) clock.setSpeed(1);
+      report();
+      await steps[index](driver);
     }
-    await wait(400);
-    enter('send');
-    await click(await find(byLabel(t('workbench.send'))));
-    // Open the running turn's work process so the steps stream in view.
-    enter('process');
-    const process = await find(() => document.querySelector('main section > button[aria-expanded="false"]'));
-    await click(process);
-    pointer.hide();
-    enter('answer');
-    // The turn streams on its own; let the finished answer sit, then start
-    // over (landing) or stop (docs player, which offers a replay).
+    driver.hidePointer();
+    // Let the finished demo sit, then start over (landing) or stop (docs
+    // player, which offers a replay).
     if (!controlled) {
-      await wait(turnMs + LOOP_PAUSE_MS);
+      await clock.wait(LOOP_PAUSE_MS);
       window.location.reload();
       return;
     }
-    await wait(turnMs + END_HOLD_MS);
+    await clock.wait(END_HOLD_MS);
     ended = true;
-    enter('done');
+    report();
   };
   void run().catch((error: unknown) => {
-    pointer.hide();
+    driver.hidePointer();
     ended = true;
-    enter('done');
+    clock.setSpeed(1);
+    report();
     if (!(error instanceof Stopped)) console.error('TodeX demo autoplay stopped', error);
+    else console.warn(`TodeX demo "${scene}" stopped at step ${step}: a target did not show up`);
   });
 }
