@@ -90,7 +90,7 @@ A task board per workspace, with priorities, due dates and status, tasks pinned 
 
 ## Private conversations
 
-A private conversation lives only in the backend's memory: nothing goes into history, and it is gone after a restart. Scheduled conversations send their prompt at the time you pick.
+A private conversation lives only in the backend's memory: nothing goes into history, and it is gone after a restart. Scheduled send (the timer button next to Send) sends a message at the time you pick, with that conversation's agent, model and settings.
 
 ![Private conversation](docs/screenshots/private-conversation-en.png)
 

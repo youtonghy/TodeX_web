@@ -859,10 +859,10 @@ Workspaces sit above conversations — or switch **Settings → Appearance → S
 
 :::demo offline-sidebar
 
-## Scheduled conversations & optional features
+## Scheduled send & optional features
 
-- **Scheduled conversations**: create one from the sidebar or a **Plan** task and choose a send time. Messages sent there wait in the backend queue and fire in order at the scheduled time, with **Send now**, **Change time**, and **Cancel schedule** controls above the composer.
-- **Features (Settings → Features)**: show, fold under **More**, or turn off **Scheduled conversations**, **Terminal**, and **Plan** per device (removing their shortcuts and menus when off).
+- **Scheduled send**: type a message in a new or existing conversation, click the timer button next to Send, and pick a time. It goes with that conversation's agent, model, and settings. Until then, anything else sent there waits in the backend queue and goes in order at the same time, with **Send now**, **Change time**, and **Cancel schedule** controls above the composer. A **Plan** task's **Schedule send…** opens its conversation with the time picker up.
+- **Features (Settings → Features)**: show, fold under **More**, or turn off **Terminal** and **Plan**, and turn **Scheduled send** on or off, per device (removing their shortcuts and menus when off).
 - **Connection pre-warming**: while a backend is booting, the sidebar waits up to 2 minutes instead of failing immediately, and the active conversation's agent is pre-warmed for faster first replies.
 
 ## Smart work mode & plan review
