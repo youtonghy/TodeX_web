@@ -63,7 +63,7 @@ it('keeps only the switch and an entry per tool on the overview; each tool has i
   await press('Agent 浏览器');
   expect(container.textContent).toContain('尚未安装 Chromium');
   expect(container.textContent).toContain('localhost 指那台电脑');
-  expect(container.textContent).not.toContain('允许 Agent 使用浏览器和 Computer Use');
+  expect(container.textContent).not.toContain('允许 Agent 使用浏览器、Computer Use 和摄像头');
   const install = vi.spyOn(V2ApiClient.prototype, 'installAgentBrowser').mockResolvedValue({ ...base, browser: browser(false, true) });
   await press('下载浏览器组件');
   expect(install).toHaveBeenCalled();
