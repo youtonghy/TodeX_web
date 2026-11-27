@@ -722,7 +722,7 @@ TodeX Desktop is a native client for \`todex-agentd\` built with Electron 44, Re
 ## Home board & three panes
 
 - **Home page**: opens by default on launch with live cards for running runs, waiting approvals, daily conversation/token counts, hourly usage, and Codex / Claude Code plan limits — fully reorderable and resizable.
-- **Left sidebar**: split or unified workspace/conversation layout, workspace tags, group folder status rings, offline-backend workspace folding, and standalone views for **Plan** (board & calendar), **Terminal** (SSH/FTP/Local), **Profile**, and **Private conversations**.
+- **Left sidebar**: split or unified workspace/conversation layout, workspace tags, group folder status rings, offline-backend workspace folding, and standalone views for **Plan** (board & calendar), **Terminal** (SSH/FTP/Local), and **Profile**.
 - **Center chat**: streaming Markdown timeline, action-titled execution groups with thinking dots and file chips, dedicated Plan rows & approval cards, live **Plan steps** above the composer, **Smart work mode** handoffs, \`@\` / \`/\` / \`#\` reference menus, and background task stop controls.
 - **Right workbench**: resizable multi-tab aside with **Terminal** (embedded xterm.js WebGL PTY), **Files**, **Git Diff**, **Agent calls**, plus live views for **Agent browser** and **Computer Use** (or place live views above the composer).
 
@@ -855,13 +855,14 @@ Workspaces sit above conversations — or switch **Settings → Appearance → S
 - **Offline-backend workspaces folded**: workspaces on disconnected backends stay hidden (except the currently open row) until paging reaches the bottom, where **Show workspaces on offline backends (n)** restores them in order. Search always queries everything.
 - **Tags & folder status rings**: assign tags to workspaces or groups and toggle **Group by tags**; group folder icons carry the most urgent status ring among their workspaces (\`working > issue > unread\`).
 - **Standalone views & No workspace**: **No workspace** collects unattached conversations across backends; opening Home, Plan, Terminal, or Profile clears the workspace/conversation highlight behind them.
-- **Private conversations (\`⌘⇧P\` / \`⌥⇧P\` on web)**: pick a supported agent to run a RAM-only conversation with a private badge and notice.
+- **Send options**: right-click or hold Send to open its wheel. The choice shows beside Send (click it to cancel), and pressing Send applies it.
+- **Private conversations (wheel, or \`⌘⇧P\` / \`⌥⇧P\` on web)**: the message starts a new RAM-only conversation in the same workspace with the current agent, model, and settings, with a private badge and notice. It cannot take attachments.
 
 :::demo offline-sidebar
 
 ## Scheduled send & optional features
 
-- **Scheduled send**: type a message in a new or existing conversation, click the timer button next to Send, and pick a time. It goes with that conversation's agent, model, and settings. Until then, anything else sent there waits in the backend queue and goes in order at the same time, with **Send now**, **Change time**, and **Cancel schedule** controls above the composer. A **Plan** task's **Schedule send…** opens its conversation with the time picker up.
+- **Scheduled send**: type a message in a new or existing conversation, pick **Scheduled send** on the Send wheel and a time, then press Send. It goes with that conversation's agent, model, and settings. Until then, anything else sent there waits in the backend queue and goes in order at the same time, with **Send now**, **Change time**, and **Cancel schedule** controls above the composer. A **Plan** task's **Schedule send…** opens its conversation with the time picker up.
 - **Features (Settings → Features)**: show, fold under **More**, or turn off **Terminal** and **Plan**, and turn **Scheduled send** on or off, per device (removing their shortcuts and menus when off).
 - **Connection pre-warming**: while a backend is booting, the sidebar waits up to 2 minutes instead of failing immediately, and the active conversation's agent is pre-warmed for faster first replies.
 
@@ -913,7 +914,7 @@ Choose **Smart** in a Claude Code conversation's work mode menu to run the two-s
 | \`⇧⌘G\` / \`Ctrl Shift G\` | Git actions |
 | \`⌘N\` (\`⌥N\` on web) | New conversation |
 | \`⇧⌘N\` (\`⌥⇧N\` on web) | Add a workspace |
-| \`⇧⌘P\` (\`⌥⇧P\` on web) | New private conversation |
+| \`⇧⌘P\` (\`⌥⇧P\` on web) | Send the message as a private conversation |
 | \`⌘L\` / \`Ctrl L\` | Quick search across conversations and content |
 | \`⌘1…⌘9\` / \`Ctrl 1…9\` | Switch workbench tab |
 | \`⇧⌘K\` / \`Ctrl Shift K\` | Plan panel (Board / Calendar) |
